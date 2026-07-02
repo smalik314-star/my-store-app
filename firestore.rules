@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update: if isOwner(userId);
+    }
+
+    // Products
+    match /products/{productId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && (request.resource == null || request.resource.data.userId == request.auth.uid);
+    }
+
+    // Customers
+    match /customers/{customerId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && (request.resource == null || request.resource.data.userId == request.auth.uid);
+    }
+
+    // Invoices
+    match /invoices/{invoiceId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && (request.resource == null || request.resource.data.userId == request.auth.uid);
+    }
+
+    // Counters
+    match /counters/{counterId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Settings
+    match /settings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

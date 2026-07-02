@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and permissions",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "admin", "staff"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastLogin": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory product/medication",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "barcode": { "type": "string" },
+        "category": { "type": "string" },
+        "brand": { "type": "string" },
+        "purchasePrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "minimumStock": { "type": "number" },
+        "expiryDate": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "sku", "sellingPrice", "stockQuantity", "userId"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "outstandingBalance": { "type": "number" },
+        "totalPurchases": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "userId"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Sales invoice",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "tax": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["invoiceNumber", "items", "grandTotal", "userId"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Store settings",
+      "type": "object",
+      "properties": {
+        "storeName": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "currency": { "type": "string" },
+        "taxRate": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["storeName", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profile collection"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Inventory collection"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer collection"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Invoice collection"
+    },
+    "/settings/{userId}": {
+      "schema": "Settings",
+      "description": "User specific settings"
+    }
+  }
+}

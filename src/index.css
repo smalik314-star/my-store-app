@@ -1,0 +1,67 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Poppins", sans-serif;
+
+  --color-primary: #0f766e;
+  --color-secondary: #14b8a6;
+  --color-accent: #f59e0b;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-text: #1e293b;
+  --color-border: #e2e8f0;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-text font-sans antialiased overflow-x-hidden;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading font-semibold tracking-tight;
+  }
+
+  table {
+    @apply w-full border-collapse;
+  }
+
+  th {
+    @apply text-left px-4 md:px-6 py-3 text-[10px] md:text-[12px] text-text/60 uppercase tracking-wider font-semibold bg-background;
+  }
+
+  td {
+    @apply px-4 md:px-6 py-4 border-b border-border text-[13px] md:text-[14px];
+  }
+}
+
+/* Touch target optimization */
+@layer components {
+  .touch-target {
+    @apply min-h-[44px] flex items-center justify-center;
+  }
+}
+
+.glass-morphism {
+  @apply bg-white/80 backdrop-blur-md border border-white/20;
+}
+
+.page-transition {
+  @apply transition-all duration-300 ease-in-out;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background-color: white !important;
+  }
+}

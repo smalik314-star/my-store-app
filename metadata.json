@@ -1,0 +1,6 @@
+{
+  "name": "PharmaFlow",
+  "description": "A premium Pharmacy Billing & Inventory Management System with real-time sync and professional design.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
