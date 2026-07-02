@@ -16,17 +16,16 @@ import {
   startAfter
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { Invoice, Product, Customer } from '../types';
+import { Invoice, Product, Customer, Tenant } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { tenantService } from './tenantService';
 
 const COLLECTION_NAME = 'invoices';
 
 export const invoiceService = {
-  async generateInvoiceNumber(prefix: string = 'INV'): Promise<string> {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
-    // We'll isolate counters per user for true multi-tenancy
-    const counterRef = doc(db, 'counters', `invoices_${uid}`);
+  async generateInvoiceNumber(tenantId: string, prefix: string = 'INV'): Promise<string> {
+    if (!tenantId) throw new Error('Tenant ID required');
+    const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
     const year = new Date().getFullYear();
     
     try {
@@ -41,7 +40,7 @@ export const invoiceService = {
           }
         }
         
-        transaction.set(counterRef, { count: nextNumber, year, userId: uid });
+        transaction.set(counterRef, { count: nextNumber, year, tenantId });
         return nextNumber;
       });
       
@@ -52,18 +51,27 @@ export const invoiceService = {
     }
   },
 
-  async saveInvoice(invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt'>) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async saveInvoice(tenantId: string, invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt'>) {
+    if (!tenantId) throw new Error('Tenant ID required');
 
     try {
       return await runTransaction(db, async (transaction) => {
+        // 0. Check Limits
+        const tenantRef = doc(db, 'tenants', tenantId);
+        const tenantDoc = await transaction.get(tenantRef);
+        if (tenantDoc.exists()) {
+          const tenant = tenantDoc.data() as Tenant;
+          if (tenant.usage.invoicesCount >= tenant.limits.maxInvoices) {
+            throw new Error('Monthly invoice limit reached. Please upgrade your plan.');
+          }
+        }
+
         // 1. Verify stock and ownership for all items
         for (const item of invoiceData.items) {
           const productRef = doc(db, 'products', item.productId);
           const productDoc = await transaction.get(productRef);
           
-          if (!productDoc.exists() || productDoc.data().userId !== uid) {
+          if (!productDoc.exists() || productDoc.data().tenantId !== tenantId) {
             throw new Error(`Product ${item.name} not found or unauthorized.`);
           }
           
@@ -77,7 +85,7 @@ export const invoiceService = {
         const invoiceRef = doc(collection(db, COLLECTION_NAME));
         const invoice = {
           ...invoiceData,
-          userId: uid,
+          tenantId,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
@@ -97,7 +105,7 @@ export const invoiceService = {
           const customerRef = doc(db, 'customers', invoiceData.customerId);
           const customerDoc = await transaction.get(customerRef);
           
-          if (customerDoc.exists() && customerDoc.data().userId === uid) {
+          if (customerDoc.exists() && customerDoc.data().tenantId === tenantId) {
             const updateData: any = {
               totalPurchases: increment(invoiceData.grandTotal),
               updatedAt: serverTimestamp()
@@ -113,6 +121,21 @@ export const invoiceService = {
           }
         }
 
+        // 5. Update Tenant Usage
+        transaction.update(tenantRef, {
+          'usage.invoicesCount': increment(1),
+          updatedAt: serverTimestamp()
+        });
+
+        // 6. Add Audit Log
+        const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
+        transaction.set(logRef, {
+          action: 'CREATE_INVOICE',
+          targetId: invoiceRef.id,
+          userId: auth.currentUser?.uid,
+          timestamp: serverTimestamp(),
+        });
+
         return invoiceRef.id;
       });
     } catch (error) {
@@ -120,14 +143,13 @@ export const invoiceService = {
     }
   },
 
-  async getInvoicesPaginated(pageSize: number = 10, lastInvoice?: any) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async getInvoicesPaginated(tenantId: string, pageSize: number = 10, lastInvoice?: any) {
+    if (!tenantId) throw new Error('Tenant ID required');
 
     try {
       let q = query(
         collection(db, COLLECTION_NAME),
-        where('userId', '==', uid),
+        where('tenantId', '==', tenantId),
         limit(pageSize)
       );
 
@@ -154,16 +176,15 @@ export const invoiceService = {
     }
   },
 
-  async deleteInvoice(invoiceId: string) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async deleteInvoice(tenantId: string, invoiceId: string) {
+    if (!tenantId) throw new Error('Tenant ID required');
 
     try {
       await runTransaction(db, async (transaction) => {
         const invoiceRef = doc(db, COLLECTION_NAME, invoiceId);
         const invoiceDoc = await transaction.get(invoiceRef);
 
-        if (!invoiceDoc.exists() || invoiceDoc.data().userId !== uid) {
+        if (!invoiceDoc.exists() || invoiceDoc.data().tenantId !== tenantId) {
           throw new Error('Invoice not found or unauthorized');
         }
 
@@ -183,7 +204,7 @@ export const invoiceService = {
           const customerRef = doc(db, 'customers', invoice.customerId);
           const customerDoc = await transaction.get(customerRef);
           
-          if (customerDoc.exists() && customerDoc.data().userId === uid) {
+          if (customerDoc.exists() && customerDoc.data().tenantId === tenantId) {
             const updateData: any = {
               totalPurchases: increment(-invoice.grandTotal),
               updatedAt: serverTimestamp()
@@ -199,7 +220,23 @@ export const invoiceService = {
           }
         }
 
-        // 3. Delete Invoice
+        // 3. Update Tenant Usage
+        const tenantRef = doc(db, 'tenants', tenantId);
+        transaction.update(tenantRef, {
+          'usage.invoicesCount': increment(-1),
+          updatedAt: serverTimestamp()
+        });
+
+        // 4. Audit Log
+        const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
+        transaction.set(logRef, {
+          action: 'DELETE_INVOICE',
+          targetId: invoiceId,
+          userId: auth.currentUser?.uid,
+          timestamp: serverTimestamp(),
+        });
+
+        // 5. Delete Invoice
         transaction.delete(invoiceRef);
       });
     } catch (error) {

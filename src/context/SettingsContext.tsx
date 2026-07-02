@@ -39,20 +39,20 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) {
+    if (!user?.tenantId) {
       setSettings(null);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    const path = `settings/${user.uid}`;
-    const unsub = onSnapshot(doc(db, 'settings', user.uid), (snapshot) => {
+    const path = `settings/${user.tenantId}`;
+    const unsub = onSnapshot(doc(db, 'settings', user.tenantId), (snapshot) => {
       if (snapshot.exists()) {
         setSettings(snapshot.data() as StoreSettings);
       } else {
-        // Initialize with defaults if not found for this new user
-        setSettings({ ...DEFAULT_SETTINGS, userId: user.uid });
+        // Initialize with defaults if not found for this new tenant
+        setSettings({ ...DEFAULT_SETTINGS, tenantId: user.tenantId });
       }
       setLoading(false);
     }, (error) => {
@@ -61,18 +61,18 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsub();
-  }, [user]);
+  }, [user?.tenantId]);
 
   const updateSettings = async (newSettings: Partial<StoreSettings>) => {
-    if (!user) throw new Error('User not authenticated');
+    if (!user?.tenantId) throw new Error('Tenant not found');
     
-    const path = `settings/${user.uid}`;
+    const path = `settings/${user.tenantId}`;
     try {
-      const settingsRef = doc(db, 'settings', user.uid);
+      const settingsRef = doc(db, 'settings', user.tenantId);
       await setDoc(settingsRef, {
         ...settings,
         ...newSettings,
-        userId: user.uid,
+        tenantId: user.tenantId,
         updatedAt: serverTimestamp(),
       }, { merge: true });
     } catch (error) {

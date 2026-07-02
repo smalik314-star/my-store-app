@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, onSnapshot, getDocs, where, limit } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, where, limit, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { Product, Customer, InvoiceItem, Invoice } from '../../types';
 import { Card } from '../../components/common/Card';
@@ -21,7 +21,8 @@ import {
   ArrowRight,
   Save,
   X,
-  UserPlus
+  UserPlus,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
@@ -30,6 +31,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
+import { formatCurrency } from '../../utils/currency';
 
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
@@ -49,7 +51,6 @@ const WALK_IN_CUSTOMER: Customer = {
 export default function Billing() {
   const { user } = useAuth();
   const { settings } = useSettings();
-  const currency = settings?.currency || '₹';
   const [searchParams] = useSearchParams();
   const preSelectedCustomerId = searchParams.get('customerId');
   
@@ -69,6 +70,11 @@ export default function Billing() {
   
   const navigate = useNavigate();
   const productSearchRef = useRef<HTMLInputElement>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const [barcodeValue, setBarcodeValue] = useState('');
+  const [quickMode, setQuickMode] = useState(true);
+  const [recentProducts, setRecentProducts] = useState<Product[]>([]);
+  const [recentCustomers, setRecentCustomers] = useState<Customer[]>([]);
 
   // Fetch initial data
   useEffect(() => {
@@ -96,13 +102,105 @@ export default function Billing() {
         const found = items.find(c => c.id === preSelectedCustomerId);
         if (found) setSelectedCustomer(found);
       }
+
+      // Recent customers (last 3 for quick select)
+      setRecentCustomers(items.slice(0, 3));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'customers'));
+
+    // Fetch recent products from last 5 invoices to show in "Quick Bar"
+    const fetchRecentItems = async () => {
+      try {
+        const qRecentInvoices = query(
+          collection(db, 'invoices'),
+          where('userId', '==', user.uid),
+          orderBy('createdAt', 'desc'),
+          limit(5)
+        );
+        const snapshot = await getDocs(qRecentInvoices);
+        const recentProductIds = new Set<string>();
+        snapshot.docs.forEach(doc => {
+          const items = doc.data().items as InvoiceItem[];
+          items.forEach(item => recentProductIds.add(item.productId));
+        });
+        
+        const recentList = products.filter(p => recentProductIds.has(p.id)).slice(0, 10);
+        setRecentProducts(recentList);
+      } catch (err) {
+        console.error('Error fetching recent products:', err);
+      }
+    };
+
+    if (products.length > 0) {
+      fetchRecentItems();
+    }
 
     return () => {
       unsubProducts();
       unsubCustomers();
     };
-  }, [user, preSelectedCustomerId]);
+  }, [user, preSelectedCustomerId, products.length]);
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleShortcuts = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'n':
+            e.preventDefault();
+            setCart([]);
+            setDiscount(0);
+            setSelectedCustomer(WALK_IN_CUSTOMER);
+            showToast('New invoice started', 'success');
+            break;
+          case 's':
+            e.preventDefault();
+            handleSaveInvoice();
+            break;
+          case 'b':
+            e.preventDefault();
+            barcodeInputRef.current?.focus();
+            break;
+          case 'p':
+            e.preventDefault();
+            if (cart.length > 0) {
+              window.print();
+            } else {
+              showToast('Cannot print empty invoice', 'warning');
+            }
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcuts);
+    return () => window.removeEventListener('keydown', handleShortcuts);
+  }, [cart, selectedCustomer, discount]);
+
+  // Smart Discount Suggestions
+  const suggestedDiscount = useMemo(() => {
+    const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    
+    if (subtotal > 10000) return { amount: Math.floor(subtotal * 0.1), label: 'High Value (10%)' };
+    if (subtotal > 5000) return { amount: Math.floor(subtotal * 0.05), label: 'Preferred (5%)' };
+    if (selectedCustomer.id !== 'walk-in' && selectedCustomer.totalPurchases > 50000) {
+      return { amount: Math.floor(subtotal * 0.03), label: 'Loyalty (3%)' };
+    }
+    return null;
+  }, [cart, selectedCustomer]);
+
+  const handleBarcodeScan = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!barcodeValue) return;
+
+    const product = products.find(p => p.barcode === barcodeValue || p.sku === barcodeValue);
+    if (product) {
+      addToCart(product);
+      setBarcodeValue('');
+      showToast(`${product.name} added to cart`, 'success');
+    } else {
+      showToast('Product not found for this barcode', 'danger');
+    }
+  };
 
   // Filtered lists
   const filteredProducts = useMemo(() => {
@@ -204,6 +302,7 @@ export default function Billing() {
   };
 
   const handleSaveInvoice = async () => {
+    if (!user?.tenantId) return;
     if (cart.length === 0) {
       showToast('Cart is empty!', 'danger');
       return;
@@ -213,9 +312,9 @@ export default function Billing() {
     try {
       // Use prefix from settings
       const prefix = settings?.invoicePrefix || 'INV';
-      const invoiceNumber = await invoiceService.generateInvoiceNumber(prefix);
+      const invoiceNumber = await invoiceService.generateInvoiceNumber(user.tenantId, prefix);
       
-      const invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt'> = {
+      const invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'> = {
         invoiceNumber,
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.name,
@@ -228,7 +327,7 @@ export default function Billing() {
         paymentMethod,
       };
 
-      const invoiceId = await invoiceService.saveInvoice(invoiceData);
+      const invoiceId = await invoiceService.saveInvoice(user.tenantId, invoiceData);
       showToast('Invoice generated successfully!', 'success');
       
       setTimeout(() => {
@@ -295,7 +394,23 @@ export default function Billing() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
+              <div className="grid grid-cols-1 gap-2">
+                {recentCustomers.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {recentCustomers.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => setSelectedCustomer(c)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all",
+                          selectedCustomer.id === c.id ? "bg-primary text-white border-primary" : "bg-background border-border hover:border-primary/50"
+                        )}
+                      >
+                        {c.name.split(' ')[0]}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {filteredCustomers.map(customer => (
                   <button
                     key={customer.id}
@@ -330,7 +445,7 @@ export default function Billing() {
                         "text-[8px] font-black",
                         selectedCustomer.id === customer.id && "bg-white/20 text-white"
                       )}>
-                        DUE: {currency}{customer.outstandingBalance}
+                        DUE: {formatCurrency(customer.outstandingBalance)}
                       </Badge>
                     )}
                   </button>
@@ -348,25 +463,73 @@ export default function Billing() {
             </div>
           </Card>
 
-          {/* Product Search */}
+          {/* Product Search & Barcode */}
           <Card className="p-6 border-border bg-surface relative overflow-visible">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Package className="h-5 w-5 text-primary" />
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Package className="h-5 w-5 text-primary" />
+                </div>
+                <h3 className="text-sm font-black text-text uppercase tracking-widest">Add Items</h3>
               </div>
-              <h3 className="text-sm font-black text-text uppercase tracking-widest">Search Products</h3>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setQuickMode(!quickMode)}
+                  className={cn(
+                    "px-3 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all",
+                    quickMode ? "bg-success/10 text-success border border-success/20" : "bg-secondary/10 text-text/40 border border-border"
+                  )}
+                >
+                  Quick Bill: {quickMode ? 'ON' : 'OFF'}
+                </button>
+              </div>
             </div>
             
-            <div className="relative group">
-              <ScanLine className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
-              <input
-                ref={productSearchRef}
-                type="text"
-                placeholder="Product Name, SKU or Barcode..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-              />
+            <div className="space-y-4">
+              <form onSubmit={handleBarcodeScan} className="relative group">
+                <ScanLine className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  placeholder="Scan Barcode (Ctrl + B)..."
+                  value={barcodeValue}
+                  onChange={(e) => setBarcodeValue(e.target.value)}
+                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
+                />
+              </form>
+
+              <div className="relative group">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
+                <input
+                  ref={productSearchRef}
+                  type="text"
+                  placeholder="Search Product Name or SKU..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
+                />
+              </div>
+
+              {/* Recent Products Quick Bar */}
+              {recentProducts.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <span className="text-[10px] font-black text-text/30 uppercase tracking-widest ml-1">Recent Products</span>
+                  <div className="flex flex-wrap gap-2">
+                    {recentProducts.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => addToCart(p)}
+                        className="px-3 py-2 rounded-xl border border-border bg-background/50 hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center gap-2 group"
+                      >
+                        <div className="h-5 w-5 rounded-md bg-secondary/10 flex items-center justify-center">
+                          <Plus className="h-3 w-3 text-text/40 group-hover:text-primary" />
+                        </div>
+                        <span className="text-xs font-bold text-text/60 group-hover:text-text">{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Product Results Dropdown */}
@@ -394,7 +557,7 @@ export default function Billing() {
                         </div>
                       </div>
                       <div className="flex flex-col items-end">
-                        <span className="text-sm font-black text-text">{currency}{product.sellingPrice}</span>
+                        <span className="text-sm font-black text-text">{formatCurrency(product.sellingPrice)}</span>
                         <Badge variant={product.stockQuantity > 5 ? 'success' : 'warning'} className="text-[8px] py-0">
                           {product.stockQuantity} {product.unit} left
                         </Badge>
@@ -469,7 +632,7 @@ export default function Billing() {
                             </td>
                             <td className="px-6 py-5 text-right">
                               <div className="flex flex-col">
-                                <span className="text-sm font-black text-text">{currency}{item.total.toLocaleString()}</span>
+                                <span className="text-sm font-black text-text">{formatCurrency(item.total)}</span>
                                 <span className="text-[9px] font-bold text-text/30 uppercase">Incl. GST</span>
                               </div>
                             </td>
@@ -517,20 +680,36 @@ export default function Billing() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-sm font-bold text-text/60">
                   <span className="uppercase tracking-widest text-[10px]">Subtotal</span>
-                  <span>{currency}{totals.subtotal.toLocaleString()}</span>
+                  <span>{formatCurrency(totals.subtotal)}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm font-bold text-text/60">
                   <span className="uppercase tracking-widest text-[10px]">Tax (GST)</span>
-                  <span className="text-success">+ {currency}{totals.gstTotal.toLocaleString()}</span>
+                  <span className="text-success">+ {formatCurrency(totals.gstTotal)}</span>
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm font-bold text-text/60">
                     <span className="uppercase tracking-widest text-[10px]">Discount</span>
-                    <span className="text-danger">- {currency}{discount.toLocaleString()}</span>
+                    <span className="text-danger">- {formatCurrency(discount)}</span>
                   </div>
+                  
+                  {suggestedDiscount && (
+                    <motion.button
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      onClick={() => setDiscount(suggestedDiscount.amount)}
+                      className="w-full p-3 rounded-xl bg-success/5 border border-success/20 flex items-center justify-between group hover:bg-success/10 transition-all"
+                    >
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-3.5 w-3.5 text-success" />
+                        <span className="text-[10px] font-black text-success uppercase tracking-widest">{suggestedDiscount.label}</span>
+                      </div>
+                      <span className="text-xs font-black text-success">Apply {formatCurrency(suggestedDiscount.amount)}</span>
+                    </motion.button>
+                  )}
+
                   <input
                     type="number"
-                    placeholder={`Apply Discount ${currency}`}
+                    placeholder="Apply Discount (INR)"
                     value={discount || ''}
                     onChange={(e) => setDiscount(Number(e.target.value))}
                     className="w-full px-4 py-3 rounded-xl border border-border bg-background focus:ring-4 focus:ring-danger/5 focus:border-danger transition-all outline-none text-xs font-bold"
@@ -541,7 +720,7 @@ export default function Billing() {
                 
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-black text-text uppercase tracking-widest">Grand Total</span>
-                  <span className="text-3xl font-black text-primary tracking-tighter">{currency}{totals.grandTotal.toLocaleString()}</span>
+                  <span className="text-3xl font-black text-primary tracking-tighter">{formatCurrency(totals.grandTotal)}</span>
                 </div>
               </div>
 
@@ -608,6 +787,23 @@ export default function Billing() {
             </Card>
           </div>
         </div>
+      </div>
+
+      {/* Mobile Sticky Total Bar */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface border-t border-border p-4 pb-safe z-40 flex items-center justify-between shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
+        <div className="flex flex-col">
+          <span className="text-[8px] font-black text-text/30 uppercase tracking-widest">Total Amount</span>
+          <span className="text-xl font-black text-primary">{formatCurrency(totals.grandTotal)}</span>
+        </div>
+        <Button 
+          variant="primary" 
+          className="px-8 h-12 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-primary/20"
+          onClick={handleSaveInvoice}
+          isLoading={loading}
+          rightIcon={<ArrowRight className="h-4 w-4" />}
+        >
+          Checkout
+        </Button>
       </div>
     </div>
     </PageTransition>

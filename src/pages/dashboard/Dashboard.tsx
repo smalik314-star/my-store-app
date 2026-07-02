@@ -5,7 +5,7 @@ import {
   ReceiptText, 
   TrendingUp, 
   ShoppingBag,
-  DollarSign,
+  IndianRupee,
   Plus,
   ArrowRight
 } from 'lucide-react';
@@ -19,16 +19,14 @@ import { AlertPanel } from '../../components/dashboard/AlertPanel';
 import { RecentInvoices } from '../../components/dashboard/RecentInvoices';
 import { DashboardCharts } from '../../components/dashboard/DashboardCharts';
 import { Invoice, Product } from '../../types';
+import { formatCurrency, formatCurrencyCompact } from '../../utils/currency';
 import { useNavigate } from 'react-router-dom';
-import { useSettings } from '../../context/SettingsContext';
 import { SkeletonDashboard } from '../../components/common/Skeleton';
 import { PageTransition } from '../../components/common/PageTransition';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { settings } = useSettings();
-  const currency = settings?.currency || '₹';
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
@@ -49,8 +47,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!user) return;
+
+    if (!user.tenantId) {
+      console.warn('Dashboard: No tenantId found for user');
+      setLoading(false);
+      return;
+    }
     
-    console.log('Dashboard: Starting data subscriptions for user', user.uid);
+    console.log('Dashboard: Starting data subscriptions for tenant', user.tenantId);
     setLoading(true);
 
     // Safety timeout: stop loading after 8 seconds no matter what
@@ -60,7 +64,7 @@ export default function Dashboard() {
     }, 8000);
 
     const unsubStats = dashboardService.subscribeToStats(
-      user.uid,
+      user.tenantId,
       (newStats) => {
         console.log('Dashboard: Received stats update');
         setStats(newStats);
@@ -74,12 +78,12 @@ export default function Dashboard() {
       }
     );
 
-    const unsubInvoices = dashboardService.subscribeToRecentInvoices(user.uid, (invoices) => {
+    const unsubInvoices = dashboardService.subscribeToRecentInvoices(user.tenantId, (invoices) => {
       console.log('Dashboard: Received invoices update');
       setRecentInvoices(invoices);
     });
 
-    const unsubAlerts = dashboardService.subscribeToAlerts(user.uid, (newAlerts) => {
+    const unsubAlerts = dashboardService.subscribeToAlerts(user.tenantId, (newAlerts) => {
       console.log('Dashboard: Received alerts update');
       setAlerts(newAlerts);
     });
@@ -164,7 +168,7 @@ export default function Dashboard() {
         />
         <KpiCard 
           label="Today's Sales" 
-          value={`${currency}${stats.todaySales.toFixed(0)}`} 
+          value={formatCurrencyCompact(stats.todaySales)} 
           icon={ShoppingBag} 
           loading={loading}
           trend="+5.4%"
@@ -175,8 +179,8 @@ export default function Dashboard() {
         />
         <KpiCard 
           label="Monthly Rev" 
-          value={`${currency}${(stats.monthlyRevenue / 1000).toFixed(1)}k`} 
-          icon={DollarSign} 
+          value={formatCurrency(stats.monthlyRevenue)} 
+          icon={IndianRupee} 
           loading={loading}
           trend="+12.2%"
           isUp={true}

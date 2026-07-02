@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  X, Save, AlertCircle, Package, DollarSign, Calendar, MapPin, 
-  Image as ImageIcon, Percent, TrendingUp, Calculator, Info, 
+  X, Save, AlertCircle, Package, IndianRupee, Calendar, MapPin, 
+  ImageIcon, Percent, TrendingUp, Calculator, Info, 
   Barcode, Factory, Tag, ChevronRight, ChevronLeft, Upload, Trash2,
   CheckCircle2
 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { Card } from '../common/Card';
 import { Timestamp } from 'firebase/firestore';
 import { uploadProductImage } from '../../utils/storage';
 import { cn } from '../../utils/cn';
+import { formatCurrency } from '../../utils/currency';
 
 interface ProductFormProps {
   product?: Product;
@@ -26,7 +27,7 @@ const UNITS = ['Strip', 'Bottle', 'Box', 'Piece', 'Vial', 'Tube'];
 const TABS = [
   { id: 'basic', label: 'Basic Info', icon: Info },
   { id: 'tracking', label: 'Tracking', icon: Barcode },
-  { id: 'pricing', label: 'Pricing', icon: DollarSign },
+  { id: 'pricing', label: 'Pricing', icon: IndianRupee },
   { id: 'inventory', label: 'Stock', icon: Package },
   { id: 'storage', label: 'Storage', icon: MapPin },
   { id: 'media', label: 'Media', icon: ImageIcon },
@@ -344,7 +345,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     <div className="flex flex-col gap-2.5">
                       <label className="text-[10px] font-black text-text/40 uppercase tracking-widest ml-1">Purchase Price</label>
                       <div className="relative">
-                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
+                        <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
                         <input
                           type="number"
                           name="purchasePrice"
@@ -358,7 +359,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     <div className="flex flex-col gap-2.5">
                       <label className="text-[10px] font-black text-text/40 uppercase tracking-widest ml-1">Selling Price</label>
                       <div className="relative">
-                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
+                        <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
                         <input
                           type="number"
                           name="sellingPrice"
@@ -372,7 +373,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     <div className="flex flex-col gap-2.5">
                       <label className="text-[10px] font-black text-text/40 uppercase tracking-widest ml-1">MRP (Max Price)</label>
                       <div className="relative">
-                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
+                        <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
                         <input
                           type="number"
                           name="mrp"
@@ -393,7 +394,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
                       <div className="flex flex-col">
                         <span className="text-[10px] font-black text-text/30 uppercase tracking-[0.2em] mb-2">Estimated Profit</span>
-                        <span className="text-3xl font-black text-text">${profit.toFixed(2)}</span>
+                        <span className="text-3xl font-black text-text">{formatCurrency(profit)}</span>
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[10px] font-black text-text/30 uppercase tracking-[0.2em] mb-2">Profit Margin</span>

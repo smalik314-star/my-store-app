@@ -47,13 +47,13 @@ import { useNavigate } from 'react-router-dom';
 import { PageTransition } from '../../components/common/PageTransition';
 import { SkeletonChart, SkeletonCard } from '../../components/common/Skeleton';
 import { EmptyState } from '../../components/common/EmptyState';
+import { formatCurrency } from '../../utils/currency';
 
 type DateRange = 'today' | '7days' | '30days' | 'thisMonth' | 'lastMonth' | 'custom';
 
 export default function Reports() {
   const { settings } = useSettings();
   const navigate = useNavigate();
-  const currency = settings?.currency || '₹';
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -391,13 +391,13 @@ export default function Reports() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             <StatCard 
               label="Total Revenue" 
-              value={`${currency}${stats.totalRevenue.toLocaleString()}`} 
+              value={formatCurrency(stats.totalRevenue)} 
               icon={<DollarSign className="h-5 w-5 text-primary" />}
               trend="+12.5%" 
             />
             <StatCard 
               label="Total Profit" 
-              value={`${currency}${stats.totalProfit.toLocaleString()}`} 
+              value={formatCurrency(stats.totalProfit)} 
               icon={<TrendingUp className="h-5 w-5 text-success" />}
               trend="+8.2%" 
             />
@@ -408,17 +408,17 @@ export default function Reports() {
             />
             <StatCard 
               label="GST Collected" 
-              value={`${currency}${stats.totalGst.toLocaleString()}`} 
+              value={formatCurrency(stats.totalGst)} 
               icon={<Percent className="h-5 w-5 text-amber-500" />}
             />
             <StatCard 
               label="Avg Invoice" 
-              value={`${currency}${Math.round(stats.avgInvoiceValue).toLocaleString()}`} 
+              value={formatCurrency(Math.round(stats.avgInvoiceValue))} 
               icon={<FileText className="h-5 w-5 text-blue-500" />}
             />
             <StatCard 
               label="Pending Dues" 
-              value={`${currency}${stats.pendingDues.toLocaleString()}`} 
+              value={formatCurrency(stats.pendingDues)} 
               icon={<Users className="h-5 w-5 text-danger" />}
               trend="-5.4%"
               trendType="down"
@@ -456,7 +456,7 @@ export default function Reports() {
                       axisLine={false} 
                       tickLine={false} 
                       tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
-                      tickFormatter={(value) => `${currency}${value}`}
+                      tickFormatter={(value) => formatCurrency(value)}
                     />
                     <Tooltip 
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
@@ -491,7 +491,7 @@ export default function Reports() {
                       cursor={{ fill: '#f8fafc' }}
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
                     />
-                    <Bar dataKey="revenue" name={`Revenue (${currency})`} fill="#a855f7" radius={[0, 4, 4, 0]} barSize={20} />
+                    <Bar dataKey="revenue" name={`Revenue (INR)`} fill="#a855f7" radius={[0, 4, 4, 0]} barSize={20} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -525,7 +525,7 @@ export default function Reports() {
                 </ResponsiveContainer>
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-8">
                   <span className="text-[10px] font-black text-text/30 uppercase">Total GST</span>
-                  <span className="text-xl font-black text-text">{currency}{stats.totalGst.toLocaleString()}</span>
+                  <span className="text-xl font-black text-text">{formatCurrency(stats.totalGst)}</span>
                 </div>
               </div>
             </Card>
@@ -538,10 +538,10 @@ export default function Reports() {
                   <div key={i} className="flex items-center justify-between">
                     <div className="flex flex-col">
                       <span className="text-sm font-black text-text line-clamp-1">{prod.name}</span>
-                      <span className="text-[10px] font-bold text-text/30 uppercase">Profit Unit: {currency}{(prod.profit / prod.quantity).toFixed(2)}</span>
+                      <span className="text-[10px] font-bold text-text/30 uppercase">Profit Unit: {formatCurrency(prod.profit / prod.quantity)}</span>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-black text-success">{currency}{Math.round(prod.profit).toLocaleString()}</p>
+                      <p className="text-sm font-black text-success">{formatCurrency(Math.round(prod.profit))}</p>
                       <p className="text-[10px] font-bold text-text/30">{prod.quantity} Units</p>
                     </div>
                   </div>
@@ -560,7 +560,7 @@ export default function Reports() {
                       <span className="text-[10px] font-bold text-text/30 uppercase">{cust.visitCount} Purchases</span>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-black text-primary">{currency}{Math.round(cust.revenue).toLocaleString()}</p>
+                      <p className="text-sm font-black text-primary">{formatCurrency(Math.round(cust.revenue))}</p>
                     </div>
                   </div>
                 ))}
@@ -579,7 +579,7 @@ export default function Reports() {
                         <span className="text-[10px] font-bold text-text/30 uppercase">Last Visit: {cust.visitCount}</span>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-black text-danger">{currency}{Math.round(cust.dues).toLocaleString()}</p>
+                        <p className="text-sm font-black text-danger">{formatCurrency(Math.round(cust.dues))}</p>
                       </div>
                     </div>
                   ))

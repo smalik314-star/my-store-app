@@ -395,18 +395,12 @@ export default function Settings() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-text/40 mb-1.5 ml-1">
-                  Currency
+                  Currency (System Default)
                 </label>
-                <select
-                  name="currency"
-                  value={formData.currency}
-                  onChange={handleInputChange}
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-bold text-text focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-                >
-                  <option value="₹">₹ INR (Indian Rupee)</option>
-                  <option value="$">$ USD (US Dollar)</option>
-                  <option value="€">€ EUR (Euro)</option>
-                </select>
+                <div className="w-full bg-background/50 border border-border rounded-xl px-4 py-3 text-sm font-black text-text/40 cursor-not-allowed">
+                  ₹ INR (Indian Rupee)
+                </div>
+                <input type="hidden" name="currency" value="₹" />
               </div>
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-widest text-text/40 mb-1.5 ml-1">

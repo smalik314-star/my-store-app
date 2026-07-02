@@ -24,7 +24,7 @@ export interface DashboardStats {
 }
 
 export const dashboardService = {
-  subscribeToStats(userId: string, callback: (stats: DashboardStats) => void, onError?: (error: any) => void) {
+  subscribeToStats(tenantId: string, callback: (stats: DashboardStats) => void, onError?: (error: any) => void) {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -43,7 +43,7 @@ export const dashboardService = {
 
     // Products Stats
     const unsubProducts = onSnapshot(
-      query(collection(db, 'products'), where('userId', '==', userId)), 
+      query(collection(db, 'products'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         try {
           const products = snapshot.docs.map(doc => doc.data() as Product);
@@ -79,7 +79,7 @@ export const dashboardService = {
 
     // Customers Stats
     const unsubCustomers = onSnapshot(
-      query(collection(db, 'customers'), where('userId', '==', userId)), 
+      query(collection(db, 'customers'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         stats.totalCustomers = snapshot.size;
         callback({ ...stats });
@@ -92,7 +92,7 @@ export const dashboardService = {
 
     // Invoices Stats
     const unsubInvoices = onSnapshot(
-      query(collection(db, 'invoices'), where('userId', '==', userId)), 
+      query(collection(db, 'invoices'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         try {
           const invoices = snapshot.docs.map(doc => doc.data() as Invoice);
@@ -131,13 +131,10 @@ export const dashboardService = {
     };
   },
 
-  subscribeToRecentInvoices(userId: string, callback: (invoices: Invoice[]) => void, onError?: (error: any) => void) {
-    // Note: This query requires a composite index on (userId, createdAt DESC).
-    // We remove the orderBy to allow the app to function without the index, 
-    // and perform sorting client-side for now.
+  subscribeToRecentInvoices(tenantId: string, callback: (invoices: Invoice[]) => void, onError?: (error: any) => void) {
     const q = query(
       collection(db, 'invoices'), 
-      where('userId', '==', userId)
+      where('tenantId', '==', tenantId)
     );
 
     return onSnapshot(q, (snapshot) => {
@@ -147,14 +144,12 @@ export const dashboardService = {
           ...doc.data()
         })) as Invoice[];
         
-        // Client-side sort: Recent first
         invoices.sort((a, b) => {
           const dateA = typeof a.createdAt?.toDate === 'function' ? a.createdAt.toDate() : new Date(a.createdAt);
           const dateB = typeof b.createdAt?.toDate === 'function' ? b.createdAt.toDate() : new Date(b.createdAt);
           return dateB.getTime() - dateA.getTime();
         });
 
-        // Limit to 10
         callback(invoices.slice(0, 10));
       } catch (err) {
         console.error('Recent Invoices Processing Error:', err);
@@ -166,13 +161,13 @@ export const dashboardService = {
     });
   },
 
-  subscribeToAlerts(userId: string, callback: (alerts: { lowStock: Product[], expiring: Product[] }) => void, onError?: (error: any) => void) {
+  subscribeToAlerts(tenantId: string, callback: (alerts: { lowStock: Product[], expiring: Product[] }) => void, onError?: (error: any) => void) {
     const now = new Date();
     const twoMonthsFromNow = new Date();
     twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
 
     return onSnapshot(
-      query(collection(db, 'products'), where('userId', '==', userId)), 
+      query(collection(db, 'products'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         try {
           const products = snapshot.docs.map(doc => ({

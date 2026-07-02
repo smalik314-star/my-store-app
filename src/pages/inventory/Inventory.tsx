@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Download, Trash2, Tag, FileDown, Search, Filter } from 'lucide-react';
+import { Plus, Download, Trash2, Tag, FileDown, Search, Filter, CheckCircle2 } from 'lucide-react';
 import { PageContainer, SectionHeader } from '../../components/common/PageContainer';
 import { Button } from '../../components/common/Button';
 import { ProductTable } from '../../components/inventory/ProductTable';
@@ -7,6 +7,7 @@ import { ProductForm } from '../../components/inventory/ProductForm';
 import { ProductFilters } from '../../components/inventory/ProductFilters';
 import { ProductDetailsSidebar } from '../../components/inventory/ProductDetailsSidebar';
 import { productService } from '../../services/productService';
+import { inventoryIntelligenceService, ProductIntelligence } from '../../services/inventoryIntelligenceService';
 import { Product } from '../../types';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../utils/cn';
@@ -14,6 +15,7 @@ import { PageTransition } from '../../components/common/PageTransition';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { useToast } from '../../context/ToastContext';
 import { SkeletonTable } from '../../components/common/Skeleton';
+import { InventoryIntelligence } from '../../components/inventory/InventoryIntelligence';
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -26,6 +28,8 @@ export default function Inventory() {
   const viewId = searchParams.get('view');
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [intelligence, setIntelligence] = useState<Record<string, ProductIntelligence>>({});
+  const [intelligenceLoading, setIntelligenceLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>();
@@ -77,9 +81,16 @@ export default function Inventory() {
 
   useEffect(() => {
     if (!user) return;
+
+    if (!user.tenantId) {
+      console.warn('Inventory: No tenantId found for user');
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const unsub = productService.subscribeToProducts(
-      user.uid,
+      user.tenantId,
       (newProducts) => {
         let filtered = [...newProducts];
 
@@ -118,6 +129,19 @@ export default function Inventory() {
     return () => unsub();
   }, [user, selectedCategory, debouncedSearch, selectedStatus, selectedExpiryStatus, priceRange]);
 
+  // Analyze products for intelligence
+  useEffect(() => {
+    if (products.length > 0 && user?.tenantId) {
+      const analyze = async () => {
+        setIntelligenceLoading(true);
+        const result = await inventoryIntelligenceService.analyzeProducts(products);
+        setIntelligence(result);
+        setIntelligenceLoading(false);
+      };
+      analyze();
+    }
+  }, [products.length, user?.tenantId]);
+
   const handleBarcodeScan = (barcode: string) => {
     const found = products.find(p => p.barcode === barcode);
     if (found) {
@@ -130,13 +154,14 @@ export default function Inventory() {
   };
 
   const handleSaveProduct = async (data: any) => {
+    if (!user?.tenantId) return;
     setFormLoading(true);
     try {
       if (editingProduct) {
-        await productService.updateProduct(editingProduct.id, data);
+        await productService.updateProduct(user.tenantId, editingProduct.id, data);
         showToast('Product updated successfully', 'success');
       } else {
-        await productService.addProduct(data);
+        await productService.addProduct(user.tenantId, data);
         showToast('Product added successfully', 'success');
       }
       setShowForm(false);
@@ -147,10 +172,12 @@ export default function Inventory() {
   };
 
   const handleDeleteProduct = async () => {
+    if (!user?.tenantId) return;
+    
     if (isBulkDeleting) {
       setFormLoading(true);
       try {
-        await Promise.all(selectedIds.map(id => productService.deleteProduct(id)));
+        await Promise.all(selectedIds.map(id => productService.deleteProduct(user.tenantId!, id)));
         showToast(`${selectedIds.length} items deleted`, 'success');
         setSelectedIds([]);
         setIsBulkDeleting(false);
@@ -162,7 +189,7 @@ export default function Inventory() {
     } else if (deletingProduct) {
       setFormLoading(true);
       try {
-        await productService.deleteProduct(deletingProduct.id);
+        await productService.deleteProduct(user.tenantId, deletingProduct.id);
         showToast('Product deleted successfully', 'success');
         setDeletingProduct(undefined);
         if (selectedProduct?.id === deletingProduct.id) setSelectedProduct(null);
@@ -179,17 +206,28 @@ export default function Inventory() {
       ? products.filter(p => selectedIds.includes(p.id)) 
       : products;
     
-    const headers = ['Name', 'SKU', 'Category', 'Stock', 'Selling Price', 'Expiry'];
-    const rows = dataToExport.map(p => [
-      p.name,
-      p.sku,
-      p.category,
-      p.stockQuantity,
-      p.sellingPrice,
-      p.expiryDate?.toDate().toLocaleDateString()
-    ]);
+    const headers = [
+      'Name', 'SKU', 'Category', 'Stock', 'Selling Price', 'Expiry', 
+      'Movement', 'Health Status', 'Daily Sales Avg', 'Depletion Date', 'Suggested Reorder'
+    ];
+    const rows = dataToExport.map(p => {
+      const intel = intelligence[p.id];
+      return [
+        p.name,
+        p.sku,
+        p.category,
+        p.stockQuantity,
+        p.sellingPrice,
+        p.expiryDate?.toDate().toLocaleDateString(),
+        intel?.movement || 'N/A',
+        intel?.status || 'N/A',
+        intel?.dailySalesAvg.toFixed(2) || '0.00',
+        intel?.expectedDepletionDate?.toLocaleDateString() || 'N/A',
+        intel?.suggestedQuantity || 0
+      ];
+    });
 
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const csvContent = [headers, ...rows].map(e => e.map(String).map(v => `"${v}"`).join(",")).join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -227,6 +265,11 @@ export default function Inventory() {
           </Button>
         </div>
       </div>
+
+      <InventoryIntelligence 
+        intelligence={intelligence} 
+        loading={intelligenceLoading} 
+      />
 
       <ProductFilters 
         searchQuery={searchQuery}
@@ -266,19 +309,29 @@ export default function Inventory() {
                   Clear Selection
                 </button>
               </div>
-              <div className="flex items-center gap-3 w-full md:w-auto">
-                <button 
-                  onClick={handleExportCSV}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-white/10 hover:bg-white/20 rounded-2xl text-xs font-bold transition-all"
-                >
-                  <FileDown className="h-4 w-4" /> Export
-                </button>
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                 <button 
                   onClick={() => setIsBulkDeleting(true)}
                   className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-danger hover:bg-danger/80 rounded-2xl text-xs font-bold transition-all shadow-lg shadow-danger/20"
                 >
                   <Trash2 className="h-4 w-4" /> Delete
                 </button>
+                <div className="flex-1 md:flex-none flex items-center gap-2">
+                  <button 
+                    onClick={async () => {
+                      if (!user?.tenantId) return;
+                      setFormLoading(true);
+                      try {
+                        await Promise.all(selectedIds.map(id => productService.updateProduct(user.tenantId!, id, { updatedAt: new Date() })));
+                        showToast(`${selectedIds.length} items marked as reviewed`, 'success');
+                        setSelectedIds([]);
+                      } finally { setFormLoading(false); }
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  >
+                    <CheckCircle2 className="h-4 w-4" /> Review
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}
@@ -295,6 +348,7 @@ export default function Inventory() {
         
         <ProductTable 
           products={products} 
+          intelligence={intelligence}
           loading={loading}
           selectedIds={selectedIds}
           onSelect={setSelectedIds}
@@ -327,6 +381,7 @@ export default function Inventory() {
         {selectedProduct && (
           <ProductDetailsSidebar 
             product={selectedProduct}
+            intelligence={intelligence[selectedProduct.id]}
             onClose={() => setSelectedProduct(null)}
             onEdit={(p) => { setSelectedProduct(null); setEditingProduct(p); setShowForm(true); }}
             onDelete={(p) => { setDeletingProduct(p); }}

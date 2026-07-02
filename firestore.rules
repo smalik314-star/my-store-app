@@ -6,33 +6,61 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isTenantUser(tenantId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
+    }
+
+    function getRole(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid)).data.role;
     }
 
     // User profiles
     match /users/{userId} {
-      allow get: if isOwner(userId);
+      allow get: if isAuthenticated() && request.auth.uid == userId;
       allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update: if isOwner(userId);
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Tenants
+    match /tenants/{tenantId} {
+      allow get: if isTenantUser(tenantId);
+      allow update: if isTenantUser(tenantId) && getRole(tenantId) == 'owner';
+      
+      match /users/{userId} {
+        allow read: if isTenantUser(tenantId);
+        allow write: if isTenantUser(tenantId) && getRole(tenantId) == 'owner';
+      }
+
+      match /logs/{logId} {
+        allow read: if isTenantUser(tenantId) && getRole(tenantId) in ['owner', 'admin'];
+        allow create: if isTenantUser(tenantId);
+      }
     }
 
     // Products
     match /products/{productId} {
-      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
-      allow write: if isAuthenticated() && (request.resource == null || request.resource.data.userId == request.auth.uid);
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
     }
 
     // Customers
     match /customers/{customerId} {
-      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
-      allow write: if isAuthenticated() && (request.resource == null || request.resource.data.userId == request.auth.uid);
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow write: if isAuthenticated() && isTenantUser(request.resource.data.tenantId || resource.data.tenantId) && getRole(request.resource.data.tenantId || resource.data.tenantId) in ['owner', 'admin', 'staff'];
     }
 
     // Invoices
     match /invoices/{invoiceId} {
-      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
-      allow write: if isAuthenticated() && (request.resource == null || request.resource.data.userId == request.auth.uid);
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
     }
 
     // Counters
@@ -40,9 +68,10 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
-    // Settings
-    match /settings/{userId} {
-      allow read, write: if isOwner(userId);
+    // Settings (Scoped by tenantId)
+    match /settings/{tenantId} {
+      allow read: if isTenantUser(tenantId);
+      allow write: if isTenantUser(tenantId) && getRole(tenantId) in ['owner', 'admin'];
     }
   }
 }

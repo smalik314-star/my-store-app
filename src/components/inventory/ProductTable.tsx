@@ -3,11 +3,14 @@ import { EmptyState } from '../common/EmptyState';
 import { motion } from 'motion/react';
 import { Edit2, Trash2, MoreVertical, Package, AlertCircle, Calendar, CheckSquare, Square, ChevronRight } from 'lucide-react';
 import { Product } from '../../types';
+import { ProductIntelligence } from '../../services/inventoryIntelligenceService';
 import { cn } from '../../utils/cn';
 import { useState, useMemo } from 'react';
+import { formatCurrency } from '../../utils/currency';
 
 interface ProductTableProps {
   products: Product[];
+  intelligence?: Record<string, ProductIntelligence>;
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
   onView: (product: Product) => void;
@@ -19,6 +22,7 @@ interface ProductTableProps {
 
 export function ProductTable({ 
   products, 
+  intelligence = {},
   onEdit, 
   onDelete, 
   onView, 
@@ -132,7 +136,15 @@ export function ProductTable({
                             {product.name[0].toUpperCase()}
                           </div>
                           <div className="flex flex-col min-w-0">
-                            <span className="text-sm font-bold text-text truncate group-hover:text-primary transition-colors">{product.name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-text truncate group-hover:text-primary transition-colors">{product.name}</span>
+                              {intelligence[product.id]?.movement === 'Fast Moving' && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[8px] font-black uppercase tracking-widest">Fast</span>
+                              )}
+                              {intelligence[product.id]?.movement === 'Dead Stock' && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-danger/10 text-danger text-[8px] font-black uppercase tracking-widest">Dead</span>
+                              )}
+                            </div>
                             <span className="text-[11px] text-text/40 font-bold truncate">{product.brand || 'Generic'}</span>
                           </div>
                         </div>
@@ -169,8 +181,8 @@ export function ProductTable({
                       </td>
                       <td className="px-6 py-5">
                         <div className="flex flex-col">
-                          <span className="text-sm font-black text-text">${product.sellingPrice.toFixed(2)}</span>
-                          <span className="text-[10px] font-bold text-text/30 line-through">MRP: ${product.mrp.toFixed(2)}</span>
+                          <span className="text-sm font-black text-text">{formatCurrency(product.sellingPrice)}</span>
+                          <span className="text-[10px] font-bold text-text/30 line-through">MRP: {formatCurrency(product.mrp)}</span>
                         </div>
                       </td>
                       <td className="px-6 py-5">
@@ -241,7 +253,15 @@ export function ProductTable({
                       {product.name[0].toUpperCase()}
                     </div>
                     <div className="flex flex-col">
-                      <h4 className="font-bold text-text leading-tight">{product.name}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-text leading-tight">{product.name}</h4>
+                        {intelligence[product.id]?.movement === 'Fast Moving' && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[8px] font-black uppercase tracking-widest">Fast</span>
+                        )}
+                        {intelligence[product.id]?.movement === 'Dead Stock' && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-danger/10 text-danger text-[8px] font-black uppercase tracking-widest">Dead</span>
+                        )}
+                      </div>
                       <p className="text-[10px] font-bold text-text/40 uppercase tracking-widest">{product.sku}</p>
                     </div>
                   </div>
@@ -265,7 +285,7 @@ export function ProductTable({
                   </div>
                   <div className="p-3 bg-background rounded-2xl border border-border">
                     <p className="text-[9px] font-black text-text/30 uppercase mb-1">Price</p>
-                    <span className="text-sm font-black text-text">${product.sellingPrice.toFixed(2)}</span>
+                    <span className="text-sm font-black text-text">{formatCurrency(product.sellingPrice)}</span>
                   </div>
                 </div>
 

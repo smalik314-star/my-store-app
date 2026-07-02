@@ -1,18 +1,21 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Edit2, Trash2, Package, MapPin, DollarSign, Calendar, Info, Barcode, Factory, Tag } from 'lucide-react';
+import { X, Edit2, Trash2, Package, MapPin, IndianRupee, Calendar, Info, Barcode, Factory, Tag } from 'lucide-react';
 import { Product } from '../../types';
+import { ProductIntelligence } from '../../services/inventoryIntelligenceService';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
 import { cn } from '../../utils/cn';
+import { formatCurrency } from '../../utils/currency';
 
 interface ProductDetailsSidebarProps {
   product: Product | null;
+  intelligence?: ProductIntelligence;
   onClose: () => void;
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
 }
 
-export function ProductDetailsSidebar({ product, onClose, onEdit, onDelete }: ProductDetailsSidebarProps) {
+export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, onDelete }: ProductDetailsSidebarProps) {
   if (!product) return null;
 
   const getStockStatus = (stock: number, min: number) => {
@@ -107,10 +110,66 @@ export function ProductDetailsSidebar({ product, onClose, onEdit, onDelete }: Pr
               </Card>
               <Card className="p-4 flex flex-col items-center justify-center text-center bg-secondary/5 border-secondary/10">
                 <span className="text-[10px] font-black uppercase text-text/30 tracking-widest mb-1">Selling Price</span>
-                <span className="text-2xl font-black text-text">${product.sellingPrice.toFixed(2)}</span>
+                <span className="text-2xl font-black text-text">{formatCurrency(product.sellingPrice)}</span>
                 <span className="text-[11px] font-bold text-text/40 uppercase">Inc. GST</span>
               </Card>
             </div>
+
+            {/* AI Intelligence Section */}
+            {intelligence && (
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black uppercase text-text/40 tracking-widest ml-1">AI Inventory Intelligence</h4>
+                  <div className="grid grid-cols-1 gap-3">
+                    <Card className={cn(
+                      "p-5 border-2 transition-all",
+                      intelligence.status === 'Healthy' ? "bg-success/5 border-success/20" : 
+                      intelligence.status === 'Watch' ? "bg-warning/5 border-warning/20" : 
+                      "bg-danger/5 border-danger/20"
+                    )}>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-black uppercase tracking-widest opacity-40">Movement Pattern</span>
+                          <span className="text-sm font-black text-text">{intelligence.movement}</span>
+                        </div>
+                        <div className={cn(
+                          "px-3 py-1 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-black/5",
+                          intelligence.status === 'Healthy' ? "bg-success text-white" : 
+                          intelligence.status === 'Watch' ? "bg-warning text-white" : 
+                          "bg-danger text-white"
+                        )}>{intelligence.healthScore} Score</div>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 border-t border-border/20 pt-4">
+                        <div>
+                          <p className="text-[9px] font-black uppercase opacity-40 mb-1">Daily Avg Sales</p>
+                          <p className="text-xs font-black text-text">{intelligence.dailySalesAvg.toFixed(2)} units</p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] font-black uppercase opacity-40 mb-1">Reorder Recommendation</p>
+                          <p className={cn("text-xs font-black", intelligence.reorderRequired ? "text-danger" : "text-success")}>
+                            {intelligence.reorderRequired ? `Add ${intelligence.suggestedQuantity}` : 'Not Required'}
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-4 rounded-2xl bg-background border border-border group hover:border-info/20 transition-all">
+                        <p className="text-[9px] font-black uppercase text-text/30 mb-1">Depletion Forecast</p>
+                        <p className="text-xs font-black text-text">
+                          {intelligence.expectedDepletionDate ? intelligence.expectedDepletionDate.toLocaleDateString() : 'N/A'}
+                        </p>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-background border border-border group hover:border-primary/20 transition-all">
+                        <p className="text-[9px] font-black uppercase text-text/30 mb-1">Suggested Restock</p>
+                        <p className="text-xs font-black text-primary">
+                          {intelligence.recommendedRestockDate ? intelligence.recommendedRestockDate.toLocaleDateString() : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
             {/* Information Groups */}
             <div className="space-y-6">
@@ -137,8 +196,8 @@ export function ProductDetailsSidebar({ product, onClose, onEdit, onDelete }: Pr
               <div className="space-y-3">
                 <h4 className="text-xs font-black uppercase text-text/40 tracking-widest ml-1">Financial Breakdown</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <InfoRow icon={DollarSign} label="Purchase Price" value={`$${product.purchasePrice.toFixed(2)}`} colorClass="text-info" />
-                  <InfoRow icon={DollarSign} label="MRP" value={`$${product.mrp.toFixed(2)}`} colorClass="text-accent" />
+                  <InfoRow icon={IndianRupee} label="Purchase Price" value={formatCurrency(product.purchasePrice)} colorClass="text-info" />
+                  <InfoRow icon={IndianRupee} label="MRP" value={formatCurrency(product.mrp)} colorClass="text-accent" />
                 </div>
               </div>
 

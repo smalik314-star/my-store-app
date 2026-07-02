@@ -32,11 +32,10 @@ const sanitizeCustomer = (data: any) => {
 };
 
 export const customerService = {
-  async getCustomers() {
-    if (!auth.currentUser) return [];
-    const uid = auth.currentUser.uid;
+  async getCustomers(tenantId: string) {
+    if (!tenantId) return [];
     try {
-      const q = query(collection(db, COLLECTION_NAME), where('userId', '==', uid));
+      const q = query(collection(db, COLLECTION_NAME), where('tenantId', '==', tenantId));
       const snapshot = await getDocs(q);
       const customers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
       // Client-side sort by name
@@ -48,13 +47,12 @@ export const customerService = {
     }
   },
 
-  async getCustomersPaginated(pageSize: number = 15, lastVisibleDoc: any = null) {
-    if (!auth.currentUser) return null;
-    const uid = auth.currentUser.uid;
+  async getCustomersPaginated(tenantId: string, pageSize: number = 15, lastVisibleDoc: any = null) {
+    if (!tenantId) return null;
     try {
       let q = query(
         collection(db, COLLECTION_NAME),
-        where('userId', '==', uid),
+        where('tenantId', '==', tenantId),
         limit(pageSize)
       );
 
@@ -76,16 +74,15 @@ export const customerService = {
     }
   },
 
-  async addCustomer(customerData: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async addCustomer(tenantId: string, customerData: Omit<Customer, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'>) {
+    if (!tenantId) throw new Error('Tenant ID required');
     const sanitized = sanitizeCustomer(customerData);
 
     try {
-      // Check for duplicate phone for this user
+      // Check for duplicate phone for this tenant
       const q = query(
         collection(db, COLLECTION_NAME), 
-        where('userId', '==', uid),
+        where('tenantId', '==', tenantId),
         where('phone', '==', sanitized.phone)
       );
       const snapshot = await getDocs(q);
@@ -96,7 +93,7 @@ export const customerService = {
 
       const docRef = await addDoc(collection(db, COLLECTION_NAME), {
         ...sanitized,
-        userId: uid,
+        tenantId,
         outstandingBalance: sanitized.outstandingBalance || 0,
         totalPurchases: sanitized.totalPurchases || 0,
         totalPaid: sanitized.totalPaid || 0,
@@ -110,15 +107,14 @@ export const customerService = {
     }
   },
 
-  async updateCustomer(id: string, customerData: Partial<Customer>) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async updateCustomer(tenantId: string, id: string, customerData: Partial<Customer>) {
+    if (!tenantId) throw new Error('Tenant ID required');
     const sanitized = sanitizeCustomer(customerData);
 
     try {
       const docRef = doc(db, COLLECTION_NAME, id);
       const currentDoc = await getDoc(docRef);
-      if (!currentDoc.exists() || currentDoc.data().userId !== uid) {
+      if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or customer not found');
       }
 
@@ -131,14 +127,13 @@ export const customerService = {
     }
   },
 
-  async deleteCustomer(id: string) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async deleteCustomer(tenantId: string, id: string) {
+    if (!tenantId) throw new Error('Tenant ID required');
 
     try {
       const docRef = doc(db, COLLECTION_NAME, id);
       const currentDoc = await getDoc(docRef);
-      if (!currentDoc.exists() || currentDoc.data().userId !== uid) {
+      if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or customer not found');
       }
 

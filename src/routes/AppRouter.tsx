@@ -18,6 +18,8 @@ const InvoiceDetail = lazy(() => import('../pages/billing/InvoiceDetail'));
 const PrintInvoice = lazy(() => import('../pages/billing/PrintInvoice'));
 const Reports = lazy(() => import('../pages/reports/Reports'));
 const Settings = lazy(() => import('../pages/settings/Settings'));
+const Subscription = lazy(() => import('../pages/subscription/Subscription'));
+const UserManagement = lazy(() => import('../pages/users/UserManagement'));
 const Login = lazy(() => import('../pages/auth/Login'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
@@ -54,6 +56,8 @@ export function AppRouter() {
               <Route path="/invoice/:id" element={<InvoiceDetail />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/subscription" element={<Subscription />} />
+              <Route path="/users" element={<UserManagement />} />
             </Route>
           </Route>
 

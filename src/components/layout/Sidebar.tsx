@@ -15,7 +15,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Stethoscope,
-  X
+  X,
+  Zap,
+  CreditCard
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -38,6 +40,8 @@ const menuItems = [
   { icon: Plus, label: 'New Bill', path: '/billing', active: true },
   { icon: ReceiptText, label: 'Invoices', path: '/invoices', active: true },
   { icon: BarChart3, label: 'Reports', path: '/reports', active: true },
+  { icon: Users, label: 'Users', path: '/users', active: true },
+  { icon: CreditCard, label: 'Subscription', path: '/subscription', active: true },
   { icon: Settings, label: 'Settings', path: '/settings', active: true },
 ];
 

@@ -1,4 +1,4 @@
-import { Search, Filter, SlidersHorizontal, Package, AlertTriangle, XCircle, CheckCircle, Calendar, DollarSign, ChevronDown } from 'lucide-react';
+import { Search, Filter, SlidersHorizontal, Package, AlertTriangle, XCircle, CheckCircle, Calendar, IndianRupee, ChevronDown } from 'lucide-react';
 import { Card } from '../common/Card';
 import { cn } from '../../utils/cn';
 import { useState } from 'react';
@@ -142,7 +142,7 @@ export function ProductFilters({
                 <label className="text-[10px] font-black uppercase text-text/40 tracking-widest ml-1">Price Range</label>
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1">
-                    <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-text/20" />
+                    <IndianRupee className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-text/20" />
                     <input
                       type="number"
                       placeholder="Min"
@@ -153,7 +153,7 @@ export function ProductFilters({
                   </div>
                   <span className="text-text/20">-</span>
                   <div className="relative flex-1">
-                    <DollarSign className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-text/20" />
+                    <IndianRupee className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-text/20" />
                     <input
                       type="number"
                       placeholder="Max"

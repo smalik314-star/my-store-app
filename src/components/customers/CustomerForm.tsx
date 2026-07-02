@@ -5,6 +5,7 @@ import { Button } from '../common/Button';
 import { Card } from '../common/Card';
 import { customerService } from '../../services/customerService';
 import { Customer } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 
 interface CustomerFormProps {
   onClose: () => void;
@@ -12,6 +13,7 @@ interface CustomerFormProps {
 }
 
 export default function CustomerForm({ onClose, editingCustomer }: CustomerFormProps) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -46,10 +48,12 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
     }
 
     try {
+      if (!user?.tenantId) throw new Error('Tenant session not found');
+      
       if (editingCustomer) {
-        await customerService.updateCustomer(editingCustomer.id, formData);
+        await customerService.updateCustomer(user.tenantId, editingCustomer.id, formData);
       } else {
-        await customerService.addCustomer(formData);
+        await customerService.addCustomer(user.tenantId, formData);
       }
       onClose();
     } catch (err: any) {

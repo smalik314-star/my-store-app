@@ -33,7 +33,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 
 import { useAuth } from '../../context/AuthContext';
-import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
+import { formatCurrency } from '../../utils/currency';
 
 export default function Customers() {
   const { user } = useAuth();
@@ -49,11 +49,11 @@ export default function Customers() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) return;
     setLoading(true);
     const q = query(
       collection(db, 'customers'), 
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -197,7 +197,7 @@ export default function Customers() {
             <div className="h-5 w-5 text-danger/40 font-black">₹</div>
           </div>
           <div className="mt-4 flex items-baseline gap-2">
-            <span className="text-4xl font-black text-danger">₹{stats.totalOutstanding.toLocaleString()}</span>
+            <span className="text-4xl font-black text-danger">{formatCurrency(stats.totalOutstanding)}</span>
             <span className="text-[10px] font-bold text-danger/40 uppercase">Receivable</span>
           </div>
         </Card>
@@ -291,7 +291,7 @@ export default function Customers() {
                     </td>
                     <td className="px-6 py-5 text-center">
                       <div className="flex flex-col">
-                        <span className="text-sm font-black text-text">₹{customer.totalPurchases.toLocaleString()}</span>
+                        <span className="text-sm font-black text-text">{formatCurrency(customer.totalPurchases)}</span>
                         <span className="text-[8px] font-black text-text/30 uppercase">Lifetime</span>
                       </div>
                     </td>
@@ -304,7 +304,7 @@ export default function Customers() {
                           "text-sm font-black",
                           customer.outstandingBalance > 0 ? "text-danger" : "text-success"
                         )}>
-                          ₹{customer.outstandingBalance.toLocaleString()}
+                          {formatCurrency(customer.outstandingBalance)}
                         </span>
                         <span className="text-[8px] font-black opacity-40 uppercase">Dues</span>
                       </div>
@@ -374,7 +374,7 @@ export default function Customers() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 bg-background/50 rounded-xl border border-border/50">
                   <span className="text-[8px] font-black text-text/30 uppercase block mb-1">Total Spent</span>
-                  <span className="text-sm font-black text-text">₹{customer.totalPurchases.toLocaleString()}</span>
+                  <span className="text-sm font-black text-text">{formatCurrency(customer.totalPurchases)}</span>
                 </div>
                 <div className={cn(
                   "p-3 rounded-xl border",
@@ -385,7 +385,7 @@ export default function Customers() {
                     "text-sm font-black",
                     customer.outstandingBalance > 0 ? "text-danger" : "text-success"
                   )}>
-                    ₹{customer.outstandingBalance.toLocaleString()}
+                    {formatCurrency(customer.outstandingBalance)}
                   </span>
                 </div>
               </div>

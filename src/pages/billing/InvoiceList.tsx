@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
+import { formatCurrency } from '../../utils/currency';
 import { useNavigate } from 'react-router-dom';
 import { invoiceService } from '../../services/invoiceService';
 import { PageTransition } from '../../components/common/PageTransition';
@@ -75,34 +76,41 @@ export default function InvoiceList() {
 
   // Fetch customers for phone lookup
   useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, 'customers'), where('userId', '==', user.uid));
+    if (!user?.tenantId) return;
+    const q = query(collection(db, 'customers'), where('tenantId', '==', user.tenantId));
     const unsub = onSnapshot(q, (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'customers'));
     return () => unsub();
-  }, [user]);
+  }, [user?.tenantId]);
 
   // Real-time stats listener
   useEffect(() => {
-    if (!user) return;
-    const qStats = query(collection(db, 'invoices'), where('userId', '==', user.uid));
+    if (!user?.tenantId) return;
+    const qStats = query(collection(db, 'invoices'), where('tenantId', '==', user.tenantId));
     const unsubStats = onSnapshot(qStats, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Invoice));
       setAllInvoicesForStats(items);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'invoices'));
     return () => unsubStats();
-  }, [user]);
+  }, [user?.tenantId]);
 
   // Main data listener with filters and pagination
   useEffect(() => {
     if (!user) return;
+
+    if (!user.tenantId) {
+      console.warn('InvoiceList: No tenantId found for user');
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     
     // We'll use the service for paginated results
     const fetchInvoices = async () => {
       try {
-        const result = await invoiceService.getInvoicesPaginated(500); // For now keeping it simple with filters
+        const result = await invoiceService.getInvoicesPaginated(user.tenantId!, 500); // For now keeping it simple with filters
         if (result) {
           setInvoices(result.invoices);
         }
@@ -171,10 +179,10 @@ export default function InvoiceList() {
   const totalPages = Math.ceil(filteredInvoices.length / PAGE_SIZE);
 
   const handleDelete = async () => {
-    if (!invoiceToDelete) return;
+    if (!invoiceToDelete || !user?.tenantId) return;
     setIsDeleting(true);
     try {
-      await invoiceService.deleteInvoice(invoiceToDelete.id);
+      await invoiceService.deleteInvoice(user.tenantId, invoiceToDelete.id);
       showToast(`Invoice ${invoiceToDelete.invoiceNumber} deleted and stock reverted.`, 'success');
       setInvoiceToDelete(null);
     } catch (error: any) {
@@ -240,7 +248,7 @@ export default function InvoiceList() {
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Total Revenue</span>
-            <span className="text-3xl font-black text-text">₹{stats.revenue.toLocaleString()}</span>
+            <span className="text-3xl font-black text-text">{formatCurrency(stats.revenue)}</span>
             <div className="flex items-center gap-2 mt-2">
               <Badge variant="success" className="text-[8px] py-0">REAL-TIME</Badge>
             </div>
@@ -275,7 +283,7 @@ export default function InvoiceList() {
           </div>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Outstanding</span>
-            <span className="text-3xl font-black text-danger">₹{stats.dueAmount.toLocaleString()}</span>
+            <span className="text-3xl font-black text-danger">{formatCurrency(stats.dueAmount)}</span>
             <span className="text-[10px] font-bold text-danger/40 uppercase mt-2">Total credit value</span>
           </div>
         </Card>
@@ -406,7 +414,7 @@ export default function InvoiceList() {
                     </td>
                     <td className="px-6 py-5 text-center">
                       <div className="flex flex-col">
-                        <span className="text-sm font-black text-text">₹{invoice.grandTotal.toLocaleString()}</span>
+                        <span className="text-sm font-black text-text">{formatCurrency(invoice.grandTotal)}</span>
                         <span className="text-[8px] font-black text-text/30 uppercase">{invoice.paymentMethod}</span>
                       </div>
                     </td>
@@ -477,7 +485,7 @@ export default function InvoiceList() {
                 </div>
                 <div className="flex flex-col items-end">
                   <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Grand Total</span>
-                  <span className="text-lg font-black text-primary">₹{invoice.grandTotal.toLocaleString()}</span>
+                  <span className="text-lg font-black text-primary">{formatCurrency(invoice.grandTotal)}</span>
                 </div>
               </div>
 

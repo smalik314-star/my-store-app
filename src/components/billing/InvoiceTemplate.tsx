@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
+import { formatCurrency } from '../../utils/currency';
 
 interface InvoiceTemplateProps {
   invoice: Invoice;
@@ -21,7 +22,6 @@ interface InvoiceTemplateProps {
 
 export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(({ invoice, customer, className, variant = 'a4' }, ref) => {
   const { settings } = useSettings();
-  const currency = settings?.currency || '₹';
 
   if (variant === 'thermal') {
     return (
@@ -66,7 +66,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <div key={idx} className="flex justify-between py-0.5">
               <span className="w-1/2 truncate">{item.name}</span>
               <span className="w-1/6 text-center">{item.quantity}</span>
-              <span className="w-1/3 text-right">{currency}{item.total.toLocaleString()}</span>
+              <span className="w-1/3 text-right">{formatCurrency(item.total)}</span>
             </div>
           ))}
         </div>
@@ -74,23 +74,23 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         <div className="border-t border-dashed border-black pt-2 space-y-1">
           <div className="flex justify-between">
             <span>Subtotal:</span>
-            <span>{currency}{invoice.subtotal.toLocaleString()}</span>
+            <span>{formatCurrency(invoice.subtotal)}</span>
           </div>
           {settings?.taxMode && (
             <div className="flex justify-between">
               <span>GST:</span>
-              <span>{currency}{invoice.gstTotal.toLocaleString()}</span>
+              <span>{formatCurrency(invoice.gstTotal)}</span>
             </div>
           )}
           {invoice.discount > 0 && (
             <div className="flex justify-between">
               <span>Discount:</span>
-              <span>-{currency}{invoice.discount.toLocaleString()}</span>
+              <span>-{formatCurrency(invoice.discount)}</span>
             </div>
           )}
           <div className="flex justify-between text-base font-bold pt-2 border-t border-black">
             <span>TOTAL:</span>
-            <span>{currency}{invoice.grandTotal.toLocaleString()}</span>
+            <span>{formatCurrency(invoice.grandTotal)}</span>
           </div>
         </div>
 
@@ -215,10 +215,10 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                   <span className="text-sm font-black text-text">{item.quantity}</span>
                 </td>
                 <td className="px-6 py-6 text-right">
-                  <span className="text-sm font-bold text-text/60">{currency}{item.price.toLocaleString()}</span>
+                  <span className="text-sm font-bold text-text/60">{formatCurrency(item.price)}</span>
                 </td>
                 <td className="px-10 py-6 text-right">
-                  <span className="text-sm font-black text-text">{currency}{(item.price * item.quantity).toLocaleString()}</span>
+                  <span className="text-sm font-black text-text">{formatCurrency(item.price * item.quantity)}</span>
                 </td>
               </tr>
             ))}
@@ -244,34 +244,34 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         <div className="w-full md:w-80 space-y-4">
           <div className="flex justify-between items-center text-sm font-bold text-text/60">
             <span className="uppercase tracking-widest text-[10px]">Subtotal</span>
-            <span>{currency}{invoice.subtotal.toLocaleString()}</span>
+            <span>{formatCurrency(invoice.subtotal)}</span>
           </div>
           {settings?.taxMode && (
             <>
               <div className="flex justify-between items-center text-sm font-bold text-text/60">
                 <span className="uppercase tracking-widest text-[10px]">CGST ({settings.cgstRate}%)</span>
-                <span>{currency}{(invoice.gstTotal / 2).toLocaleString()}</span>
+                <span>{formatCurrency(invoice.gstTotal / 2)}</span>
               </div>
               <div className="flex justify-between items-center text-sm font-bold text-text/60">
                 <span className="uppercase tracking-widest text-[10px]">SGST ({settings.sgstRate}%)</span>
-                <span>{currency}{(invoice.gstTotal / 2).toLocaleString()}</span>
+                <span>{formatCurrency(invoice.gstTotal / 2)}</span>
               </div>
               <div className="flex justify-between items-center text-sm font-black text-primary">
                 <span className="uppercase tracking-widest text-[10px]">Total GST</span>
-                <span>{currency}{invoice.gstTotal.toLocaleString()}</span>
+                <span>{formatCurrency(invoice.gstTotal)}</span>
               </div>
             </>
           )}
           {invoice.discount > 0 && (
             <div className="flex justify-between items-center text-sm font-black text-danger">
               <span className="uppercase tracking-widest text-[10px]">Discount</span>
-              <span>- {currency}{invoice.discount.toLocaleString()}</span>
+              <span>- {formatCurrency(invoice.discount)}</span>
             </div>
           )}
           <div className="h-px bg-border my-4" />
           <div className="flex justify-between items-center">
             <span className="text-lg font-black text-text uppercase tracking-tighter">Total Payable</span>
-            <span className="text-3xl font-black text-primary tracking-tighter">{currency}{invoice.grandTotal.toLocaleString()}</span>
+            <span className="text-3xl font-black text-primary tracking-tighter">{formatCurrency(invoice.grandTotal)}</span>
           </div>
           
           <div className="pt-8">

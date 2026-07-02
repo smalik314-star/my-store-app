@@ -3,6 +3,7 @@ import { ReceiptText, ExternalLink } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Invoice } from '../../types';
 import { cn } from '../../utils/cn';
+import { formatCurrency } from '../../utils/currency';
 
 interface RecentInvoicesProps {
   invoices: Invoice[];
@@ -86,7 +87,7 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="text-sm font-black text-text">₹{inv.grandTotal.toLocaleString()}</span>
+                    <span className="text-sm font-black text-text">{formatCurrency(inv.grandTotal)}</span>
                   </td>
                   <td className="px-6 py-4">
                     <span className={cn(

@@ -2,6 +2,7 @@ import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firest
 import { db, auth } from '../firebase/config';
 import { User as FirebaseUser } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { tenantService } from './tenantService';
 
 export const userService = {
   async createUserIfNotExists(user: FirebaseUser) {
@@ -12,23 +13,42 @@ export const userService = {
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
+        // Check for pending invites
+        // (Skipping for now for simplicity, assume new users create new tenants)
+        
+        const tenant = await tenantService.createTenant(user.uid, `${user.displayName || 'My'}'s Pharmacy`);
+
         const userData = {
           uid: user.uid,
           displayName: user.displayName || 'User',
           email: user.email,
           photoURL: user.photoURL || '',
           role: 'owner',
+          tenantId: tenant.id,
           status: 'active',
           createdAt: serverTimestamp(),
           lastLogin: serverTimestamp(),
         };
         await setDoc(userRef, userData);
-        return { role: 'owner' };
+        return userData;
       } else {
+        const existingData = userSnap.data();
+        
+        // Migration: If user exists but has no tenantId, create one
+        if (!existingData.tenantId) {
+          const tenant = await tenantService.createTenant(user.uid, `${existingData.displayName || 'My'}'s Pharmacy`);
+          await updateDoc(userRef, {
+            tenantId: tenant.id,
+            role: 'owner',
+            lastLogin: serverTimestamp(),
+          });
+          return { ...existingData, tenantId: tenant.id, role: 'owner' };
+        }
+
         await updateDoc(userRef, {
           lastLogin: serverTimestamp(),
         });
-        return userSnap.data();
+        return existingData;
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);

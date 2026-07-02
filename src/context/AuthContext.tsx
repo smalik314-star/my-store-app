@@ -8,7 +8,7 @@ import {
   getRedirectResult
 } from 'firebase/auth';
 import { auth, isConfigValid } from '../firebase/config';
-import { User, AuthContextType } from '../types';
+import { User, AuthContextType, UserRole } from '../types';
 import { userService } from '../services/userService';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,7 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: 'admin@pharmaflow.com',
           displayName: 'Admin User',
           photoURL: null,
-          role: 'admin',
+          role: 'owner',
+          tenantId: 'simulated-tenant',
         });
       } else {
         setUser(null);
@@ -41,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          // Sync with Firestore and get role
+          // Sync with Firestore and get role and tenantId
           const userData = await userService.createUserIfNotExists(firebaseUser);
           
           setUser({
@@ -49,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: firebaseUser.email,
             displayName: firebaseUser.displayName,
             photoURL: firebaseUser.photoURL,
-            role: (userData?.role as 'admin' | 'staff' | 'owner') || 'staff',
+            role: (userData?.role as UserRole) || 'staff',
+            tenantId: userData?.tenantId,
           });
         } catch (error) {
           console.error('Error syncing user with Firestore:', error);
@@ -60,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             displayName: firebaseUser.displayName || 'Test User',
             photoURL: firebaseUser.photoURL,
             role: 'owner',
+            tenantId: 'simulated-tenant',
           });
         }
       } else if (simulationMode) {
@@ -68,7 +71,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: 'admin@pharmaflow.com',
           displayName: 'Admin User',
           photoURL: null,
-          role: 'admin',
+          role: 'owner',
+          tenantId: 'simulated-tenant',
         });
       } else {
         setUser(null);

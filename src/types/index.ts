@@ -1,13 +1,49 @@
+export type UserRole = 'owner' | 'admin' | 'staff' | 'viewer';
+
 export interface User {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  role: 'admin' | 'staff' | 'owner';
+  role: UserRole;
+  tenantId?: string;
+}
+
+export type SubscriptionPlan = 'free' | 'pro' | 'business';
+
+export interface Tenant {
+  id: string;
+  name: string;
+  ownerId: string;
+  plan: SubscriptionPlan;
+  status: 'active' | 'cancelled' | 'past_due';
+  subscriptionId?: string;
+  customerId?: string; // Payment gateway customer ID
+  usage: {
+    invoicesCount: number;
+    productsCount: number;
+    usersCount: number;
+  };
+  limits: {
+    maxInvoices: number;
+    maxProducts: number;
+    maxUsers: number;
+  };
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface TenantUser {
+  uid: string;
+  tenantId: string;
+  role: UserRole;
+  email: string;
+  addedAt: any;
 }
 
 export interface Product {
   id: string;
+  tenantId: string;
   name: string;
   genericName?: string;
   brand?: string;
@@ -33,6 +69,7 @@ export interface Product {
 
 export interface Customer {
   id: string;
+  tenantId: string;
   name: string;
   phone: string;
   email?: string;
@@ -57,6 +94,7 @@ export interface InvoiceItem {
 
 export interface Invoice {
   id: string;
+  tenantId: string;
   invoiceNumber: string;
   customerId: string;
   customerName: string;

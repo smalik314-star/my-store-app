@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { Card } from '../common/Card';
 import { Invoice, Product } from '../../types';
+import { formatCurrency } from '../../utils/currency';
 
 interface DashboardChartsProps {
   invoices: Invoice[];
@@ -81,7 +82,7 @@ export function DashboardCharts({ invoices, products, loading }: DashboardCharts
                 axisLine={false} 
                 tickLine={false} 
                 tick={{ fontSize: 11, fontWeight: 600, fill: '#94A3B8' }}
-                tickFormatter={(value) => `$${value}`}
+                tickFormatter={(value) => formatCurrency(value)}
               />
               <Tooltip 
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}

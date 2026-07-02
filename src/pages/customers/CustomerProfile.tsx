@@ -23,9 +23,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
+import { formatCurrency } from '../../utils/currency';
 import CustomerForm from '../../components/customers/CustomerForm';
+import { useAuth } from '../../context/AuthContext';
 
 export default function CustomerProfile() {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -34,12 +37,17 @@ export default function CustomerProfile() {
   const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !user?.tenantId) return;
 
     // Fetch Customer
-    const unsubCustomer = onSnapshot(doc(db, 'customers', id), (doc) => {
-      if (doc.exists()) {
-        setCustomer({ ...doc.data(), id: doc.id } as Customer);
+    const unsubCustomer = onSnapshot(doc(db, 'customers', id), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.tenantId === user.tenantId) {
+          setCustomer({ ...data, id: docSnap.id } as Customer);
+        } else {
+          navigate('/customers');
+        }
       }
       setLoading(false);
     });
@@ -47,6 +55,7 @@ export default function CustomerProfile() {
     // Fetch Purchase History (Invoices)
     const q = query(
       collection(db, 'invoices'), 
+      where('tenantId', '==', user.tenantId),
       where('customerId', '==', id),
       orderBy('createdAt', 'desc')
     );
@@ -221,7 +230,7 @@ export default function CustomerProfile() {
                 <Badge variant="neutral" className="text-[8px] font-black">LIFETIME</Badge>
               </div>
               <span className="text-[10px] font-black text-text/40 uppercase tracking-widest block mb-1">Total Purchases</span>
-              <span className="text-2xl font-black text-text">₹{stats?.totalPurchases.toLocaleString()}</span>
+              <span className="text-2xl font-black text-text">{formatCurrency(stats?.totalPurchases || 0)}</span>
             </Card>
 
             <Card className="p-6 border-success/20 bg-success/5">
@@ -230,7 +239,7 @@ export default function CustomerProfile() {
                 <Badge variant="success" className="text-[8px] font-black">PAID</Badge>
               </div>
               <span className="text-[10px] font-black text-success/40 uppercase tracking-widest block mb-1">Total Paid</span>
-              <span className="text-2xl font-black text-success">₹{stats?.totalPaid.toLocaleString()}</span>
+              <span className="text-2xl font-black text-success">{formatCurrency(stats?.totalPaid || 0)}</span>
             </Card>
 
             <Card className={cn(
@@ -246,7 +255,7 @@ export default function CustomerProfile() {
                 "text-2xl font-black",
                 (stats?.outstanding || 0) > 0 ? "text-warning" : "text-text"
               )}>
-                ₹{stats?.outstanding.toLocaleString()}
+                {formatCurrency(stats?.outstanding || 0)}
               </span>
             </Card>
           </div>
@@ -298,7 +307,7 @@ export default function CustomerProfile() {
                         </div>
                       </td>
                       <td className="px-6 py-5 text-center">
-                        <span className="text-sm font-black text-text">₹{invoice.grandTotal.toLocaleString()}</span>
+                        <span className="text-sm font-black text-text">{formatCurrency(invoice.grandTotal)}</span>
                       </td>
                       <td className="px-6 py-5">
                         <Badge 

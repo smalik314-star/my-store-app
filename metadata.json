@@ -1,6 +1,6 @@
 {
   "name": "PharmaFlow",
-  "description": "A premium Pharmacy Billing & Inventory Management System with real-time sync and professional design.",
+  "description": "A full-featured Pharmacy SaaS ERP with multi-tenancy, subscription billing, AI inventory intelligence, and professional design.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

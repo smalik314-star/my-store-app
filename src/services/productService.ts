@@ -13,10 +13,11 @@ import {
   limit,
   startAfter,
   QueryConstraint,
-  getDoc
+  getDoc,
+  increment
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { Product } from '../types';
+import { Product, Tenant } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 const COLLECTION_NAME = 'products';
@@ -35,26 +36,35 @@ const sanitizeProduct = (data: any) => {
 };
 
 export const productService = {
-  async addProduct(productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async addProduct(tenantId: string, productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'>) {
+    if (!tenantId) throw new Error('Tenant ID required');
     const sanitized = sanitizeProduct(productData);
 
     try {
-      // Check SKU uniqueness for this user
+      // Check Limits
+      const tenantRef = doc(db, 'tenants', tenantId);
+      const tenantDoc = await getDoc(tenantRef);
+      if (tenantDoc.exists()) {
+        const tenant = tenantDoc.data() as Tenant;
+        if (tenant.usage.productsCount >= tenant.limits.maxProducts) {
+          throw new Error('Product limit reached. Please upgrade your plan.');
+        }
+      }
+
+      // Check SKU uniqueness for this tenant
       const skuQuery = query(
         collection(db, COLLECTION_NAME), 
-        where('userId', '==', uid),
+        where('tenantId', '==', tenantId),
         where('sku', '==', sanitized.sku)
       );
       const skuSnap = await getDocs(skuQuery);
       if (!skuSnap.empty) throw new Error('SKU already exists');
 
-      // Check Barcode uniqueness for this user
+      // Check Barcode uniqueness for this tenant
       if (sanitized.barcode) {
         const barcodeQuery = query(
           collection(db, COLLECTION_NAME), 
-          where('userId', '==', uid),
+          where('tenantId', '==', tenantId),
           where('barcode', '==', sanitized.barcode)
         );
         const barcodeSnap = await getDocs(barcodeQuery);
@@ -64,27 +74,34 @@ export const productService = {
       if (sanitized.stockQuantity < 0) throw new Error('Stock quantity cannot be negative');
       if (sanitized.purchasePrice < 0) throw new Error('Purchase price cannot be negative');
 
-      return await addDoc(collection(db, COLLECTION_NAME), {
+      const docRef = await addDoc(collection(db, COLLECTION_NAME), {
         ...sanitized,
-        userId: uid,
+        tenantId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // Update usage
+      await updateDoc(tenantRef, {
+        'usage.productsCount': increment(1),
+        updatedAt: serverTimestamp()
+      });
+
+      return docRef;
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, COLLECTION_NAME);
     }
   },
 
-  async updateProduct(id: string, productData: Partial<Product>) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async updateProduct(tenantId: string, id: string, productData: Partial<Product>) {
+    if (!tenantId) throw new Error('Tenant ID required');
     const sanitized = sanitizeProduct(productData);
 
     try {
       // Verify ownership first
       const productRef = doc(db, COLLECTION_NAME, id);
       const currentDoc = await getDoc(productRef);
-      if (!currentDoc.exists() || currentDoc.data().userId !== uid) {
+      if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or product not found');
       }
 
@@ -94,7 +111,7 @@ export const productService = {
       if (sanitized.sku) {
         const skuQuery = query(
           collection(db, COLLECTION_NAME), 
-          where('userId', '==', uid),
+          where('tenantId', '==', tenantId),
           where('sku', '==', sanitized.sku)
         );
         const skuSnap = await getDocs(skuQuery);
@@ -110,31 +127,38 @@ export const productService = {
     }
   },
 
-  async deleteProduct(id: string) {
-    if (!auth.currentUser) throw new Error('User not authenticated');
-    const uid = auth.currentUser.uid;
+  async deleteProduct(tenantId: string, id: string) {
+    if (!tenantId) throw new Error('Tenant ID required');
 
     try {
       const productRef = doc(db, COLLECTION_NAME, id);
       const currentDoc = await getDoc(productRef);
-      if (!currentDoc.exists() || currentDoc.data().userId !== uid) {
+      if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or product not found');
       }
 
-      return await deleteDoc(productRef);
+      await deleteDoc(productRef);
+
+      // Update usage
+      const tenantRef = doc(db, 'tenants', tenantId);
+      await updateDoc(tenantRef, {
+        'usage.productsCount': increment(-1),
+        updatedAt: serverTimestamp()
+      });
+
+      return true;
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${COLLECTION_NAME}/${id}`);
     }
   },
 
-  async getProductsPaginated(pageSize: number = 15, lastVisibleDoc: any = null) {
-    if (!auth.currentUser) return null;
-    const uid = auth.currentUser.uid;
+  async getProductsPaginated(tenantId: string, pageSize: number = 15, lastVisibleDoc: any = null) {
+    if (!tenantId) return null;
 
     try {
       let q = query(
         collection(db, COLLECTION_NAME),
-        where('userId', '==', uid),
+        where('tenantId', '==', tenantId),
         orderBy('name', 'asc'),
         limit(pageSize)
       );
@@ -155,14 +179,14 @@ export const productService = {
   },
 
   subscribeToProducts(
-    userId: string,
+    tenantId: string,
     callback: (products: Product[]) => void, 
     filters: { category?: string, searchQuery?: string, stockStatus?: string } = {}
   ) {
-    // Note: To avoid composite index requirements in dev, we only filter by userId on the server.
-    // All other filters (category, stockStatus) and sorting (name) are done client-side.
+    if (!tenantId) return () => {};
+    
     let constraints: QueryConstraint[] = [
-      where('userId', '==', userId)
+      where('tenantId', '==', tenantId)
     ];
     
     return onSnapshot(query(collection(db, COLLECTION_NAME), ...constraints), (snapshot) => {
