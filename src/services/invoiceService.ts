@@ -25,6 +25,7 @@ const COLLECTION_NAME = 'invoices';
 export const invoiceService = {
   async generateInvoiceNumber(tenantId: string, prefix: string = 'INV'): Promise<string> {
     if (!tenantId) throw new Error('Tenant ID required');
+
     const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
     const year = new Date().getFullYear();
     
@@ -51,7 +52,7 @@ export const invoiceService = {
     }
   },
 
-  async saveInvoice(tenantId: string, invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt'>) {
+  async saveInvoice(tenantId: string, invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'>) {
     if (!tenantId) throw new Error('Tenant ID required');
 
     try {

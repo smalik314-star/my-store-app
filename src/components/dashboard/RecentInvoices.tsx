@@ -4,6 +4,7 @@ import { Card } from '../common/Card';
 import { Invoice } from '../../types';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
+import { toJsDate } from '../../utils/date';
 
 interface RecentInvoicesProps {
   invoices: Invoice[];
@@ -83,7 +84,7 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-text/60 font-medium">
-                      {inv.createdAt?.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {toJsDate(inv.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   </td>
                   <td className="px-6 py-4">

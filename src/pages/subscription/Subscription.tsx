@@ -94,7 +94,7 @@ export default function Subscription() {
       setTenant(updatedTenant);
       showToast(`Successfully upgraded to ${planId.toUpperCase()} plan!`, 'success');
     } catch (error) {
-      showToast('Upgrade failed. Please try again.', 'error');
+      showToast('Upgrade failed. Please try again.', 'danger');
     } finally {
       setUpgradingPlan(null);
     }

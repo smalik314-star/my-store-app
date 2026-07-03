@@ -16,6 +16,7 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { useToast } from '../../context/ToastContext';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import { InventoryIntelligence } from '../../components/inventory/InventoryIntelligence';
+import { toJsDate } from '../../utils/date';
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -102,7 +103,7 @@ export default function Inventory() {
 
           filtered = filtered.filter(p => {
             if (!p.expiryDate) return false;
-            const expiry = p.expiryDate.toDate();
+            const expiry = toJsDate(p.expiryDate);
             if (selectedExpiryStatus === 'expired') return expiry < now;
             if (selectedExpiryStatus === 'soon') return expiry >= now && expiry <= soonThreshold;
             if (selectedExpiryStatus === 'safe') return expiry > soonThreshold;
@@ -134,7 +135,7 @@ export default function Inventory() {
     if (products.length > 0 && user?.tenantId) {
       const analyze = async () => {
         setIntelligenceLoading(true);
-        const result = await inventoryIntelligenceService.analyzeProducts(products);
+        const result = await inventoryIntelligenceService.analyzeProducts(products, user.tenantId);
         setIntelligence(result);
         setIntelligenceLoading(false);
       };
@@ -218,7 +219,7 @@ export default function Inventory() {
         p.category,
         p.stockQuantity,
         p.sellingPrice,
-        p.expiryDate?.toDate().toLocaleDateString(),
+        toJsDate(p.expiryDate).toLocaleDateString(),
         intel?.movement || 'N/A',
         intel?.status || 'N/A',
         intel?.dailySalesAvg.toFixed(2) || '0.00',

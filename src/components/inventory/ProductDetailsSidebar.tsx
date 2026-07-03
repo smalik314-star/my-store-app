@@ -6,6 +6,7 @@ import { Button } from '../common/Button';
 import { Card } from '../common/Card';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
+import { toJsDate } from '../../utils/date';
 
 interface ProductDetailsSidebarProps {
   product: Product | null;
@@ -26,7 +27,7 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
 
   const getExpiryStatus = (date: any) => {
     if (!date) return null;
-    const expiry = date.toDate();
+    const expiry = toJsDate(date);
     const now = new Date();
     const diff = expiry.getTime() - now.getTime();
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
@@ -187,7 +188,7 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
                 <h4 className="text-xs font-black uppercase text-text/40 tracking-widest ml-1">Inventory & Storage</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <InfoRow icon={Info} label="Batch Number" value={product.batchNumber} colorClass="text-warning" />
-                  <InfoRow icon={Calendar} label="Expiry Date" value={product.expiryDate?.toDate().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} colorClass="text-danger" />
+                  <InfoRow icon={Calendar} label="Expiry Date" value={toJsDate(product.expiryDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} colorClass="text-danger" />
                   <InfoRow icon={MapPin} label="Location" value={product.rackLocation || 'Not Assigned'} colorClass="text-success" />
                   <InfoRow icon={AlertTriangle} label="Min. Stock" value={`${product.minimumStock} Units`} colorClass="text-danger" />
                 </div>

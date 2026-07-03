@@ -24,6 +24,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { Toast } from '../../components/common/Toast';
+import { toJsDate } from '../../utils/date';
 
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
@@ -51,11 +52,11 @@ export default function ExpiryAlerts() {
 
   // Fetch products and classify in real-time
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) return;
     
     const q = query(
       collection(db, 'products'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -64,9 +65,7 @@ export default function ExpiryAlerts() {
 
       const items: ExpiryItem[] = snapshot.docs.map(doc => {
         const data = doc.data() as Product;
-        const expiryDate = data.expiryDate instanceof Timestamp 
-          ? data.expiryDate.toDate() 
-          : new Date(data.expiryDate);
+        const expiryDate = toJsDate(data.expiryDate);
         
         expiryDate.setHours(0, 0, 0, 0);
         
@@ -169,7 +168,7 @@ export default function ExpiryAlerts() {
       p.name,
       p.sku,
       p.batchNumber,
-      p.expiryDate.toDate().toLocaleDateString(),
+      toJsDate(p.expiryDate).toLocaleDateString(),
       p.daysLeft,
       p.status
     ]);
@@ -404,9 +403,7 @@ export default function ExpiryAlerts() {
                       <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4 text-text/20" />
                         <span className="font-bold text-sm">
-                          {product.expiryDate instanceof Timestamp 
-                            ? product.expiryDate.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                            : new Date(product.expiryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {toJsDate(product.expiryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </span>
                       </div>
                     </td>
@@ -479,9 +476,7 @@ export default function ExpiryAlerts() {
                 <div className="p-3 bg-background/50 rounded-xl">
                   <span className="text-[8px] font-black text-text/30 uppercase tracking-widest block mb-1">Expiry Date</span>
                   <span className="text-xs font-bold text-text">
-                    {product.expiryDate instanceof Timestamp 
-                      ? product.expiryDate.toDate().toLocaleDateString()
-                      : new Date(product.expiryDate).toLocaleDateString()}
+                    {toJsDate(product.expiryDate).toLocaleDateString()}
                   </span>
                 </div>
                 <div className={cn(

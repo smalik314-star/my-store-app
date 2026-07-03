@@ -34,6 +34,7 @@ const sanitizeCustomer = (data: any) => {
 export const customerService = {
   async getCustomers(tenantId: string) {
     if (!tenantId) return [];
+
     try {
       const q = query(collection(db, COLLECTION_NAME), where('tenantId', '==', tenantId));
       const snapshot = await getDocs(q);
@@ -49,6 +50,7 @@ export const customerService = {
 
   async getCustomersPaginated(tenantId: string, pageSize: number = 15, lastVisibleDoc: any = null) {
     if (!tenantId) return null;
+
     try {
       let q = query(
         collection(db, COLLECTION_NAME),

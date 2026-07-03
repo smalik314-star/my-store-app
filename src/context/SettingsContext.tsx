@@ -52,7 +52,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setSettings(snapshot.data() as StoreSettings);
       } else {
         // Initialize with defaults if not found for this new tenant
-        setSettings({ ...DEFAULT_SETTINGS, tenantId: user.tenantId });
+        setSettings({ ...DEFAULT_SETTINGS });
       }
       setLoading(false);
     }, (error) => {

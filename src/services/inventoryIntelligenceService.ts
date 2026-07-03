@@ -23,9 +23,8 @@ export interface ProductIntelligence {
 }
 
 export const inventoryIntelligenceService = {
-  async analyzeProducts(products: Product[]): Promise<Record<string, ProductIntelligence>> {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return {};
+  async analyzeProducts(products: Product[], tenantId?: string): Promise<Record<string, ProductIntelligence>> {
+    if (!tenantId) return {};
 
     // Fetch invoices from last 60 days to analyze movement
     const sixtyDaysAgo = new Date();
@@ -33,7 +32,7 @@ export const inventoryIntelligenceService = {
 
     const q = query(
       collection(db, 'invoices'),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('createdAt', '>=', Timestamp.fromDate(sixtyDaysAgo))
     );
 

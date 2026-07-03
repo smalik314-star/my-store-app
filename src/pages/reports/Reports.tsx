@@ -43,6 +43,7 @@ import {
 import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
+import { toJsDate } from '../../utils/date';
 import { useNavigate } from 'react-router-dom';
 import { PageTransition } from '../../components/common/PageTransition';
 import { SkeletonChart, SkeletonCard } from '../../components/common/Skeleton';
@@ -67,20 +68,23 @@ export default function Reports() {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
 
     const qInvoices = query(
       collection(db, 'invoices'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     const unsubInvoices = onSnapshot(qInvoices, (snapshot) => {
       try {
         const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Invoice));
         // Client-side sort: Recent first
         items.sort((a, b) => {
-          const dateA = typeof a.createdAt?.toDate === 'function' ? a.createdAt.toDate() : new Date(a.createdAt);
-          const dateB = typeof b.createdAt?.toDate === 'function' ? b.createdAt.toDate() : new Date(b.createdAt);
+          const dateA = toJsDate(a.createdAt);
+          const dateB = toJsDate(b.createdAt);
           return dateB.getTime() - dateA.getTime();
         });
         setInvoices(items);
@@ -93,7 +97,7 @@ export default function Reports() {
 
     const qProducts = query(
       collection(db, 'products'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     const unsubProducts = onSnapshot(qProducts, (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
@@ -101,7 +105,7 @@ export default function Reports() {
 
     const qCustomers = query(
       collection(db, 'customers'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
       setCustomers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer)));
@@ -116,7 +120,7 @@ export default function Reports() {
       unsubProducts();
       unsubCustomers();
     };
-  }, [user]);
+  }, [user?.tenantId]);
 
   const filteredInvoices = useMemo(() => {
     const now = new Date();
@@ -149,7 +153,7 @@ export default function Reports() {
     }
 
     return invoices.filter(inv => {
-      const date = inv.createdAt?.toDate();
+      const date = toJsDate(inv.createdAt);
       if (!date) return false;
       return isWithinInterval(date, { start, end });
     });
@@ -235,10 +239,10 @@ export default function Reports() {
     const dailyData: Record<string, { date: string; revenue: number; profit: number }> = {};
     
     // Sort filtered invoices by date to ensure continuity
-    const sorted = [...filteredInvoices].sort((a, b) => a.createdAt.toMillis() - b.createdAt.toMillis());
+    const sorted = [...filteredInvoices].sort((a, b) => toJsDate(a.createdAt).getTime() - toJsDate(b.createdAt).getTime());
     
     sorted.forEach(inv => {
-      const dateStr = format(inv.createdAt.toDate(), 'dd MMM');
+      const dateStr = format(toJsDate(inv.createdAt), 'dd MMM');
       if (!dailyData[dateStr]) {
         dailyData[dateStr] = { date: dateStr, revenue: 0, profit: 0 };
       }
@@ -274,7 +278,7 @@ export default function Reports() {
       });
       
       return [
-        format(inv.createdAt.toDate(), 'yyyy-MM-dd HH:mm'),
+        format(toJsDate(inv.createdAt), 'yyyy-MM-dd HH:mm'),
         inv.invoiceNumber,
         inv.customerName,
         inv.grandTotal,

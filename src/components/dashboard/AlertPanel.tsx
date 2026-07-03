@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { AlertCircle, Calendar, ChevronRight } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Product } from '../../types';
+import { toJsDate } from '../../utils/date';
 
 import { cn } from '../../utils/cn';
 
@@ -70,7 +71,7 @@ export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
                     "text-[10px] font-bold px-2 py-0.5 rounded-lg whitespace-nowrap",
                     isStock ? "bg-danger text-white" : "bg-warning text-white"
                   )}>
-                    {isStock ? `${item.stockQuantity} left` : item.expiryDate?.toDate().toLocaleDateString()}
+                    {isStock ? `${item.stockQuantity} left` : toJsDate(item.expiryDate).toLocaleDateString()}
                   </p>
                 </div>
                 <p className="text-[11px] text-text/60 mt-0.5 font-medium">

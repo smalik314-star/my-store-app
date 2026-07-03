@@ -52,11 +52,11 @@ export default function LowStock() {
 
   // Fetch products and classify in real-time
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) return;
     
     const q = query(
       collection(db, 'products'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {

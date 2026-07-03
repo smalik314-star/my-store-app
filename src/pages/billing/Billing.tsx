@@ -38,6 +38,7 @@ import { handleFirestoreError, OperationType } from '../../utils/firestore-error
 
 const WALK_IN_CUSTOMER: Customer = {
   id: 'walk-in',
+  tenantId: '',
   name: 'Walk-in Customer',
   phone: '0000000000',
   address: 'Counter Sale',
@@ -78,11 +79,11 @@ export default function Billing() {
 
   // Fetch initial data
   useEffect(() => {
-    if (!user) return;
+    if (!user?.tenantId) return;
 
     const qProducts = query(
       collection(db, 'products'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     const unsubProducts = onSnapshot(qProducts, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
@@ -91,7 +92,7 @@ export default function Billing() {
 
     const qCustomers = query(
       collection(db, 'customers'),
-      where('userId', '==', user.uid)
+      where('tenantId', '==', user.tenantId)
     );
     const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
@@ -112,7 +113,7 @@ export default function Billing() {
       try {
         const qRecentInvoices = query(
           collection(db, 'invoices'),
-          where('userId', '==', user.uid),
+          where('tenantId', '==', user.tenantId),
           orderBy('createdAt', 'desc'),
           limit(5)
         );

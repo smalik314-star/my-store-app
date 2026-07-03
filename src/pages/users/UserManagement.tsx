@@ -18,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { tenantService } from '../../services/tenantService';
 import { UserRole, TenantUser } from '../../types';
 import { useToast } from '../../context/ToastContext';
+import { toJsDate } from '../../utils/date';
 import { cn } from '../../utils/cn';
 
 export default function UserManagement() {
@@ -58,7 +59,7 @@ export default function UserManagement() {
       setShowInviteModal(false);
       setInviteEmail('');
     } catch (error) {
-      showToast('Failed to send invite', 'error');
+      showToast('Failed to send invite', 'danger');
     } finally {
       setInviting(false);
     }
@@ -113,7 +114,7 @@ export default function UserManagement() {
                     )}>{u.role}</span>
                   </div>
                   <p className="text-xs font-bold text-text/30 mt-1 uppercase tracking-widest">
-                    Joined {u.addedAt?.toDate ? u.addedAt.toDate().toLocaleDateString() : 'Recently'}
+                    Joined {u.addedAt ? toJsDate(u.addedAt).toLocaleDateString() : 'Recently'}
                   </p>
                 </div>
               </div>

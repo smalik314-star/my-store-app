@@ -13,6 +13,7 @@ import { Timestamp } from 'firebase/firestore';
 import { uploadProductImage } from '../../utils/storage';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
+import { toJsDate } from '../../utils/date';
 
 interface ProductFormProps {
   product?: Product;
@@ -51,7 +52,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     unit: product?.unit || UNITS[0],
     minimumStock: product?.minimumStock || 10,
     batchNumber: product?.batchNumber || '',
-    expiryDate: product?.expiryDate ? new Date(product.expiryDate.toDate()).toISOString().split('T')[0] : '',
+    expiryDate: product?.expiryDate ? toJsDate(product.expiryDate).toISOString().split('T')[0] : '',
     rackLocation: product?.rackLocation || '',
     description: product?.description || '',
     imageUrl: product?.imageUrl || '',

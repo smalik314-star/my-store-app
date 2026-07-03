@@ -7,7 +7,9 @@ import {
   limit, 
   Timestamp,
   startAt,
-  endAt
+  endAt,
+  doc,
+  getDoc
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { AIIntent, AIResponse, AIAction } from '../types/ai';
@@ -52,25 +54,32 @@ export const aiService = {
     }
 
     try {
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      const userData = userDoc.data();
+      const tenantId = userData?.tenantId;
+      if (!tenantId) {
+        return this.createFallbackResponse(queryText, 'Tenant configuration not found for your account.');
+      }
+
       switch (intent) {
         case 'REVENUE_TODAY':
-          return await this.getTodayRevenue(uid, queryText);
+          return await this.getTodayRevenue(tenantId, queryText);
         case 'REVENUE_MONTHLY':
-          return await this.getMonthlyRevenue(uid, queryText);
+          return await this.getMonthlyRevenue(tenantId, queryText);
         case 'LOW_STOCK':
-          return await this.getLowStock(uid, queryText);
+          return await this.getLowStock(tenantId, queryText);
         case 'OUT_OF_STOCK':
-          return await this.getOutOfStock(uid, queryText);
+          return await this.getOutOfStock(tenantId, queryText);
         case 'EXPIRY_ITEMS':
-          return await this.getExpiryItems(uid, queryText);
+          return await this.getExpiryItems(tenantId, queryText);
         case 'PENDING_DUES':
-          return await this.getPendingDues(uid, queryText);
+          return await this.getPendingDues(tenantId, queryText);
         case 'TOP_CUSTOMERS':
-          return await this.getTopCustomers(uid, queryText);
+          return await this.getTopCustomers(tenantId, queryText);
         case 'TOTAL_PROFIT':
-          return await this.getTotalProfit(uid, queryText);
+          return await this.getTotalProfit(tenantId, queryText);
         case 'PROFIT_7DAYS':
-          return await this.getProfit7Days(uid, queryText);
+          return await this.getProfit7Days(tenantId, queryText);
         default:
           return this.createFallbackResponse(queryText);
       }
@@ -96,13 +105,13 @@ export const aiService = {
   },
 
   // Revenue Queries
-  async getTodayRevenue(uid: string, queryText: string): Promise<AIResponse> {
+  async getTodayRevenue(tenantId: string, queryText: string): Promise<AIResponse> {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('createdAt', '>=', Timestamp.fromDate(startOfToday))
     );
     
@@ -122,14 +131,14 @@ export const aiService = {
     };
   },
 
-  async getMonthlyRevenue(uid: string, queryText: string): Promise<AIResponse> {
+  async getMonthlyRevenue(tenantId: string, queryText: string): Promise<AIResponse> {
     const firstDayOfMonth = new Date();
     firstDayOfMonth.setDate(1);
     firstDayOfMonth.setHours(0, 0, 0, 0);
     
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('createdAt', '>=', Timestamp.fromDate(firstDayOfMonth))
     );
     
@@ -150,10 +159,10 @@ export const aiService = {
   },
 
   // Inventory Queries
-  async getLowStock(uid: string, queryText: string): Promise<AIResponse> {
+  async getLowStock(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_PRODUCTS),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('stockQuantity', '<=', 10),
       where('stockQuantity', '>', 0)
     );
@@ -174,10 +183,10 @@ export const aiService = {
     };
   },
 
-  async getOutOfStock(uid: string, queryText: string): Promise<AIResponse> {
+  async getOutOfStock(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_PRODUCTS),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('stockQuantity', '==', 0)
     );
     
@@ -197,13 +206,13 @@ export const aiService = {
     };
   },
 
-  async getExpiryItems(uid: string, queryText: string): Promise<AIResponse> {
+  async getExpiryItems(tenantId: string, queryText: string): Promise<AIResponse> {
     const next30Days = new Date();
     next30Days.setDate(next30Days.getDate() + 30);
     
     const q = query(
       collection(db, COLLECTION_PRODUCTS),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('expiryDate', '<=', Timestamp.fromDate(next30Days))
     );
     
@@ -224,10 +233,10 @@ export const aiService = {
   },
 
   // Customer Queries
-  async getPendingDues(uid: string, queryText: string): Promise<AIResponse> {
+  async getPendingDues(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_CUSTOMERS),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('outstandingBalance', '>', 0),
       orderBy('outstandingBalance', 'desc'),
       limit(5)
@@ -249,10 +258,10 @@ export const aiService = {
     };
   },
 
-  async getTopCustomers(uid: string, queryText: string): Promise<AIResponse> {
+  async getTopCustomers(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_CUSTOMERS),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       orderBy('totalPurchases', 'desc'),
       limit(5)
     );
@@ -274,12 +283,12 @@ export const aiService = {
   },
 
   // Profit Queries
-  async getTotalProfit(uid: string, queryText: string): Promise<AIResponse> {
+  async getTotalProfit(tenantId: string, queryText: string): Promise<AIResponse> {
     // This requires calculating from invoices/products
     // For simplicity, we'll fetch invoices and sum grandTotal - estimatedCost
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('userId', '==', uid)
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
@@ -301,13 +310,13 @@ export const aiService = {
     };
   },
 
-  async getProfit7Days(uid: string, queryText: string): Promise<AIResponse> {
+  async getProfit7Days(tenantId: string, queryText: string): Promise<AIResponse> {
     const last7Days = new Date();
     last7Days.setDate(last7Days.getDate() - 7);
     
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('userId', '==', uid),
+      where('tenantId', '==', tenantId),
       where('createdAt', '>=', Timestamp.fromDate(last7Days))
     );
     

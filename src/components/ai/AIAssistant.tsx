@@ -29,7 +29,7 @@ const SUGGESTIONS = [
 ];
 
 export function AIAssistant() {
-  const { isOpen, close, ask, history, isLoading, clearHistory } = useAI();
+  const { isOpen, open, close, ask, history, isLoading, clearHistory } = useAI();
   const [query, setQuery] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -59,7 +59,7 @@ export function AIAssistant() {
       animate={{ scale: 1, opacity: 1 }}
       whileHover={{ scale: 1.1 }}
       whileTap={{ scale: 0.9 }}
-      onClick={() => useAI().open()}
+      onClick={open}
       className="fixed bottom-6 right-6 h-14 w-14 rounded-full bg-primary text-white shadow-2xl flex items-center justify-center z-50 group overflow-hidden"
     >
       <div className="absolute inset-0 bg-gradient-to-tr from-primary via-primary to-accent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />

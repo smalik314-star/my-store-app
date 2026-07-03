@@ -35,11 +35,6 @@ export default function Login() {
     }
   };
 
-  const handleDemoLogin = () => {
-    localStorage.setItem('pharmaflow_simulated_auth', 'true');
-    window.location.href = '/dashboard';
-  };
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 relative overflow-hidden">
       {/* Background decorative elements */}
@@ -85,23 +80,6 @@ export default function Login() {
               leftIcon={!loading && <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="h-5 w-5 mr-2" />}
             >
               {loading ? 'Signing in...' : 'Sign in with Google'}
-            </Button>
-
-            <div className="relative py-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border/50"></div>
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-background px-2 text-text/30 font-medium">OR CONTINUE WITH</span>
-              </div>
-            </div>
-
-            <Button
-              variant="outline"
-              onClick={handleDemoLogin}
-              className="w-full h-14 text-base font-semibold border-primary/20 hover:bg-primary/5 text-primary"
-            >
-              Try Demo Mode
             </Button>
           </div>
 

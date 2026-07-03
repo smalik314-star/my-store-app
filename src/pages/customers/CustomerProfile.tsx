@@ -24,6 +24,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
+import { toJsDate } from '../../utils/date';
 import CustomerForm from '../../components/customers/CustomerForm';
 import { useAuth } from '../../context/AuthContext';
 
@@ -81,7 +82,7 @@ export default function CustomerProfile() {
       totalPaid: customer.totalPaid,
       outstanding: customer.outstandingBalance,
       invoiceCount: invoices.length,
-      lastPurchase: invoices[0]?.createdAt?.toDate() || null
+      lastPurchase: invoices[0]?.createdAt ? toJsDate(invoices[0].createdAt) : null
     };
   }, [customer, invoices]);
 
@@ -127,7 +128,7 @@ export default function CustomerProfile() {
               )}
             </h1>
             <p className="text-[10px] font-black text-text/30 uppercase tracking-[0.2em] mt-1">
-              Registered on {customer.createdAt?.toDate().toLocaleDateString()}
+              Registered on {customer.createdAt ? toJsDate(customer.createdAt).toLocaleDateString() : 'N/A'}
             </p>
           </div>
         </div>
@@ -299,10 +300,10 @@ export default function CustomerProfile() {
                       <td className="px-6 py-5">
                         <div className="flex flex-col">
                           <span className="text-sm font-bold text-text/60">
-                            {invoice.createdAt?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            {toJsDate(invoice.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                           </span>
                           <span className="text-[8px] font-bold text-text/20 uppercase">
-                            {invoice.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {toJsDate(invoice.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                       </td>

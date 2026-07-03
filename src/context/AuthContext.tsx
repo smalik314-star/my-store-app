@@ -18,23 +18,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // In Module 1 foundation, we simulate a logged-in state if a flag is set
-    // to allow viewing the dashboard and layout.
-    const simulationMode = localStorage.getItem('pharmaflow_simulated_auth') === 'true';
-
     if (!isConfigValid || !auth) {
-      if (simulationMode) {
-        setUser({
-          uid: 'simulated-user',
-          email: 'admin@pharmaflow.com',
-          displayName: 'Admin User',
-          photoURL: null,
-          role: 'owner',
-          tenantId: 'simulated-tenant',
-        });
-      } else {
-        setUser(null);
-      }
+      setUser(null);
       setLoading(false);
       return;
     }
@@ -55,25 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
         } catch (error) {
           console.error('Error syncing user with Firestore:', error);
-          // Fallback for simulation/testing if Firestore isn't fully seeded yet
-          setUser({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName || 'Test User',
-            photoURL: firebaseUser.photoURL,
-            role: 'owner',
-            tenantId: 'simulated-tenant',
-          });
+          setUser(null);
         }
-      } else if (simulationMode) {
-        setUser({
-          uid: 'simulated-user',
-          email: 'admin@pharmaflow.com',
-          displayName: 'Admin User',
-          photoURL: null,
-          role: 'owner',
-          tenantId: 'simulated-tenant',
-        });
       } else {
         setUser(null);
       }
@@ -92,9 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async () => {
     if (!isConfigValid || !auth) {
-      // Simulated login for Module 1 fallback
-      localStorage.setItem('pharmaflow_simulated_auth', 'true');
-      window.location.href = '/dashboard';
+      console.error('Firebase Auth configuration is not valid.');
       return;
     }
 
@@ -109,7 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    localStorage.removeItem('pharmaflow_simulated_auth');
     if (auth) {
       await signOut(auth);
     }

@@ -7,6 +7,7 @@ import { ProductIntelligence } from '../../services/inventoryIntelligenceService
 import { cn } from '../../utils/cn';
 import { useState, useMemo } from 'react';
 import { formatCurrency } from '../../utils/currency';
+import { toJsDate } from '../../utils/date';
 
 interface ProductTableProps {
   products: Product[];
@@ -59,7 +60,7 @@ export function ProductTable({
 
   const getExpiryStatus = (date: any) => {
     if (!date) return null;
-    const expiry = date.toDate();
+    const expiry = toJsDate(date);
     const now = new Date();
     const diff = expiry.getTime() - now.getTime();
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
@@ -192,7 +193,7 @@ export function ProductTable({
                             expiryStatus.color
                           )}>
                             <Calendar className="h-3 w-3" />
-                            {product.expiryDate?.toDate().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                            {toJsDate(product.expiryDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
                           </span>
                         )}
                       </td>
@@ -291,7 +292,7 @@ export function ProductTable({
 
                 <div className="flex items-center justify-between pt-2 border-t border-border/50">
                   <span className="text-[10px] font-bold text-text/40 uppercase">
-                    Exp: {product.expiryDate?.toDate().toLocaleDateString()}
+                    Exp: {toJsDate(product.expiryDate).toLocaleDateString()}
                   </span>
                   <div className="flex items-center gap-2">
                     <button onClick={(e) => { e.stopPropagation(); onEdit(product); }} className="p-2 text-text/20 hover:text-info">

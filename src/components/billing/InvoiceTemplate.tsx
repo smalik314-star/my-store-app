@@ -12,6 +12,7 @@ import {
 import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
 import { formatCurrency } from '../../utils/currency';
+import { toJsDate } from '../../utils/date';
 
 interface InvoiceTemplateProps {
   invoice: Invoice;
@@ -45,7 +46,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
 
         <div className="flex justify-between mb-1">
           <span>Date:</span>
-          <span>{invoice.createdAt?.toDate().toLocaleDateString(settings?.dateFormat === 'DD/MM/YYYY' ? 'en-IN' : 'en-US')}</span>
+          <span>{toJsDate(invoice.createdAt).toLocaleDateString(settings?.dateFormat === 'DD/MM/YYYY' ? 'en-IN' : 'en-US')}</span>
         </div>
         <div className="flex justify-between mb-4">
           <span>Bill No:</span>
@@ -145,8 +146,8 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
           </div>
           <div className="space-y-1 text-xs font-bold text-text/60 text-right mt-4">
             <p className="uppercase text-[10px] text-text/30 font-black tracking-widest">Date of Issue</p>
-            <p>{invoice.createdAt?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-            <p>{invoice.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+            <p>{toJsDate(invoice.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+            <p>{toJsDate(invoice.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
           </div>
         </div>
       </div>

@@ -35,6 +35,7 @@ import { useToast } from '../../context/ToastContext';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import { useAuth } from '../../context/AuthContext';
+import { toJsDate } from '../../utils/date';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 const EmptyState = ({ title, description, icon, action, className }: any) => {
   return (
@@ -152,7 +153,7 @@ export default function InvoiceList() {
 
       let matchesDate = true;
       if (dateFilter !== 'ALL') {
-        const date = inv.createdAt?.toDate();
+        const date = toJsDate(inv.createdAt);
         if (!date) return false;
         const now = new Date();
         if (dateFilter === 'TODAY') {
@@ -405,10 +406,10 @@ export default function InvoiceList() {
                     <td className="px-6 py-5">
                       <div className="flex flex-col">
                         <span className="text-sm font-bold text-text/60">
-                          {invoice.createdAt?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {toJsDate(invoice.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </span>
                         <span className="text-[10px] font-bold text-text/20 uppercase">
-                          {invoice.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {toJsDate(invoice.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
                     </td>
@@ -491,7 +492,7 @@ export default function InvoiceList() {
 
               <div className="flex items-center justify-between pt-4 border-t border-border/50">
                 <span className="text-[10px] font-bold text-text/40">
-                  {invoice.createdAt?.toDate().toLocaleDateString()} at {invoice.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {toJsDate(invoice.createdAt).toLocaleDateString()} at {toJsDate(invoice.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
                 <div className="flex items-center gap-2">
                   <button 
