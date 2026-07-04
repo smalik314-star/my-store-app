@@ -23,6 +23,26 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
+    
+    // Check if it's a chunk/dynamic import loading error
+    const errorStr = error?.toString() || '';
+    const isChunkError = 
+      errorStr.includes('Failed to fetch dynamically imported module') ||
+      errorStr.includes('Loading chunk') ||
+      errorStr.includes('error loading chunk');
+      
+    if (isChunkError) {
+      const chunkErrorKey = 'last_chunk_error_reload';
+      const lastReload = sessionStorage.getItem(chunkErrorKey);
+      const now = Date.now();
+      
+      // Prevent infinite reloading loops by only reloading if we haven't in the last 10 seconds
+      if (!lastReload || now - parseInt(lastReload, 10) > 10000) {
+        sessionStorage.setItem(chunkErrorKey, String(now));
+        console.warn('Chunk loading/fetch error detected. Auto-reloading to fetch latest assets...');
+        window.location.reload();
+      }
+    }
   }
 
   private handleReset = () => {

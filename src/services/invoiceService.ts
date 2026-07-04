@@ -133,7 +133,7 @@ export const invoiceService = {
         transaction.set(logRef, {
           action: 'CREATE_INVOICE',
           targetId: invoiceRef.id,
-          userId: auth.currentUser?.uid,
+          userId: auth.currentUser?.uid || null,
           timestamp: serverTimestamp(),
         });
 
@@ -233,7 +233,7 @@ export const invoiceService = {
         transaction.set(logRef, {
           action: 'DELETE_INVOICE',
           targetId: invoiceId,
-          userId: auth.currentUser?.uid,
+          userId: auth.currentUser?.uid || null,
           timestamp: serverTimestamp(),
         });
 

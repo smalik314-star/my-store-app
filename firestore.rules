@@ -11,11 +11,11 @@ service cloud.firestore {
     }
 
     function isTenantUser(tenantId) {
-      return isAuthenticated() && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
+      return isAuthenticated() && getUserData().tenantId == tenantId;
     }
 
     function getRole(tenantId) {
-      return get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid)).data.role;
+      return getUserData().role;
     }
 
     // User profiles

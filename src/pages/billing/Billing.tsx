@@ -335,6 +335,7 @@ export default function Billing() {
         navigate(`/invoice/${invoiceId}`);
       }, 1000);
     } catch (error: any) {
+      console.error('Invoice saving failed:', error);
       showToast(error.message || 'Failed to save invoice', 'danger');
     } finally {
       setLoading(false);
