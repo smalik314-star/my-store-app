@@ -11,7 +11,7 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId,
   appId: import.meta.env.VITE_FIREBASE_APP_ID || appletConfig.appId,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || appletConfig.firestoreDatabaseId,
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || appletConfig.firestoreDatabaseId || 'ai-studio-pharmaflow-17500397-f099-4531-a8a4-a5ad18ba27d1',
 };
 
 // Check if config is valid before initializing
@@ -26,8 +26,9 @@ if (isConfigValid) {
   try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-    // Use specific database ID if provided, otherwise default
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    console.log('Firebase initialized successfully. Firestore Database ID:', dbId);
+    db = getFirestore(app, dbId);
     storage = getStorage(app);
   } catch (error) {
     console.error('Firebase initialization error:', error);

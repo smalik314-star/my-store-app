@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Tenant, SubscriptionPlan, UserRole } from '../types';
+import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 export const tenantService = {
   async createTenant(ownerId: string, storeName: string): Promise<Tenant> {
@@ -38,24 +39,36 @@ export const tenantService = {
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(tenantRef, tenantData);
-    
-    // Create TenantUser record
-    const tenantUserRef = doc(db, 'tenants', tenantId, 'users', ownerId);
-    await setDoc(tenantUserRef, {
-      uid: ownerId,
-      tenantId: tenantId,
-      role: 'owner',
-      addedAt: serverTimestamp(),
-    });
+    try {
+      await setDoc(tenantRef, tenantData);
+      
+      // Create TenantUser record
+      const tenantUserRef = doc(db, 'tenants', tenantId, 'users', ownerId);
+      await setDoc(tenantUserRef, {
+        uid: ownerId,
+        tenantId: tenantId,
+        role: 'owner',
+        addedAt: serverTimestamp(),
+      });
 
-    return tenantData;
+      return tenantData;
+    } catch (error) {
+      console.error('Error creating tenant:', error);
+      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}`);
+      throw error;
+    }
   },
 
   async getTenant(tenantId: string): Promise<Tenant | null> {
     const tenantRef = doc(db, 'tenants', tenantId);
-    const snap = await getDoc(tenantRef);
-    return snap.exists() ? (snap.data() as Tenant) : null;
+    try {
+      const snap = await getDoc(tenantRef);
+      return snap.exists() ? (snap.data() as Tenant) : null;
+    } catch (error) {
+      console.error('Error fetching tenant:', error);
+      handleFirestoreError(error, OperationType.GET, `tenants/${tenantId}`);
+      throw error;
+    }
   },
 
   async updateUsage(tenantId: string, field: 'invoicesCount' | 'productsCount' | 'usersCount', delta: number) {

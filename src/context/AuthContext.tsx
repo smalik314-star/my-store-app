@@ -4,8 +4,7 @@ import {
   User as FirebaseUser,
   signOut,
   GoogleAuthProvider,
-  signInWithRedirect,
-  getRedirectResult
+  signInWithPopup
 } from 'firebase/auth';
 import { auth, isConfigValid } from '../firebase/config';
 import { User, AuthContextType, UserRole } from '../types';
@@ -48,13 +47,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    // Handle redirect result
-    if (auth) {
-      getRedirectResult(auth).catch((error) => {
-        console.error('Redirect Sign-In Error:', error);
-      });
-    }
-
     return () => unsubscribe();
   }, []);
 
@@ -66,8 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const provider = new GoogleAuthProvider();
-      // Using redirect instead of popup for better iframe compatibility
-      await signInWithRedirect(auth, provider);
+      // Using popup instead of redirect to avoid iframe third-party cookie/redirect URI issues
+      await signInWithPopup(auth, provider);
     } catch (error) {
       console.error('Google Sign-In Error:', error);
       throw error;
