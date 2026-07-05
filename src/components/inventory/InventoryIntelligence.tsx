@@ -78,7 +78,7 @@ export function InventoryIntelligence({ intelligence, loading }: InventoryIntell
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card className="p-6 border-border flex items-center justify-between">
+        <Card className="p-6 border-border flex items-center justify-between select-none">
           <div className="flex items-center gap-4">
             <div className="h-12 w-12 rounded-2xl bg-info/10 flex items-center justify-center">
               <TrendingUp className="h-6 w-6 text-info" />
@@ -93,7 +93,7 @@ export function InventoryIntelligence({ intelligence, loading }: InventoryIntell
           </div>
         </Card>
 
-        <Card className="p-6 border-border flex items-center justify-between">
+        <Card className="p-6 border-border flex items-center justify-between select-none">
           <div className="flex items-center gap-4">
             <div className="h-12 w-12 rounded-2xl bg-accent/10 flex items-center justify-center">
               <BarChart3 className="h-6 w-6 text-accent" />

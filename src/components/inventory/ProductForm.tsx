@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, AlertCircle, Package, IndianRupee, Calendar, MapPin, 
@@ -9,11 +9,14 @@ import {
 import { Product } from '../../types';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import { uploadProductImage } from '../../utils/storage';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
+import { useAuth } from '../../context/AuthContext';
+import { brandService } from '../../services/brandService';
+import { db } from '../../firebase/config';
 
 interface ProductFormProps {
   product?: Product;
@@ -50,6 +53,186 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     description: product?.description || '',
     imageUrl: product?.imageUrl || '',
   });
+
+  const { user } = useAuth();
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [allBrands, setAllBrands] = useState<string[]>([]);
+  
+  // Custom inputs for productName and brandName
+  const [productNameInput, setProductNameInput] = useState(product?.name || '');
+  const [debouncedProductName, setDebouncedProductName] = useState(product?.name || '');
+  
+  const [brandNameInput, setBrandNameInput] = useState(product?.brand || '');
+  const [debouncedBrandName, setDebouncedBrandName] = useState(product?.brand || '');
+
+  const [productActiveIndex, setProductActiveIndex] = useState(-1);
+  const [brandActiveIndex, setBrandActiveIndex] = useState(-1);
+  const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const [showBrandDropdown, setShowBrandDropdown] = useState(false);
+
+  const [selectedSuggestionProduct, setSelectedSuggestionProduct] = useState<Product | null>(null);
+  const [showAutofillConfirm, setShowAutofillConfirm] = useState(false);
+
+  // Synchronize debounced values
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedProductName(productNameInput);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [productNameInput]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedBrandName(brandNameInput);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [brandNameInput]);
+
+  // Synchronize inputs with formData
+  useEffect(() => {
+    setFormData(prev => ({ ...prev, name: productNameInput }));
+  }, [productNameInput]);
+
+  useEffect(() => {
+    setFormData(prev => ({ ...prev, brand: brandNameInput }));
+  }, [brandNameInput]);
+
+  // Fetch products and brands on mount / tenantId change
+  useEffect(() => {
+    if (!user?.tenantId) return;
+
+    const loadData = async () => {
+      try {
+        const productsQuery = query(
+          collection(db, 'products'),
+          where('tenantId', '==', user.tenantId)
+        );
+        const productsSnap = await getDocs(productsQuery);
+        const productsList = productsSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Product[];
+        setAllProducts(productsList);
+
+        const brandsQuery = query(
+          collection(db, 'brands'),
+          where('tenantId', '==', user.tenantId)
+        );
+        const brandsSnap = await getDocs(brandsQuery);
+        const brandsList = brandsSnap.docs.map(doc => doc.data().name) as string[];
+
+        const productBrands = productsList
+          .map(p => p.brand)
+          .filter((b): b is string => !!b);
+        
+        const uniqueBrands = Array.from(new Set([...brandsList, ...productBrands]));
+        setAllBrands(uniqueBrands);
+      } catch (err) {
+        console.error('Error fetching autocomplete data:', err);
+      }
+    };
+
+    loadData();
+  }, [user?.tenantId]);
+
+  const handleSelectProductSuggestion = (selectedProd: Product) => {
+    setProductNameInput(selectedProd.name);
+    setSelectedSuggestionProduct(selectedProd);
+    setShowAutofillConfirm(true);
+  };
+
+  const applyAutofillMetadata = (selectedProd: Product) => {
+    setBrandNameInput(selectedProd.brand || '');
+    setFormData(prev => ({
+      ...prev,
+      genericName: selectedProd.genericName || '',
+      category: selectedProd.category || 'Others',
+      manufacturer: selectedProd.manufacturer || '',
+      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
+      unit: selectedProd.unit || 'Strip',
+      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
+    }));
+  };
+
+  const applyAutofillAll = (selectedProd: Product) => {
+    applyAutofillMetadata(selectedProd);
+    setFormData(prev => ({
+      ...prev,
+      batchNumber: selectedProd.batchNumber || '',
+      manufacturingDate: selectedProd.manufacturingDate ? toJsDate(selectedProd.manufacturingDate).toISOString().split('T')[0] : '',
+      expiryDate: selectedProd.expiryDate ? toJsDate(selectedProd.expiryDate).toISOString().split('T')[0] : '',
+      purchasePrice: selectedProd.purchasePrice || 0,
+      sellingPrice: selectedProd.sellingPrice || 0,
+      stockQuantity: selectedProd.stockQuantity || 0,
+      sku: selectedProd.sku || '',
+      barcode: selectedProd.barcode || '',
+      mrp: selectedProd.mrp || 0,
+      rackLocation: selectedProd.rackLocation || '',
+      description: selectedProd.description || '',
+    }));
+    if (selectedProd.imageUrl) {
+      setImagePreview(selectedProd.imageUrl);
+    }
+  };
+
+  const uniqueProductsSuggestions: Product[] = [];
+  const seenNames = new Set<string>();
+  for (const p of allProducts) {
+    const norm = p.name.trim().toLowerCase();
+    if (norm.includes(debouncedProductName.trim().toLowerCase()) && norm !== productNameInput.trim().toLowerCase()) {
+      if (!seenNames.has(norm)) {
+        seenNames.add(norm);
+        uniqueProductsSuggestions.push(p);
+      }
+    }
+  }
+
+  const brandSuggestions = debouncedBrandName.trim() === ''
+    ? []
+    : allBrands.filter(brandName => 
+        brandName.toLowerCase().includes(debouncedBrandName.toLowerCase()) &&
+        brandName.toLowerCase() !== brandNameInput.toLowerCase()
+      );
+
+  const handleProductKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showProductDropdown || uniqueProductsSuggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setProductActiveIndex(prev => (prev + 1) % uniqueProductsSuggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setProductActiveIndex(prev => (prev - 1 + uniqueProductsSuggestions.length) % uniqueProductsSuggestions.length);
+    } else if (e.key === 'Enter') {
+      if (productActiveIndex >= 0 && productActiveIndex < uniqueProductsSuggestions.length) {
+        e.preventDefault();
+        handleSelectProductSuggestion(uniqueProductsSuggestions[productActiveIndex]);
+        setShowProductDropdown(false);
+      }
+    } else if (e.key === 'Escape') {
+      setShowProductDropdown(false);
+    }
+  };
+
+  const handleBrandKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showBrandDropdown || brandSuggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setBrandActiveIndex(prev => (prev + 1) % brandSuggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setBrandActiveIndex(prev => (prev - 1 + brandSuggestions.length) % brandSuggestions.length);
+    } else if (e.key === 'Enter') {
+      if (brandActiveIndex >= 0 && brandActiveIndex < brandSuggestions.length) {
+        e.preventDefault();
+        setBrandNameInput(brandSuggestions[brandActiveIndex]);
+        setShowBrandDropdown(false);
+      }
+    } else if (e.key === 'Escape') {
+      setShowBrandDropdown(false);
+    }
+  };
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>(product?.imageUrl || '');
@@ -166,6 +349,11 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         imageUrl: imageUrl || '',
       };
 
+      // Auto-create brand only when saving a real product with a new brand name
+      if (user?.tenantId && formData.brand.trim()) {
+        await brandService.addBrandIfNotExists(user.tenantId, formData.brand.trim());
+      }
+
       await onSave(dataToSave);
       onClose();
     } catch (err: any) {
@@ -235,7 +423,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Product Name */}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 relative">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
                   Product Name *
                 </label>
@@ -243,17 +431,49 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                   <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
                   <input
                     name="name"
-                    value={formData.name}
-                    onChange={handleChange}
+                    value={productNameInput}
+                    onChange={(e) => {
+                      setProductNameInput(e.target.value);
+                      setShowProductDropdown(true);
+                      setProductActiveIndex(-1);
+                    }}
+                    onFocus={() => setShowProductDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowProductDropdown(false), 200)}
+                    onKeyDown={handleProductKeyDown}
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. Paracetamol 500mg"
+                    autoComplete="off"
                     required
                   />
                 </div>
+
+                {/* Suggestions Dropdown */}
+                {showProductDropdown && uniqueProductsSuggestions.length > 0 && (
+                  <ul className="absolute left-0 right-0 top-[100%] z-[100] mt-1 max-h-60 overflow-y-auto bg-surface border border-border rounded-xl shadow-lg divide-y divide-border/50">
+                    {uniqueProductsSuggestions.map((p, idx) => (
+                      <li
+                        key={p.id}
+                        className={cn(
+                          "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex flex-col gap-0.5",
+                          productActiveIndex === idx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
+                        )}
+                        onMouseDown={() => {
+                          handleSelectProductSuggestion(p);
+                          setShowProductDropdown(false);
+                        }}
+                      >
+                        <span className="font-bold text-text">{p.name}</span>
+                        {p.brand && (
+                          <span className="text-[10px] text-text/40 font-medium">Brand: {p.brand} | Category: {p.category}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
               {/* Brand Name */}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 relative">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
                   Brand Name *
                 </label>
@@ -261,13 +481,53 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                   <Tag className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
                   <input
                     name="brand"
-                    value={formData.brand}
-                    onChange={handleChange}
+                    value={brandNameInput}
+                    onChange={(e) => {
+                      setBrandNameInput(e.target.value);
+                      setShowBrandDropdown(true);
+                      setBrandActiveIndex(-1);
+                    }}
+                    onFocus={() => setShowBrandDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowBrandDropdown(false), 200)}
+                    onKeyDown={handleBrandKeyDown}
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. Calpol"
+                    autoComplete="off"
                     required
                   />
                 </div>
+
+                {/* Suggestions Dropdown */}
+                {showBrandDropdown && (
+                  <div className="absolute left-0 right-0 top-[100%] z-[100] mt-1 max-h-60 overflow-y-auto bg-surface border border-border rounded-xl shadow-lg">
+                    {brandSuggestions.length > 0 ? (
+                      <ul className="divide-y divide-border/50">
+                        {brandSuggestions.map((brandName, idx) => (
+                          <li
+                            key={brandName}
+                            className={cn(
+                              "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex items-center justify-between",
+                              brandActiveIndex === idx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
+                            )}
+                            onMouseDown={() => {
+                              setBrandNameInput(brandName);
+                              setShowBrandDropdown(false);
+                            }}
+                          >
+                            <span>{brandName}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      debouncedBrandName.trim() !== '' && (
+                        <div className="px-4 py-3 text-xs font-bold text-text/40 bg-background/50 flex flex-col gap-1 select-none">
+                          <span className="text-text/60">No matching brand found</span>
+                          <span className="text-[10px] text-primary/80 font-medium">Will be saved as new brand: "{debouncedBrandName}"</span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Batch Number */}
@@ -694,6 +954,65 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
             {product ? 'Save Changes' : 'Save Product'}
           </Button>
         </div>
+
+        {/* Autofill Confirmation Modal */}
+        <AnimatePresence>
+          {showAutofillConfirm && selectedSuggestionProduct && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-surface max-w-md w-full rounded-2xl p-6 shadow-2xl border border-border"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Info className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-text">Autofill Stock & Pricing?</h3>
+                    <p className="text-xs text-text/60 mt-1.5 leading-relaxed font-semibold">
+                      We found <span className="font-bold text-text">"{selectedSuggestionProduct.name}"</span> in your inventory.
+                      Would you like to copy all pricing details, batch information, dates, and stock quantity too, or only copy the basic product metadata?
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 mt-6">
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      applyAutofillAll(selectedSuggestionProduct);
+                      setShowAutofillConfirm(false);
+                    }}
+                    className="w-full text-xs font-bold py-2.5"
+                  >
+                    Yes, Copy Everything (Prices, Stock & Dates)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      applyAutofillMetadata(selectedSuggestionProduct);
+                      setShowAutofillConfirm(false);
+                    }}
+                    className="w-full text-xs font-bold py-2.5 border-border bg-background"
+                  >
+                    No, Basic Metadata Only (Brand, Category, GST % etc.)
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAutofillConfirm(false);
+                    }}
+                    className="text-xs font-semibold text-text/40 hover:text-text/70 mt-2 transition-colors py-1"
+                  >
+                    Cancel / Name Only
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   );

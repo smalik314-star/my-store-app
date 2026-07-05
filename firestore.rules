@@ -51,6 +51,14 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
     }
 
+    // Brands
+    match /brands/{brandId} {
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+    }
+
     // Customers
     match /customers/{customerId} {
       allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);

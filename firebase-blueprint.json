@@ -90,6 +90,17 @@
         "userId": { "type": "string" }
       },
       "required": ["storeName", "userId"]
+    },
+    "Brand": {
+      "title": "Brand",
+      "description": "Product brand reference",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "tenantId"]
     }
   },
   "firestore": {
@@ -100,6 +111,10 @@
     "/products/{productId}": {
       "schema": "Product",
       "description": "Inventory collection"
+    },
+    "/brands/{brandId}": {
+      "schema": "Brand",
+      "description": "Brands reference collection"
     },
     "/customers/{customerId}": {
       "schema": "Customer",

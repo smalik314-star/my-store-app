@@ -131,6 +131,13 @@ export interface StoreSettings {
   updatedAt: any;
 }
 
+export interface Brand {
+  id: string;
+  tenantId: string;
+  name: string;
+  createdAt: any;
+}
+
 export interface AuthContextType {
   user: User | null;
   loading: boolean;
