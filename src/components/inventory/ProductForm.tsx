@@ -29,12 +29,32 @@ const CATEGORIES = ['Tablets', 'Capsules', 'Syrups', 'Injections', 'Topicals', '
 const UNITS = ['Strip', 'Bottle', 'Box', 'Piece', 'Vial', 'Tube'];
 
 export function ProductForm({ product, onSave, onClose, loading: saveLoading }: ProductFormProps) {
+  const getDefaultExpiryDate = () => {
+    const futureYear = new Date().getFullYear() + 2;
+    const currentMonthNum = new Date().getMonth() + 1;
+    const lastDay = new Date(futureYear, currentMonthNum, 0).getDate();
+    const monthStr = String(currentMonthNum).padStart(2, '0');
+    const lastDayStr = String(lastDay).padStart(2, '0');
+    return `${futureYear}-${monthStr}-${lastDayStr}`;
+  };
+
+  const getDefaultMfgDate = () => {
+    const currentYear = new Date().getFullYear();
+    const currentMonthNum = new Date().getMonth() + 1;
+    const monthStr = String(currentMonthNum).padStart(2, '0');
+    return `${currentYear}-${monthStr}-01`;
+  };
+
   const [formData, setFormData] = useState({
     name: product?.name || '',
     brand: product?.brand || '',
     batchNumber: product?.batchNumber || '',
-    manufacturingDate: product?.manufacturingDate ? toJsDate(product.manufacturingDate).toISOString().split('T')[0] : '',
-    expiryDate: product?.expiryDate ? toJsDate(product.expiryDate).toISOString().split('T')[0] : '',
+    manufacturingDate: product?.manufacturingDate 
+      ? toJsDate(product.manufacturingDate).toISOString().split('T')[0] 
+      : getDefaultMfgDate(),
+    expiryDate: product?.expiryDate 
+      ? toJsDate(product.expiryDate).toISOString().split('T')[0] 
+      : getDefaultExpiryDate(),
     purchasePrice: product?.purchasePrice || 0,
     sellingPrice: product?.sellingPrice || 0,
     stockQuantity: product?.stockQuantity || 0,
@@ -53,6 +73,106 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     description: product?.description || '',
     imageUrl: product?.imageUrl || '',
   });
+
+  // Extract month and year from form dates to sync select fields
+  const [mfgMonth, setMfgMonth] = useState(() => {
+    const initialDate = product?.manufacturingDate ? toJsDate(product.manufacturingDate).toISOString().split('T')[0] : '';
+    if (initialDate) {
+      return initialDate.split('-')[1] || '';
+    }
+    return String(new Date().getMonth() + 1).padStart(2, '0');
+  });
+
+  const [mfgYear, setMfgYear] = useState(() => {
+    const initialDate = product?.manufacturingDate ? toJsDate(product.manufacturingDate).toISOString().split('T')[0] : '';
+    if (initialDate) {
+      return initialDate.split('-')[0] || '';
+    }
+    return String(new Date().getFullYear());
+  });
+
+  const [expMonth, setExpMonth] = useState(() => {
+    const initialDate = product?.expiryDate ? toJsDate(product.expiryDate).toISOString().split('T')[0] : '';
+    if (initialDate) {
+      return initialDate.split('-')[1] || '';
+    }
+    return String(new Date().getMonth() + 1).padStart(2, '0');
+  });
+
+  const [expYear, setExpYear] = useState(() => {
+    const initialDate = product?.expiryDate ? toJsDate(product.expiryDate).toISOString().split('T')[0] : '';
+    if (initialDate) {
+      return initialDate.split('-')[0] || '';
+    }
+    return String(new Date().getFullYear() + 2);
+  });
+
+  // Synchronize dropdown state with formData.manufacturingDate & expiryDate changes (e.g. from autofill)
+  useEffect(() => {
+    if (formData.manufacturingDate) {
+      const parts = formData.manufacturingDate.split('-');
+      if (parts.length >= 2) {
+        setMfgYear(parts[0]);
+        setMfgMonth(parts[1]);
+      }
+    }
+  }, [formData.manufacturingDate]);
+
+  useEffect(() => {
+    if (formData.expiryDate) {
+      const parts = formData.expiryDate.split('-');
+      if (parts.length >= 2) {
+        setExpYear(parts[0]);
+        setExpMonth(parts[1]);
+      }
+    }
+  }, [formData.expiryDate]);
+
+  const handleMfgMonthChange = (monthValue: string) => {
+    setMfgMonth(monthValue);
+    const year = mfgYear || String(new Date().getFullYear());
+    setFormData(prev => ({
+      ...prev,
+      manufacturingDate: `${year}-${monthValue}-01`
+    }));
+  };
+
+  const handleMfgYearChange = (yearValue: string) => {
+    setMfgYear(yearValue);
+    const month = mfgMonth || '01';
+    setFormData(prev => ({
+      ...prev,
+      manufacturingDate: `${yearValue}-${month}-01`
+    }));
+  };
+
+  const handleExpMonthChange = (monthValue: string) => {
+    setExpMonth(monthValue);
+    const year = expYear || String(new Date().getFullYear() + 2);
+    // Find last day of month
+    const y = parseInt(year, 10);
+    const m = parseInt(monthValue, 10);
+    const lastDay = new Date(y, m, 0).getDate();
+    const lastDayStr = String(lastDay).padStart(2, '0');
+    setFormData(prev => ({
+      ...prev,
+      expiryDate: `${year}-${monthValue}-${lastDayStr}`
+    }));
+  };
+
+  const handleExpYearChange = (yearValue: string) => {
+    setExpYear(yearValue);
+    const month = expMonth || '12';
+    // Find last day of month
+    const y = parseInt(yearValue, 10);
+    const m = parseInt(month, 10);
+    const lastDay = new Date(y, m, 0).getDate();
+    const lastDayStr = String(lastDay).padStart(2, '0');
+    setFormData(prev => ({
+      ...prev,
+      expiryDate: `${yearValue}-${month}-${lastDayStr}`
+    }));
+  };
 
   const { user } = useAuth();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -573,16 +693,40 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
                   Manufacturing Date *
                 </label>
-                <div className="relative">
-                  <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
-                  <input
-                    type="date"
-                    name="manufacturingDate"
-                    value={formData.manufacturingDate}
-                    onChange={handleChange}
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={mfgMonth}
+                    onChange={(e) => handleMfgMonthChange(e.target.value)}
+                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
                     required
-                  />
+                  >
+                    <option value="" disabled>Month</option>
+                    {Array.from({ length: 12 }, (_, i) => {
+                      const monthNum = String(i + 1).padStart(2, '0');
+                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-US', { month: 'short' });
+                      return (
+                        <option key={monthNum} value={monthNum}>
+                          {monthNum} - {monthName}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <select
+                    value={mfgYear}
+                    onChange={(e) => handleMfgYearChange(e.target.value)}
+                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
+                    required
+                  >
+                    <option value="" disabled>Year</option>
+                    {Array.from({ length: 12 }, (_, i) => {
+                      const yr = String(new Date().getFullYear() - 10 + i);
+                      return (
+                        <option key={yr} value={yr}>
+                          {yr}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
               </div>
 
@@ -591,16 +735,40 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
                   Expiry Date *
                 </label>
-                <div className="relative">
-                  <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
-                  <input
-                    type="date"
-                    name="expiryDate"
-                    value={formData.expiryDate}
-                    onChange={handleChange}
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={expMonth}
+                    onChange={(e) => handleExpMonthChange(e.target.value)}
+                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
                     required
-                  />
+                  >
+                    <option value="" disabled>Month</option>
+                    {Array.from({ length: 12 }, (_, i) => {
+                      const monthNum = String(i + 1).padStart(2, '0');
+                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-US', { month: 'short' });
+                      return (
+                        <option key={monthNum} value={monthNum}>
+                          {monthNum} - {monthName}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <select
+                    value={expYear}
+                    onChange={(e) => handleExpYearChange(e.target.value)}
+                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
+                    required
+                  >
+                    <option value="" disabled>Year</option>
+                    {Array.from({ length: 16 }, (_, i) => {
+                      const yr = String(new Date().getFullYear() - 2 + i);
+                      return (
+                        <option key={yr} value={yr}>
+                          {yr}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
               </div>
 

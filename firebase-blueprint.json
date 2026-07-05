@@ -32,10 +32,84 @@
         "minimumStock": { "type": "number" },
         "expiryDate": { "type": "string" },
         "userId": { "type": "string" },
+        "batches": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "sku", "sellingPrice", "stockQuantity", "userId"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Product suppliers",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "gstNumber": { "type": "string" },
+        "address": { "type": "string" },
+        "email": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "tenantId"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Stock Purchase",
+      "type": "object",
+      "properties": {
+        "purchaseNumber": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "supplierName": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "invoiceDate": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "itemsCount": { "type": "number" },
+        "notes": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["purchaseNumber", "supplierId", "invoiceNumber", "tenantId"]
+    },
+    "PurchaseItem": {
+      "title": "PurchaseItem",
+      "description": "Item in a stock purchase",
+      "type": "object",
+      "properties": {
+        "purchaseId": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "batchNumber": { "type": "string" },
+        "mfgDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "purchasePrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "quantity": { "type": "number" },
+        "mrp": { "type": "number" },
+        "gstPercentage": { "type": "number" },
+        "discount": { "type": "number" },
+        "total": { "type": "number" }
+      },
+      "required": ["purchaseId", "productId", "batchNumber", "quantity"]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Product stock ledger",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "batchNumber": { "type": "string" },
+        "quantity": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "purchaseId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "productId", "batchNumber", "quantity", "tenantId"]
     },
     "Customer": {
       "title": "Customer",
@@ -127,6 +201,22 @@
     "/settings/{userId}": {
       "schema": "Settings",
       "description": "User specific settings"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": "Supplier",
+      "description": "Supplier collection"
+    },
+    "/purchases/{purchaseId}": {
+      "schema": "Purchase",
+      "description": "Purchases collection"
+    },
+    "/purchaseItems/{itemId}": {
+      "schema": "PurchaseItem",
+      "description": "Purchase items collection"
+    },
+    "/stockMovements/{movementId}": {
+      "schema": "StockMovement",
+      "description": "Stock ledger movements"
     }
   }
 }

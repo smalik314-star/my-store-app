@@ -23,6 +23,11 @@ const UserManagement = lazy(() => import('../pages/users/UserManagement'));
 const Login = lazy(() => import('../pages/auth/Login'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
+// Purchases pages
+const Purchases = lazy(() => import('../pages/purchases/Purchases'));
+const PurchaseEntry = lazy(() => import('../pages/purchases/PurchaseEntry'));
+const PurchaseDetail = lazy(() => import('../pages/purchases/PurchaseDetail'));
+
 export function AppRouter() {
   const { user } = useAuth();
 
@@ -54,6 +59,9 @@ export function AppRouter() {
               <Route path="/billing" element={<Billing />} />
               <Route path="/invoices" element={<InvoiceList />} />
               <Route path="/invoice/:id" element={<InvoiceDetail />} />
+              <Route path="/purchases" element={<Purchases />} />
+              <Route path="/purchases/new" element={<PurchaseEntry />} />
+              <Route path="/purchases/:id" element={<PurchaseDetail />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/subscription" element={<Subscription />} />

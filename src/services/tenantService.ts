@@ -15,7 +15,7 @@ import { Tenant, SubscriptionPlan, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 export const tenantService = {
-  async createTenant(ownerId: string, storeName: string): Promise<Tenant> {
+  async createTenant(ownerId: string, storeName: string, email?: string): Promise<Tenant> {
     const tenantId = `tenant_${Math.random().toString(36).substr(2, 9)}`;
     const tenantRef = doc(db, 'tenants', tenantId);
     
@@ -48,6 +48,7 @@ export const tenantService = {
         uid: ownerId,
         tenantId: tenantId,
         role: 'owner',
+        email: email || null,
         addedAt: serverTimestamp(),
       });
 

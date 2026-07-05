@@ -17,7 +17,8 @@ import {
   Stethoscope,
   X,
   Zap,
-  CreditCard
+  CreditCard,
+  Truck
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -34,6 +35,7 @@ interface SidebarProps {
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', active: true },
   { icon: Package, label: 'Inventory', path: '/inventory', active: true },
+  { icon: Truck, label: 'Stock In / Purchases', path: '/purchases', active: true },
   { icon: Clock, label: 'Expiry Alerts', path: '/expiry-alerts', active: true },
   { icon: ShoppingCart, label: 'Low Stock', path: '/low-stock', active: true },
   { icon: Users, label: 'Customers', path: '/customers', active: true },

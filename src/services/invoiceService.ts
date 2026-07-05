@@ -19,6 +19,7 @@ import { db, auth } from '../firebase/config';
 import { Invoice, Product, Customer, Tenant } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { tenantService } from './tenantService';
+import { toJsDate } from '../utils/date';
 
 const COLLECTION_NAME = 'invoices';
 
@@ -92,13 +93,77 @@ export const invoiceService = {
         };
         transaction.set(invoiceRef, invoice);
 
-        // 3. Deduct Stock
+        // 3. Deduct Stock (with FEFO Batch deduction)
         for (const item of invoiceData.items) {
           const productRef = doc(db, 'products', item.productId);
-          transaction.update(productRef, {
-            stockQuantity: increment(-item.quantity),
-            updatedAt: serverTimestamp()
-          });
+          const productDoc = await transaction.get(productRef);
+          
+          if (productDoc.exists()) {
+            const product = productDoc.data() as Product;
+            const previousStock = product.stockQuantity || 0;
+            const newStock = Math.max(0, previousStock - item.quantity);
+
+            let batchesList = product.batches ? [...product.batches] : [];
+            
+            // Sort by expiry date ascending for FEFO
+            batchesList.sort((a, b) => {
+              const dateA = toJsDate(a.expiryDate).getTime();
+              const dateB = toJsDate(b.expiryDate).getTime();
+              return dateA - dateB;
+            });
+
+            let remainingToDeduct = item.quantity;
+            for (let i = 0; i < batchesList.length; i++) {
+              if (remainingToDeduct <= 0) break;
+              const b = batchesList[i];
+              if (b.quantity > 0) {
+                const deduct = Math.min(b.quantity, remainingToDeduct);
+                b.quantity -= deduct;
+                remainingToDeduct -= deduct;
+              }
+            }
+
+            // Fallback: If still remaining, subtract from first batch even if it goes negative
+            if (remainingToDeduct > 0 && batchesList.length > 0) {
+              batchesList[0].quantity -= remainingToDeduct;
+            }
+
+            // Recalculate nearest active batch
+            const activeBatches = batchesList.filter(b => b.quantity > 0);
+            const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
+
+            const updatedFields: Partial<Product> = {
+              stockQuantity: newStock,
+              batches: batchesList,
+              updatedAt: serverTimestamp()
+            };
+
+            if (currentBatch) {
+              updatedFields.batchNumber = currentBatch.batchNumber;
+              updatedFields.expiryDate = currentBatch.expiryDate;
+              updatedFields.manufacturingDate = currentBatch.mfgDate;
+              updatedFields.purchasePrice = currentBatch.purchasePrice;
+              updatedFields.sellingPrice = currentBatch.salePrice;
+            }
+
+            transaction.update(productRef, updatedFields);
+
+            // Log Stock Movement
+            const movementRef = doc(collection(db, 'stockMovements'));
+            transaction.set(movementRef, {
+              id: movementRef.id,
+              tenantId,
+              type: "SALE_OUT",
+              productId: item.productId,
+              productName: item.name,
+              batchNumber: currentBatch ? currentBatch.batchNumber : 'N/A',
+              quantity: -item.quantity,
+              previousStock,
+              newStock,
+              invoiceId: invoiceRef.id,
+              createdAt: serverTimestamp()
+            });
+          }
         }
 
         // 4. Update Customer Stats
@@ -191,13 +256,76 @@ export const invoiceService = {
 
         const invoice = invoiceDoc.data() as Invoice;
 
-        // 1. Restore Stock
+        // 1. Restore Stock (Batch aware)
         for (const item of invoice.items) {
           const productRef = doc(db, 'products', item.productId);
-          transaction.update(productRef, {
-            stockQuantity: increment(item.quantity),
-            updatedAt: serverTimestamp()
-          });
+          const productDoc = await transaction.get(productRef);
+
+          if (productDoc.exists()) {
+            const product = productDoc.data() as Product;
+            const previousStock = product.stockQuantity || 0;
+            const newStock = previousStock + item.quantity;
+
+            let batchesList = product.batches ? [...product.batches] : [];
+
+            if (batchesList.length > 0) {
+              // Add back to the nearest active/expiry batch
+              batchesList[0].quantity += item.quantity;
+            } else {
+              // Create a fallback batch if no batches exist
+              batchesList.push({
+                batchNumber: product.batchNumber || 'FIT-001',
+                mfgDate: product.manufacturingDate || serverTimestamp(),
+                expiryDate: product.expiryDate || serverTimestamp(),
+                purchasePrice: product.purchasePrice || 0,
+                salePrice: product.sellingPrice || 0,
+                quantity: item.quantity,
+                createdAt: serverTimestamp()
+              });
+            }
+
+            // Sort batches
+            batchesList.sort((a, b) => {
+              const dateA = toJsDate(a.expiryDate).getTime();
+              const dateB = toJsDate(b.expiryDate).getTime();
+              return dateA - dateB;
+            });
+
+            const activeBatches = batchesList.filter(b => b.quantity > 0);
+            const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
+
+            const updatedFields: Partial<Product> = {
+              stockQuantity: newStock,
+              batches: batchesList,
+              updatedAt: serverTimestamp()
+            };
+
+            if (currentBatch) {
+              updatedFields.batchNumber = currentBatch.batchNumber;
+              updatedFields.expiryDate = currentBatch.expiryDate;
+              updatedFields.manufacturingDate = currentBatch.mfgDate;
+              updatedFields.purchasePrice = currentBatch.purchasePrice;
+              updatedFields.sellingPrice = currentBatch.salePrice;
+            }
+
+            transaction.update(productRef, updatedFields);
+
+            // Log Stock Movement Reversal
+            const movementRef = doc(collection(db, 'stockMovements'));
+            transaction.set(movementRef, {
+              id: movementRef.id,
+              tenantId,
+              type: "SALE_RETURN",
+              productId: item.productId,
+              productName: item.name,
+              batchNumber: currentBatch ? currentBatch.batchNumber : 'N/A',
+              quantity: item.quantity,
+              previousStock,
+              newStock,
+              invoiceId,
+              createdAt: serverTimestamp()
+            });
+          }
         }
 
         // 2. Revert Customer Stats

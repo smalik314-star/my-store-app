@@ -102,11 +102,11 @@ export default function UserManagement() {
             <Card key={u.uid} className="p-6 border-border flex items-center justify-between group hover:border-primary/20 transition-all">
               <div className="flex items-center gap-6">
                 <div className="h-14 w-14 rounded-2xl bg-text/5 flex items-center justify-center font-black text-text/40 text-xl">
-                  {u.email[0].toUpperCase()}
+                  {(u.email?.[0] || 'U').toUpperCase()}
                 </div>
                 <div>
                   <div className="flex items-center gap-3">
-                    <h4 className="text-lg font-black text-text">{u.email}</h4>
+                    <h4 className="text-lg font-black text-text">{u.email || 'Team Member'}</h4>
                     <span className={cn(
                       "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
                       u.role === 'owner' ? "bg-primary/10 text-primary" : 

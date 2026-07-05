@@ -78,6 +78,35 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
+    // Suppliers
+    match /suppliers/{supplierId} {
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+    }
+
+    // Purchases
+    match /purchases/{purchaseId} {
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+    }
+
+    // Purchase Items
+    match /purchaseItems/{itemId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Stock Movements
+    match /stockMovements/{movementId} {
+      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
+      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+    }
+
     // Settings (Scoped by tenantId)
     match /settings/{tenantId} {
       allow read: if isTenantUser(tenantId);

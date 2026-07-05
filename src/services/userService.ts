@@ -16,7 +16,7 @@ export const userService = {
         // Check for pending invites
         // (Skipping for now for simplicity, assume new users create new tenants)
         
-        const tenant = await tenantService.createTenant(user.uid, `${user.displayName || 'My'}'s Pharmacy`);
+        const tenant = await tenantService.createTenant(user.uid, `${user.displayName || 'My'}'s Pharmacy`, user.email || undefined);
 
         const userData = {
           uid: user.uid,
@@ -36,7 +36,7 @@ export const userService = {
         
         // Migration: If user exists but has no tenantId, create one
         if (!existingData.tenantId) {
-          const tenant = await tenantService.createTenant(user.uid, `${existingData.displayName || 'My'}'s Pharmacy`);
+          const tenant = await tenantService.createTenant(user.uid, `${existingData.displayName || 'My'}'s Pharmacy`, existingData.email || undefined);
           await updateDoc(userRef, {
             tenantId: tenant.id,
             role: 'owner',

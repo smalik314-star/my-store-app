@@ -41,6 +41,16 @@ export interface TenantUser {
   addedAt: any;
 }
 
+export interface ProductBatch {
+  batchNumber: string;
+  mfgDate: any; // Firebase Timestamp or ISO string
+  expiryDate: any; // Firebase Timestamp or ISO string
+  purchasePrice: number;
+  salePrice: number;
+  quantity: number;
+  createdAt: any;
+}
+
 export interface Product {
   id: string;
   tenantId: string;
@@ -64,8 +74,66 @@ export interface Product {
   rackLocation?: string;
   description?: string;
   imageUrl?: string;
+  batches?: ProductBatch[];
   createdAt: any;
   updatedAt?: any;
+}
+
+export interface Supplier {
+  id: string;
+  tenantId: string;
+  name: string;
+  phone?: string;
+  gstNumber?: string;
+  address?: string;
+  email?: string;
+  createdAt: any;
+}
+
+export interface Purchase {
+  id: string;
+  tenantId: string;
+  purchaseNumber: string; // e.g. PUR-0001
+  supplierId: string;
+  supplierName: string;
+  invoiceNumber: string;
+  invoiceDate: any; // Timestamp
+  totalAmount: number;
+  itemsCount: number;
+  notes?: string;
+  createdAt: any;
+}
+
+export interface PurchaseItem {
+  id: string;
+  purchaseId: string;
+  productId: string;
+  productName: string;
+  batchNumber: string;
+  mfgDate: any; // Timestamp
+  expiryDate: any; // Timestamp
+  purchasePrice: number;
+  salePrice: number;
+  quantity: number;
+  mrp?: number;
+  gstPercentage?: number;
+  discount?: number;
+  total: number;
+}
+
+export interface StockMovement {
+  id: string;
+  tenantId: string;
+  type: "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "MANUAL_ADJUST";
+  productId: string;
+  productName: string;
+  batchNumber: string;
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  purchaseId?: string;
+  invoiceId?: string;
+  createdAt: any;
 }
 
 export interface Customer {
