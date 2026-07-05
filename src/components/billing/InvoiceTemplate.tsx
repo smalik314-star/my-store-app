@@ -13,6 +13,7 @@ import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
 import { formatCurrency } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
+import { Logo } from '../common/Logo';
 
 interface InvoiceTemplateProps {
   invoice: Invoice;
@@ -34,11 +35,9 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         )}
       >
         <div className="text-center border-b border-dashed border-black pb-4 mb-4">
-          {settings?.logoURL ? (
-            <img src={settings.logoURL} alt="Logo" className="h-12 mx-auto mb-2" />
-          ) : (
-            <h2 className="text-lg font-bold">{settings?.storeName || 'PHARMAFLOW'}</h2>
-          )}
+          <div className="flex justify-center mb-2">
+            <Logo className="h-12 w-12" variant="color" />
+          </div>
           <p>{settings?.address || '123 Healthcare Avenue, Mumbai'}</p>
           <p>Tel: {settings?.phone || '+91 98765 43210'}</p>
           {settings?.gstNumber && <p>GSTIN: {settings.gstNumber}</p>}
@@ -116,12 +115,8 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
       <div className="p-10 border-b-4 border-primary bg-background/30 flex flex-col md:flex-row justify-between gap-8">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <div className="h-14 w-14 rounded-[1.5rem] bg-primary flex items-center justify-center text-white print:bg-primary print:text-white">
-              {settings?.logoURL ? (
-                <img src={settings.logoURL} alt="Logo" className="h-10 w-10 object-contain" />
-              ) : (
-                <Building2 className="h-8 w-8" />
-              )}
+            <div className="flex shrink-0 items-center justify-center">
+              <Logo className="h-14 w-14 shadow-sm" variant="color" />
             </div>
             <div>
               <h2 className="text-2xl font-black text-text tracking-tighter">{settings?.storeName || 'PharmaFlow'}</h2>

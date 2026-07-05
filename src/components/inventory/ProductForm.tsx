@@ -17,6 +17,7 @@ import { toJsDate } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { brandService } from '../../services/brandService';
 import { db } from '../../firebase/config';
+import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 
 interface ProductFormProps {
   product?: Product;
@@ -193,6 +194,8 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   const [selectedSuggestionProduct, setSelectedSuggestionProduct] = useState<Product | null>(null);
   const [showAutofillConfirm, setShowAutofillConfirm] = useState(false);
 
+  const [masterSuggestions, setMasterSuggestions] = useState<MasterMedicine[]>([]);
+
   // Synchronize debounced values
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -200,6 +203,42 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     }, 300);
     return () => clearTimeout(handler);
   }, [productNameInput]);
+
+  // Search local IndexedDB Master Medicine database when name input changes
+  useEffect(() => {
+    if (debouncedProductName.trim().length >= 2) {
+      medicineMasterService.search(debouncedProductName).then(results => {
+        setMasterSuggestions(results);
+      });
+    } else {
+      setMasterSuggestions([]);
+    }
+  }, [debouncedProductName]);
+
+  // Initialize master medicine default samples on load so the dropdown isn't empty initially
+  useEffect(() => {
+    medicineMasterService.loadDefaultSamples().catch(err => {
+      console.error('Error loading default samples:', err);
+    });
+  }, []);
+
+  const handleSelectMasterMedicine = (med: MasterMedicine) => {
+    setProductNameInput(med.name);
+    setBrandNameInput(med.brand || '');
+    setFormData(prev => ({
+      ...prev,
+      name: med.name,
+      brand: med.brand || '',
+      genericName: med.genericName || '',
+      category: med.category || 'Others',
+      manufacturer: med.manufacturer || '',
+      mrp: med.mrp || 0,
+      unit: med.unit || 'Strip',
+      purchasePrice: med.purchasePrice || 0,
+      sellingPrice: med.sellingPrice || 0,
+    }));
+    setShowProductDropdown(false);
+  };
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -258,6 +297,28 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
     setProductNameInput(selectedProd.name);
     setSelectedSuggestionProduct(selectedProd);
+    
+    // Instantly autofill basic metadata so the Brand and other fields are visually filled immediately!
+    setBrandNameInput(selectedProd.brand || '');
+    setFormData(prev => ({
+      ...prev,
+      name: selectedProd.name,
+      brand: selectedProd.brand || '',
+      genericName: selectedProd.genericName || '',
+      category: selectedProd.category || 'Others',
+      manufacturer: selectedProd.manufacturer || '',
+      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
+      unit: selectedProd.unit || 'Strip',
+      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
+      sku: selectedProd.sku || '',
+      barcode: selectedProd.barcode || '',
+      rackLocation: selectedProd.rackLocation || '',
+      description: selectedProd.description || '',
+    }));
+    if (selectedProd.imageUrl) {
+      setImagePreview(selectedProd.imageUrl);
+    }
+
     setShowAutofillConfirm(true);
   };
 
@@ -265,6 +326,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     setBrandNameInput(selectedProd.brand || '');
     setFormData(prev => ({
       ...prev,
+      brand: selectedProd.brand || '',
       genericName: selectedProd.genericName || '',
       category: selectedProd.category || 'Others',
       manufacturer: selectedProd.manufacturer || '',
@@ -275,9 +337,16 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   };
 
   const applyAutofillAll = (selectedProd: Product) => {
-    applyAutofillMetadata(selectedProd);
+    setBrandNameInput(selectedProd.brand || '');
     setFormData(prev => ({
       ...prev,
+      brand: selectedProd.brand || '',
+      genericName: selectedProd.genericName || '',
+      category: selectedProd.category || 'Others',
+      manufacturer: selectedProd.manufacturer || '',
+      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
+      unit: selectedProd.unit || 'Strip',
+      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
       batchNumber: selectedProd.batchNumber || '',
       manufacturingDate: selectedProd.manufacturingDate ? toJsDate(selectedProd.manufacturingDate).toISOString().split('T')[0] : '',
       expiryDate: selectedProd.expiryDate ? toJsDate(selectedProd.expiryDate).toISOString().split('T')[0] : '',
@@ -314,19 +383,64 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         brandName.toLowerCase() !== brandNameInput.toLowerCase()
       );
 
+  const combinedSuggestions = [
+    ...uniqueProductsSuggestions.slice(0, 5).map(p => ({ type: 'inventory' as const, data: p })),
+    ...masterSuggestions.slice(0, 10).map(med => ({ type: 'master' as const, data: med }))
+  ];
+
   const handleProductKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!showProductDropdown || uniqueProductsSuggestions.length === 0) return;
+    if (!showProductDropdown || combinedSuggestions.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setProductActiveIndex(prev => (prev + 1) % uniqueProductsSuggestions.length);
+      setProductActiveIndex(prev => (prev + 1) % combinedSuggestions.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setProductActiveIndex(prev => (prev - 1 + uniqueProductsSuggestions.length) % uniqueProductsSuggestions.length);
+      setProductActiveIndex(prev => (prev - 1 + combinedSuggestions.length) % combinedSuggestions.length);
     } else if (e.key === 'Enter') {
-      if (productActiveIndex >= 0 && productActiveIndex < uniqueProductsSuggestions.length) {
-        e.preventDefault();
-        handleSelectProductSuggestion(uniqueProductsSuggestions[productActiveIndex]);
+      // Enter selects the active suggestion, defaulting to the first one if none is highlighted.
+      e.preventDefault();
+      const activeIdx = productActiveIndex >= 0 ? productActiveIndex : 0;
+      if (activeIdx >= 0 && activeIdx < combinedSuggestions.length) {
+        const item = combinedSuggestions[activeIdx];
+        if (item.type === 'inventory') {
+          handleSelectProductSuggestion(item.data);
+        } else {
+          handleSelectMasterMedicine(item.data);
+          // Focus Brand input if it's empty, otherwise focus Batch Number
+          setTimeout(() => {
+            const brandInput = document.querySelector('input[name="brand"]') as HTMLInputElement;
+            const batchInput = document.querySelector('input[name="batchNumber"]') as HTMLInputElement;
+            if (brandInput && !brandInput.value) {
+              brandInput.focus();
+            } else if (batchInput) {
+              batchInput.focus();
+            }
+          }, 50);
+        }
+        setShowProductDropdown(false);
+      }
+    } else if (e.key === 'Tab') {
+      // Tab key selects the active suggestion, defaulting to the first one if none is highlighted.
+      e.preventDefault();
+      const activeIdx = productActiveIndex >= 0 ? productActiveIndex : 0;
+      if (activeIdx >= 0 && activeIdx < combinedSuggestions.length) {
+        const item = combinedSuggestions[activeIdx];
+        if (item.type === 'inventory') {
+          handleSelectProductSuggestion(item.data);
+        } else {
+          handleSelectMasterMedicine(item.data);
+          // Focus Brand input if empty, otherwise focus Batch Number
+          setTimeout(() => {
+            const brandInput = document.querySelector('input[name="brand"]') as HTMLInputElement;
+            const batchInput = document.querySelector('input[name="batchNumber"]') as HTMLInputElement;
+            if (brandInput && !brandInput.value) {
+              brandInput.focus();
+            } else if (batchInput) {
+              batchInput.focus();
+            }
+          }, 50);
+        }
         setShowProductDropdown(false);
       }
     } else if (e.key === 'Escape') {
@@ -344,10 +458,29 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       e.preventDefault();
       setBrandActiveIndex(prev => (prev - 1 + brandSuggestions.length) % brandSuggestions.length);
     } else if (e.key === 'Enter') {
-      if (brandActiveIndex >= 0 && brandActiveIndex < brandSuggestions.length) {
-        e.preventDefault();
-        setBrandNameInput(brandSuggestions[brandActiveIndex]);
+      e.preventDefault();
+      const activeIdx = brandActiveIndex >= 0 ? brandActiveIndex : 0;
+      if (activeIdx >= 0 && activeIdx < brandSuggestions.length) {
+        setBrandNameInput(brandSuggestions[activeIdx]);
         setShowBrandDropdown(false);
+        // Focus Batch Number field
+        setTimeout(() => {
+          const batchInput = document.querySelector('input[name="batchNumber"]') as HTMLInputElement;
+          if (batchInput) batchInput.focus();
+        }, 50);
+      }
+    } else if (e.key === 'Tab') {
+      // Tab key selects the active suggestion, defaulting to the first one if none is highlighted.
+      e.preventDefault();
+      const activeIdx = brandActiveIndex >= 0 ? brandActiveIndex : 0;
+      if (activeIdx >= 0 && activeIdx < brandSuggestions.length) {
+        setBrandNameInput(brandSuggestions[activeIdx]);
+        setShowBrandDropdown(false);
+        // Focus Batch Number field
+        setTimeout(() => {
+          const batchInput = document.querySelector('input[name="batchNumber"]') as HTMLInputElement;
+          if (batchInput) batchInput.focus();
+        }, 50);
       }
     } else if (e.key === 'Escape') {
       setShowBrandDropdown(false);
@@ -568,27 +701,74 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 </div>
 
                 {/* Suggestions Dropdown */}
-                {showProductDropdown && uniqueProductsSuggestions.length > 0 && (
-                  <ul className="absolute left-0 right-0 top-[100%] z-[100] mt-1 max-h-60 overflow-y-auto bg-surface border border-border rounded-xl shadow-lg divide-y divide-border/50">
-                    {uniqueProductsSuggestions.map((p, idx) => (
-                      <li
-                        key={p.id}
-                        className={cn(
-                          "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex flex-col gap-0.5",
-                          productActiveIndex === idx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
-                        )}
-                        onMouseDown={() => {
-                          handleSelectProductSuggestion(p);
-                          setShowProductDropdown(false);
-                        }}
-                      >
-                        <span className="font-bold text-text">{p.name}</span>
-                        {p.brand && (
-                          <span className="text-[10px] text-text/40 font-medium">Brand: {p.brand} | Category: {p.category}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                {showProductDropdown && (uniqueProductsSuggestions.length > 0 || masterSuggestions.length > 0) && (
+                  <div className="absolute left-0 right-0 top-[100%] z-[100] mt-1 max-h-64 overflow-y-auto bg-surface border border-border rounded-xl shadow-lg divide-y divide-border/50">
+                    {uniqueProductsSuggestions.length > 0 && (
+                      <div>
+                        <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-text/40">In Your Inventory</div>
+                        <ul className="divide-y divide-border/30">
+                          {uniqueProductsSuggestions.slice(0, 5).map((p, idx) => (
+                            <li
+                              key={p.id}
+                              className={cn(
+                                "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex flex-col gap-0.5",
+                                productActiveIndex === idx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
+                              )}
+                              onMouseEnter={() => setProductActiveIndex(idx)}
+                              onMouseDown={() => {
+                                handleSelectProductSuggestion(p);
+                                setShowProductDropdown(false);
+                              }}
+                            >
+                              <span className="font-bold text-text">{p.name}</span>
+                              <span className="text-[10px] text-text/40 font-medium">Brand: {p.brand} | Category: {p.category}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {masterSuggestions.length > 0 && (
+                      <div>
+                        <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-primary flex justify-between items-center">
+                          <span>From Master Database (2.5L+ Meds)</span>
+                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Form Auto-Fill</span>
+                        </div>
+                        <ul className="divide-y divide-border/30">
+                          {masterSuggestions.slice(0, 10).map((med, idx) => {
+                            const overallIdx = uniqueProductsSuggestions.slice(0, 5).length + idx;
+                            return (
+                              <li
+                                key={med.id}
+                                className={cn(
+                                  "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex flex-col gap-0.5 text-left",
+                                  productActiveIndex === overallIdx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
+                                )}
+                                onMouseEnter={() => setProductActiveIndex(overallIdx)}
+                                onMouseDown={() => {
+                                  handleSelectMasterMedicine(med);
+                                }}
+                              >
+                                <span className="font-bold text-text flex items-center gap-1.5">
+                                  {med.name}
+                                  {med.unit && <span className="text-[9px] font-bold text-primary/70 bg-primary/5 px-1 rounded-sm">{med.unit}</span>}
+                                </span>
+                                <div className="text-[10px] text-text/40 font-medium flex flex-wrap gap-x-2 items-center">
+                                  {med.brand && (
+                                    <span className="text-primary font-extrabold bg-primary/5 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wide">
+                                      Brand: {med.brand}
+                                    </span>
+                                  )}
+                                  {med.genericName && <span>Gen: {med.genericName}</span>}
+                                  {med.manufacturer && <span>• Mfg: {med.manufacturer}</span>}
+                                  {med.mrp && <span>• MRP: ₹{med.mrp}</span>}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -629,6 +809,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                               "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex items-center justify-between",
                               brandActiveIndex === idx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
                             )}
+                            onMouseEnter={() => setBrandActiveIndex(idx)}
                             onMouseDown={() => {
                               setBrandNameInput(brandName);
                               setShowBrandDropdown(false);

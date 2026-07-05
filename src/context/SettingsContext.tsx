@@ -72,6 +72,27 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [settings?.themeMode]);
 
+  useEffect(() => {
+    // 1. Sync Document Title
+    const storeName = settings?.storeName || 'PharmaFlow';
+    document.title = `${storeName} - Pharmacy Management`;
+
+    // 2. Sync Browser Favicon
+    let faviconLink: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+    if (!faviconLink) {
+      faviconLink = document.createElement('link');
+      faviconLink.rel = 'icon';
+      document.head.appendChild(faviconLink);
+    }
+    
+    if (settings?.logoURL) {
+      faviconLink.href = settings.logoURL;
+    } else {
+      // Elegant teal-colored SVG Data URI representing PharmaFlow brand mark
+      faviconLink.href = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230ea5e9' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='5' fill='%230f172a'/%3E%3Cpath d='M12 7v10M7 12h10' stroke='%230ea5e9' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E";
+    }
+  }, [settings?.storeName, settings?.logoURL]);
+
   const updateSettings = async (newSettings: Partial<StoreSettings>) => {
     if (!user?.tenantId) throw new Error('Tenant not found');
     

@@ -49,6 +49,7 @@ import { PageTransition } from '../../components/common/PageTransition';
 import { SkeletonChart, SkeletonCard } from '../../components/common/Skeleton';
 import { EmptyState } from '../../components/common/EmptyState';
 import { formatCurrency } from '../../utils/currency';
+import { Logo } from '../../components/common/Logo';
 
 type DateRange = 'today' | '7days' | '30days' | 'thisMonth' | 'lastMonth' | 'custom';
 
@@ -326,8 +327,26 @@ export default function Reports() {
   return (
     <PageTransition>
       <div className="p-4 md:p-8 space-y-8 max-w-[1600px] mx-auto pb-20">
+      
+      {/* Print-only Branded Report Header */}
+      <div className="hidden print:flex items-center justify-between border-b border-border pb-6 mb-8 w-full">
+        <div className="flex items-center gap-4">
+          <Logo className="h-14 w-14 shadow-sm shrink-0" variant="color" />
+          <div className="text-left">
+            <h1 className="text-2xl font-black text-text tracking-tight uppercase">Analytics & Sales Report</h1>
+            <p className="text-xs text-text/40 font-bold uppercase tracking-wider">{settings?.storeName || 'PharmaFlow'} Pharmacy</p>
+            {settings?.address && <p className="text-[10px] text-text/30 font-semibold">{settings.address}</p>}
+          </div>
+        </div>
+        <div className="text-right text-xs text-text/40 font-semibold font-mono space-y-1">
+          <p className="text-[10px] font-black uppercase tracking-widest">Report Summary</p>
+          <p>Generated: {new Date().toLocaleDateString()}</p>
+          <p>Period: {dateRange.toUpperCase()}</p>
+        </div>
+      </div>
+
       {/* Header & Filters */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 no-print">
         <div>
           <h1 className="text-3xl font-black text-text tracking-tight uppercase">Analytics Dashboard</h1>
           <p className="text-sm font-bold text-text/40 flex items-center gap-2">
@@ -595,6 +614,16 @@ export default function Reports() {
           </div>
         </>
       )}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; color: black !important; margin: 1cm; }
+          /* Ensure charts are nicely fitted for print */
+          .recharts-responsive-container {
+            page-break-inside: avoid;
+          }
+        }
+      `}} />
     </div>
     </PageTransition>
   );

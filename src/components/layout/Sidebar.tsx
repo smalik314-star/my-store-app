@@ -24,6 +24,7 @@ import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../common/Button';
 import { transitions } from '../../utils/animations';
+import { Logo } from '../common/Logo';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -109,9 +110,9 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
           <motion.div 
             whileHover={shouldReduceMotion ? {} : { rotate: 360 }}
             transition={{ duration: 0.6, ease: "easeInOut" }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-primary font-bold text-lg"
+            className="flex shrink-0 items-center justify-center"
           >
-            P
+            <Logo className="h-[32px] w-[32px] md:h-[36px] md:w-[36px] lg:h-[44px] lg:w-[44px] drop-shadow-md" variant="light" />
           </motion.div>
           <AnimatePresence>
             {isOpen && (

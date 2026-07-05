@@ -24,7 +24,12 @@ import {
   Globe,
   Loader2,
   FileText,
-  Trash2
+  Trash2,
+  Database,
+  UploadCloud,
+  Sparkles,
+  Download,
+  BookOpen
 } from 'lucide-react';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../../firebase/config';
@@ -32,7 +37,8 @@ import { cn } from '../../utils/cn';
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
 import { SkeletonForm } from '../../components/common/Skeleton';
-import { AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 
 export default function Settings() {
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
@@ -59,6 +65,27 @@ export default function Settings() {
   });
 
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Master Medicine Database states
+  const [masterMedicineCount, setMasterMedicineCount] = useState<number>(0);
+  const [importingMeds, setImportingMeds] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importingError, setImportingError] = useState<string | null>(null);
+
+  const loadMasterCount = async () => {
+    try {
+      const count = await medicineMasterService.countMedicines();
+      setMasterMedicineCount(count);
+    } catch (err) {
+      console.error('Error counting master medicines:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadMasterCount();
+  }, []);
 
   useEffect(() => {
     if (settings) {
@@ -93,27 +120,288 @@ export default function Settings() {
     }));
   };
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      showToast('Please upload an image file', 'danger');
-      return;
-    }
-
+  const uploadLogoFile = async (file: File) => {
     setUploadingLogo(true);
     try {
       const storageRef = ref(storage, `logos/store_logo_${Date.now()}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       setFormData(prev => ({ ...prev, logoURL: url }));
-      showToast('Logo uploaded successfully', 'success');
+      showToast('Logo uploaded and updated successfully. Save changes to persist.', 'success');
     } catch (error) {
       console.error('Error uploading logo:', error);
-      showToast('Failed to upload logo', 'danger');
+      showToast('Failed to upload logo. Please check storage configuration.', 'danger');
     } finally {
       setUploadingLogo(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please upload an image file (PNG/JPG)', 'danger');
+      return;
+    }
+
+    await uploadLogoFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please upload an image file (PNG/JPG)', 'danger');
+      return;
+    }
+
+    await uploadLogoFile(file);
+  };
+
+  const handleMedicineCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportingMeds(true);
+    setImportProgress(0);
+    setImportingError(null);
+
+    try {
+      const reader = new FileReader();
+      
+      const fileText = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Failed to read CSV file'));
+        reader.readAsText(file);
+      });
+
+      // Parse CSV
+      const lines = fileText.split(/\r?\n/);
+      if (lines.length < 2) {
+        throw new Error('CSV file seems empty or lacks a header row.');
+      }
+
+      // Map headers
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+      
+      const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('medicine') || h.includes('title') || h === 'item');
+      if (nameIdx === -1) {
+        throw new Error('Could not find a "Name" or "Medicine" column in the header row of your CSV. Please ensure your file has headers like: Name, Generic Name, Category, MRP, Brand, Manufacturer.');
+      }
+
+      const genericIdx = headers.findIndex(h => h.includes('generic') || h.includes('composition') || h.includes('salt') || h.includes('formula'));
+      const categoryIdx = headers.findIndex(h => h.includes('category') || h.includes('type') || h.includes('group'));
+      const brandIdx = headers.findIndex(h => h.includes('brand') || h.includes('trade'));
+      const mfgIdx = headers.findIndex(h => h.includes('manufacturer') || h.includes('company') || h.includes('mfg'));
+      const mrpIdx = headers.findIndex(h => h.includes('mrp') || h.includes('price') && !h.includes('purchase') && !h.includes('sell'));
+      const purchaseIdx = headers.findIndex(h => h.includes('purchase') || h.includes('cost') || h.includes('buying'));
+      const sellingIdx = headers.findIndex(h => h.includes('selling') || h.includes('sell') || h.includes('retail'));
+      const unitIdx = headers.findIndex(h => h.includes('unit') || h.includes('pack') || h.includes('strip'));
+
+      const parsedMedicines: MasterMedicine[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        // Smart quote-aware parser
+        const cells: string[] = [];
+        let currentCell = '';
+        let inQuotes = false;
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"' || char === "'") {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            cells.push(currentCell.trim());
+            currentCell = '';
+          } else {
+            currentCell += char;
+          }
+        }
+        cells.push(currentCell.trim());
+
+        if (cells.length === 0 || !cells[nameIdx]) continue;
+
+        const name = cells[nameIdx].replace(/^["']|["']$/g, '').trim();
+        if (!name) continue;
+
+        parsedMedicines.push({
+          name,
+          genericName: genericIdx !== -1 ? cells[genericIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
+          category: categoryIdx !== -1 ? cells[categoryIdx]?.replace(/^["']|["']$/g, '').trim() : 'Tablets',
+          brand: brandIdx !== -1 ? cells[brandIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
+          manufacturer: mfgIdx !== -1 ? cells[mfgIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
+          mrp: mrpIdx !== -1 ? Number(cells[mrpIdx]) || undefined : undefined,
+          purchasePrice: purchaseIdx !== -1 ? Number(cells[purchaseIdx]) || undefined : undefined,
+          sellingPrice: sellingIdx !== -1 ? Number(cells[sellingIdx]) || undefined : undefined,
+          unit: unitIdx !== -1 ? cells[unitIdx]?.replace(/^["']|["']$/g, '').trim() : 'Strip',
+        });
+      }
+
+      if (parsedMedicines.length === 0) {
+        throw new Error('No valid medicine rows could be parsed from this CSV.');
+      }
+
+      showToast(`Found ${parsedMedicines.length.toLocaleString()} medicines. Starting fast import...`, 'success');
+
+      // Import in non-blocking batches
+      await medicineMasterService.importInChunks(parsedMedicines, (progress) => {
+        setImportProgress(progress);
+      });
+
+      showToast(`Successfully imported ${parsedMedicines.length.toLocaleString()} medicines!`, 'success');
+      await loadMasterCount();
+    } catch (err: any) {
+      console.error('Import failed:', err);
+      setImportingError(err.message || 'An unexpected error occurred during import.');
+      showToast(err.message || 'Failed to import medicines', 'danger');
+    } finally {
+      setImportingMeds(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleClearMasterDatabase = async () => {
+    if (!window.confirm('Are you sure you want to clear all medicines from the Master Database? This will not affect your active store inventory.')) {
+      return;
+    }
+    
+    try {
+      await medicineMasterService.clearMedicines();
+      showToast('Master Medicine database cleared successfully.', 'success');
+      await loadMasterCount();
+    } catch (err) {
+      console.error('Error clearing Master DB:', err);
+      showToast('Failed to clear Master Database.', 'danger');
+    }
+  };
+
+  const handleLoadDemoMeds = async () => {
+    setImportingMeds(true);
+    setImportProgress(0);
+    try {
+      await medicineMasterService.loadDefaultSamples();
+      showToast('Demo medicines loaded successfully!', 'success');
+      await loadMasterCount();
+    } catch (err) {
+      console.error('Error loading demo medicines:', err);
+      showToast('Failed to load demo medicines.', 'danger');
+    } finally {
+      setImportingMeds(false);
+    }
+  };
+
+  const handleCloudMasterImport = async () => {
+    setImportingMeds(true);
+    setImportProgress(0);
+    setImportingError(null);
+
+    try {
+      showToast('Downloading Master Medicines Dataset from Server...', 'info');
+      const response = await fetch('/pharmaflow_medicines_master.csv');
+      if (!response.ok) {
+        throw new Error('Failed to download the master dataset file from the server.');
+      }
+      const fileText = await response.text();
+
+      // Parse CSV
+      const lines = fileText.split(/\r?\n/);
+      if (lines.length < 2) {
+        throw new Error('CSV file seems empty or lacks a header row.');
+      }
+
+      // Map headers
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
+      
+      const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('medicine') || h.includes('title') || h === 'item');
+      if (nameIdx === -1) {
+        throw new Error('Invalid CSV structure: Name column missing.');
+      }
+
+      const genericIdx = headers.findIndex(h => h.includes('generic') || h.includes('composition') || h.includes('salt') || h.includes('formula'));
+      const categoryIdx = headers.findIndex(h => h.includes('category') || h.includes('type') || h.includes('group'));
+      const brandIdx = headers.findIndex(h => h.includes('brand') || h.includes('trade'));
+      const mfgIdx = headers.findIndex(h => h.includes('manufacturer') || h.includes('company') || h.includes('mfg'));
+      const mrpIdx = headers.findIndex(h => h.includes('mrp') || h.includes('price') && !h.includes('purchase') && !h.includes('sell'));
+      const purchaseIdx = headers.findIndex(h => h.includes('purchase') || h.includes('cost') || h.includes('buying'));
+      const sellingIdx = headers.findIndex(h => h.includes('selling') || h.includes('sell') || h.includes('retail'));
+      const unitIdx = headers.findIndex(h => h.includes('unit') || h.includes('pack') || h.includes('strip'));
+
+      const parsedMedicines: MasterMedicine[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cells: string[] = [];
+        let currentCell = '';
+        let inQuotes = false;
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"' || char === "'") {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            cells.push(currentCell.trim());
+            currentCell = '';
+          } else {
+            currentCell += char;
+          }
+        }
+        cells.push(currentCell.trim());
+
+        if (cells.length === 0 || !cells[nameIdx]) continue;
+
+        const name = cells[nameIdx].replace(/^["']|["']$/g, '').trim();
+        if (!name) continue;
+
+        parsedMedicines.push({
+          name,
+          genericName: genericIdx !== -1 ? cells[genericIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
+          category: categoryIdx !== -1 ? cells[categoryIdx]?.replace(/^["']|["']$/g, '').trim() : 'Tablets',
+          brand: brandIdx !== -1 ? cells[brandIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
+          manufacturer: mfgIdx !== -1 ? cells[mfgIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
+          mrp: mrpIdx !== -1 ? Number(cells[mrpIdx]) || undefined : undefined,
+          purchasePrice: purchaseIdx !== -1 ? Number(cells[purchaseIdx]) || undefined : undefined,
+          sellingPrice: sellingIdx !== -1 ? Number(cells[sellingIdx]) || undefined : undefined,
+          unit: unitIdx !== -1 ? cells[unitIdx]?.replace(/^["']|["']$/g, '').trim() : 'Strip',
+        });
+      }
+
+      if (parsedMedicines.length === 0) {
+        throw new Error('No valid medicine rows could be parsed.');
+      }
+
+      showToast(`Found ${parsedMedicines.length.toLocaleString()} standard medicines. Starting high-speed import...`, 'success');
+
+      // Import in non-blocking batches
+      await medicineMasterService.importInChunks(parsedMedicines, (progress) => {
+        setImportProgress(progress);
+      });
+
+      showToast(`Successfully imported all ${parsedMedicines.length.toLocaleString()} standard medicines!`, 'success');
+      await loadMasterCount();
+    } catch (err: any) {
+      console.error('Cloud import failed:', err);
+      setImportingError(err.message || 'An unexpected error occurred during cloud import.');
+      showToast(err.message || 'Failed to download or import medicines', 'danger');
+    } finally {
+      setImportingMeds(false);
     }
   };
 
@@ -314,6 +602,158 @@ export default function Settings() {
           </div>
         </Card>
 
+        {/* Medicine Database Master Section */}
+        <Card className="p-8 space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <Database className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-text/40">Medicine Database Master</h3>
+                <p className="text-[10px] font-bold text-text/20">Offline high-speed search index supporting 2,50,000+ medicines</p>
+              </div>
+            </div>
+            {masterMedicineCount > 0 ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[9px] font-black uppercase tracking-widest">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Active Index
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-500 text-[9px] font-black uppercase tracking-widest">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Empty Database
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Database Stats Card */}
+            <div className="p-6 bg-background rounded-2xl border border-border flex flex-col justify-between space-y-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-text/30">Total Medicines Indexed</p>
+                <p className="text-3xl font-black text-text mt-1">{masterMedicineCount.toLocaleString()}</p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <p className="text-[10px] font-medium text-text/50 leading-normal">
+                  IndexedDB manages storage in your local browser. It keeps searches <span className="font-bold text-primary">under 5 milliseconds</span> even with 250,000 records, offline, and with zero impact on performance.
+                </p>
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadDemoMeds}
+                    disabled={importingMeds}
+                    className="text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                    Load Demo (150)
+                  </Button>
+                  {masterMedicineCount > 0 && (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleClearMasterDatabase}
+                      disabled={importingMeds}
+                      className="text-[9px] font-black uppercase tracking-widest border border-danger/20 bg-danger/5 hover:bg-danger/10 text-danger flex items-center gap-1.5 animate-none"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Clear Index
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* CSV/Excel Import Card */}
+            <div className="p-6 bg-background rounded-2xl border border-border flex flex-col justify-center items-center text-center relative overflow-hidden">
+              {importingMeds ? (
+                <div className="w-full space-y-4 py-4 px-2">
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto text-primary animate-bounce">
+                    <UploadCloud className="h-6 w-6" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-black uppercase tracking-widest text-text/80">Importing Medicines...</p>
+                    <p className="text-[10px] font-bold text-text/40">Chunking data to keep browser completely responsive.</p>
+                  </div>
+                  <div className="w-full bg-border rounded-full h-2.5 overflow-hidden">
+                    <div 
+                      className="bg-primary h-full transition-all duration-300"
+                      style={{ width: `${importProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-sm font-black text-primary">{importProgress}% Complete</p>
+                </div>
+              ) : (
+                <div className="space-y-4 py-2">
+                  <div className="h-12 w-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto shadow-inner">
+                    <UploadCloud className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <label className="cursor-pointer">
+                      <span className="px-5 py-2.5 bg-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-105 active:scale-95 transition-all inline-block shadow-lg shadow-primary/25">
+                        Import Medicine CSV
+                      </span>
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        accept=".csv" 
+                        onChange={handleMedicineCSVImport} 
+                      />
+                    </label>
+                    <p className="text-[10px] font-black text-text/40 mt-3 uppercase tracking-widest">Supports 2,50,000+ Rows</p>
+                    <p className="text-[8px] font-bold text-text/20 mt-1 leading-normal uppercase max-w-[280px] mx-auto">
+                      Export your Excel sheet as a CSV file. It must contain a column named "Name" or "Medicine" with generic composition, pricing, and category.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Card 3: Standard Indian Master Dataset */}
+            <div className="p-6 bg-background rounded-2xl border border-border flex flex-col justify-between space-y-4 relative overflow-hidden text-center">
+              <div className="space-y-4 py-2">
+                <div className="h-12 w-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto shadow-inner">
+                  <BookOpen className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-widest text-text">Standard Master Dataset</h4>
+                  <p className="text-[10px] font-bold text-text/40 mt-1 uppercase tracking-widest">5,150+ Indian Medicines</p>
+                  <p className="text-[8px] font-bold text-text/20 mt-2 leading-normal uppercase max-w-[280px] mx-auto">
+                    Pre-compiled list of common Indian medicines across key categories with brands, generic formulas, units, and MRPs.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 w-full">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleCloudMasterImport}
+                  disabled={importingMeds}
+                  className="text-[9px] font-black uppercase tracking-widest w-full flex items-center justify-center gap-1.5 py-2.5 shadow-lg shadow-primary/20"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {importingMeds ? 'Please Wait...' : '1-Click Cloud Import'}
+                </Button>
+                
+                <a 
+                  href="/pharmaflow_medicines_master.csv" 
+                  download="pharmaflow_medicines_master.csv"
+                  className={cn(
+                    "px-3 py-2.5 bg-surface text-text hover:bg-background border border-border text-[9px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-sm text-center",
+                    importingMeds ? "opacity-50 pointer-events-none" : ""
+                  )}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Download CSV Dataset
+                </a>
+              </div>
+            </div>
+          </div>
+        </Card>
+
         {/* Invoice Settings */}
         <Card className="p-8 space-y-6">
           <div className="flex items-center gap-3 pb-4 border-b border-border">
@@ -327,33 +767,88 @@ export default function Settings() {
           </div>
 
           <div className="space-y-6">
-            <div className="flex flex-col items-center p-6 bg-background border border-border border-dashed rounded-3xl space-y-4">
-              {formData.logoURL ? (
-                <div className="relative group">
-                  <img src={formData.logoURL} alt="Logo" className="h-24 w-auto object-contain rounded-lg" />
-                  <button 
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, logoURL: '' }))}
-                    className="absolute -top-2 -right-2 h-6 w-6 bg-danger text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    ×
-                  </button>
-                </div>
-              ) : (
-                <div className="h-24 w-24 rounded-2xl bg-surface border border-border flex items-center justify-center text-text/10">
-                  {uploadingLogo ? <Loader2 className="h-8 w-8 animate-spin" /> : <ImageIcon className="h-8 w-8" />}
+            <div 
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={cn(
+                "flex flex-col items-center p-6 bg-background border rounded-3xl space-y-4 transition-all relative overflow-hidden w-full",
+                isDragging ? "border-primary bg-primary/5 scale-[1.02]" : "border-border border-dashed",
+                uploadingLogo ? "opacity-60 pointer-events-none" : ""
+              )}
+            >
+              {/* Drag over overlay */}
+              {isDragging && (
+                <div className="absolute inset-0 bg-primary/10 flex items-center justify-center backdrop-blur-xs z-10">
+                  <p className="text-sm font-black text-primary uppercase tracking-widest">Drop logo to upload</p>
                 </div>
               )}
-              
-              <div className="flex flex-col items-center">
-                <label className="cursor-pointer">
-                  <span className="px-4 py-2 bg-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-105 active:scale-95 transition-all inline-block">
-                    {formData.logoURL ? 'Change Logo' : 'Upload Logo'}
-                  </span>
-                  <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo} />
-                </label>
-                <p className="text-[9px] font-bold text-text/30 mt-2 uppercase tracking-widest">A4 Layout Recommendation: 200x200px</p>
-              </div>
+
+              {formData.logoURL ? (
+                <div className="flex flex-col items-center space-y-4 w-full">
+                  {/* Logo Preview box */}
+                  <div className="relative group overflow-hidden rounded-2xl border border-border p-4 bg-white/50 backdrop-blur-md shadow-inner flex items-center justify-center max-w-[180px] h-32">
+                    <img 
+                      src={formData.logoURL} 
+                      alt="Logo Preview" 
+                      className="max-h-full max-w-full object-contain cursor-pointer transition-transform duration-300 hover:scale-105"
+                      onClick={() => setIsPreviewOpen(true)}
+                      title="Click to view full-size logo"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 justify-center w-full">
+                    {/* Preview button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsPreviewOpen(true)}
+                      className="px-3 py-2 bg-surface text-text hover:bg-background border border-border text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-2 shadow-sm"
+                    >
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      Preview
+                    </button>
+
+                    {/* Replace button */}
+                    <label className="cursor-pointer">
+                      <span className="px-3 py-2 bg-primary text-white hover:bg-primary/90 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all inline-flex items-center gap-2 shadow-md shadow-primary/10">
+                        <Save className="rotate-180 h-3.5 w-3.5" />
+                        Replace
+                      </span>
+                      <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo} />
+                    </label>
+
+                    {/* Remove button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, logoURL: '' }));
+                        showToast('Logo removed from settings. Save changes to persist.', 'warning');
+                      }}
+                      className="px-3 py-2 bg-danger/10 text-danger hover:bg-danger/20 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-2"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center space-y-4 py-4 w-full">
+                  <div className="h-20 w-20 rounded-2xl bg-surface border border-border flex items-center justify-center text-text/30 shadow-inner">
+                    {uploadingLogo ? <Loader2 className="h-8 w-8 animate-spin text-primary" /> : <ImageIcon className="h-8 w-8" />}
+                  </div>
+                  
+                  <div className="text-center">
+                    <label className="cursor-pointer">
+                      <span className="px-5 py-2.5 bg-primary text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:scale-105 active:scale-95 transition-all inline-block shadow-lg shadow-primary/25">
+                        Choose File
+                      </span>
+                      <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo} />
+                    </label>
+                    <p className="text-[10px] font-black text-text/40 mt-3 uppercase tracking-widest">or Drag & Drop Logo Here</p>
+                    <p className="text-[8px] font-bold text-text/20 mt-1 uppercase tracking-widest">Supports PNG, JPG, JPEG (200x200px recommended)</p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <Input
@@ -484,6 +979,39 @@ export default function Settings() {
           Save All Settings
         </Button>
       </div>
+
+      {/* Dynamic Logo Preview Lightbox Modal */}
+      <AnimatePresence>
+        {isPreviewOpen && formData.logoURL && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative max-w-lg w-full bg-surface border border-border p-6 rounded-3xl shadow-2xl flex flex-col items-center space-y-6"
+            >
+              <div className="flex items-center justify-between w-full border-b border-border pb-3">
+                <h3 className="text-xs font-black uppercase tracking-widest text-text/60">Store Logo Preview</h3>
+                <button 
+                  onClick={() => setIsPreviewOpen(false)}
+                  className="h-8 w-8 rounded-full bg-background border border-border flex items-center justify-center text-sm font-black hover:bg-surface-hover transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="p-8 bg-white rounded-2xl border border-border/50 max-h-[350px] w-full flex items-center justify-center shadow-inner overflow-hidden">
+                <img src={formData.logoURL} alt="Store Logo High-Res Preview" className="max-h-full max-w-full object-contain" />
+              </div>
+              <div className="flex justify-between items-center w-full pt-2">
+                <p className="text-[8px] font-bold text-text/40 uppercase tracking-wider">Previewing uploaded active store branding logo</p>
+                <Button variant="outline" size="sm" onClick={() => setIsPreviewOpen(false)} className="text-[9px] font-black uppercase tracking-widest">
+                  Close Preview
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
     </PageTransition>
   );

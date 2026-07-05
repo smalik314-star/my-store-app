@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Stethoscope, LogIn, AlertCircle } from 'lucide-react';
+import { LogIn, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { useNavigate } from 'react-router-dom';
+import { Logo } from '../../components/common/Logo';
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -50,10 +51,10 @@ export default function Login() {
         className="w-full max-w-md z-10"
       >
         <div className="text-center mb-8">
-          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-white shadow-xl shadow-primary/20 mb-4">
-            <Stethoscope className="h-10 w-10" />
+          <div className="inline-flex mb-4">
+            <Logo className="h-16 w-16 drop-shadow-xl" variant="color" />
           </div>
-          <h1 className="text-3xl font-bold text-text tracking-tight">PharmaFlow</h1>
+          <h1 className="text-3xl font-bold text-text tracking-tight animate-fade-in">PharmaFlow</h1>
           <p className="text-text/60 mt-2 font-medium">Professional Pharmacy Management</p>
         </div>
 

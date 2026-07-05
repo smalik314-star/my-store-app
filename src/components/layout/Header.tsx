@@ -23,6 +23,7 @@ import { toJsDate } from '../../utils/date';
 import { Product, Invoice, Customer } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
+import { Logo } from '../common/Logo';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -334,6 +335,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
             >
               <Menu className="h-6 w-6" />
             </Button>
+            <Logo className="h-[32px] w-[32px] md:h-[36px] md:w-[36px] lg:hidden shrink-0" variant="color" />
             <h2 className="text-base md:text-lg font-semibold text-text truncate">
               {getPageTitle()}
             </h2>
@@ -590,7 +592,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                         <button
                           key={p.id}
                           onClick={() => {
-                            navigate('/inventory');
+                            navigate(`/inventory?view=${p.id}`);
                             setSearchOpen(false);
                           }}
                           className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-background text-left transition-colors group cursor-pointer border border-transparent hover:border-border"
