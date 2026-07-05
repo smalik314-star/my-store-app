@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Product, Invoice } from '../types';
+import { toJsDate } from '../utils/date';
 
 export interface ProductIntelligence {
   productId: string;
@@ -32,12 +33,13 @@ export const inventoryIntelligenceService = {
 
     const q = query(
       collection(db, 'invoices'),
-      where('tenantId', '==', tenantId),
-      where('createdAt', '>=', Timestamp.fromDate(sixtyDaysAgo))
+      where('tenantId', '==', tenantId)
     );
 
     const snapshot = await getDocs(q);
-    const invoices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+    const invoices = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as Invoice))
+      .filter(inv => toJsDate(inv.createdAt) >= sixtyDaysAgo);
 
     const analysis: Record<string, ProductIntelligence> = {};
 

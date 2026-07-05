@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { AIIntent, AIResponse, AIAction } from '../types/ai';
+import { toJsDate } from '../utils/date';
 
 const COLLECTION_INVOICES = 'invoices';
 const COLLECTION_PRODUCTS = 'products';
@@ -111,13 +112,18 @@ export const aiService = {
     
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId),
-      where('createdAt', '>=', Timestamp.fromDate(startOfToday))
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     let total = 0;
-    snapshot.forEach(doc => total += doc.data().grandTotal || 0);
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const date = toJsDate(data.createdAt);
+      if (date >= startOfToday) {
+        total += data.grandTotal || 0;
+      }
+    });
 
     return {
       id: Math.random().toString(36).substr(2, 9),
@@ -127,7 +133,7 @@ export const aiService = {
       data: total,
       type: 'number',
       timestamp: new Date(),
-      actions: [{ label: 'View Today\'s Invoices', path: '/invoices' }]
+      actions: [{ label: "View Today's Invoices", path: '/invoices' }]
     };
   },
 
@@ -138,13 +144,18 @@ export const aiService = {
     
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId),
-      where('createdAt', '>=', Timestamp.fromDate(firstDayOfMonth))
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     let total = 0;
-    snapshot.forEach(doc => total += doc.data().grandTotal || 0);
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const date = toJsDate(data.createdAt);
+      if (date >= firstDayOfMonth) {
+        total += data.grandTotal || 0;
+      }
+    });
 
     return {
       id: Math.random().toString(36).substr(2, 9),
@@ -162,14 +173,17 @@ export const aiService = {
   async getLowStock(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_PRODUCTS),
-      where('tenantId', '==', tenantId),
-      where('stockQuantity', '<=', 10),
-      where('stockQuantity', '>', 0)
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     const items: any[] = [];
-    snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.stockQuantity <= 10 && data.stockQuantity > 0) {
+        items.push({ id: doc.id, ...data });
+      }
+    });
 
     return {
       id: Math.random().toString(36).substr(2, 9),
@@ -212,13 +226,18 @@ export const aiService = {
     
     const q = query(
       collection(db, COLLECTION_PRODUCTS),
-      where('tenantId', '==', tenantId),
-      where('expiryDate', '<=', Timestamp.fromDate(next30Days))
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     const items: any[] = [];
-    snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const expiry = toJsDate(data.expiryDate);
+      if (expiry <= next30Days) {
+        items.push({ id: doc.id, ...data });
+      }
+    });
 
     return {
       id: Math.random().toString(36).substr(2, 9),
@@ -236,22 +255,27 @@ export const aiService = {
   async getPendingDues(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_CUSTOMERS),
-      where('tenantId', '==', tenantId),
-      where('outstandingBalance', '>', 0),
-      orderBy('outstandingBalance', 'desc'),
-      limit(5)
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     const items: any[] = [];
-    snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.outstandingBalance && data.outstandingBalance > 0) {
+        items.push({ id: doc.id, ...data });
+      }
+    });
+
+    items.sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
+    const limitedItems = items.slice(0, 5);
 
     return {
       id: Math.random().toString(36).substr(2, 9),
       query: queryText,
-      answer: `Found ${items.length} customers with pending dues. Here are the top ones.`,
+      answer: `Found ${limitedItems.length} customers with pending dues. Here are the top ones.`,
       intent: 'PENDING_DUES',
-      data: items,
+      data: limitedItems,
       type: 'list',
       timestamp: new Date(),
       actions: [{ label: 'View All Customers', path: '/customers' }]
@@ -261,21 +285,22 @@ export const aiService = {
   async getTopCustomers(tenantId: string, queryText: string): Promise<AIResponse> {
     const q = query(
       collection(db, COLLECTION_CUSTOMERS),
-      where('tenantId', '==', tenantId),
-      orderBy('totalPurchases', 'desc'),
-      limit(5)
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     const items: any[] = [];
     snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
 
+    items.sort((a, b) => (b.totalPurchases || 0) - (a.totalPurchases || 0));
+    const limitedItems = items.slice(0, 5);
+
     return {
       id: Math.random().toString(36).substr(2, 9),
       query: queryText,
       answer: `Here are your top 5 customers by lifetime purchases.`,
       intent: 'TOP_CUSTOMERS',
-      data: items,
+      data: limitedItems,
       type: 'list',
       timestamp: new Date(),
       actions: [{ label: 'All Customers', path: '/customers' }]
@@ -316,13 +341,18 @@ export const aiService = {
     
     const q = query(
       collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId),
-      where('createdAt', '>=', Timestamp.fromDate(last7Days))
+      where('tenantId', '==', tenantId)
     );
     
     const snapshot = await getDocs(q);
     let totalRevenue = 0;
-    snapshot.forEach(doc => totalRevenue += doc.data().grandTotal || 0);
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const date = toJsDate(data.createdAt);
+      if (date >= last7Days) {
+        totalRevenue += data.grandTotal || 0;
+      }
+    });
     const estimatedProfit = totalRevenue * 0.2;
 
     return {

@@ -49,7 +49,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     const path = `settings/${user.tenantId}`;
     const unsub = onSnapshot(doc(db, 'settings', user.tenantId), (snapshot) => {
       if (snapshot.exists()) {
-        setSettings(snapshot.data() as StoreSettings);
+        const data = snapshot.data() as StoreSettings;
+        setSettings(data);
       } else {
         // Initialize with defaults if not found for this new tenant
         setSettings({ ...DEFAULT_SETTINGS });
@@ -62,6 +63,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     return () => unsub();
   }, [user?.tenantId]);
+
+  useEffect(() => {
+    if (settings?.themeMode === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings?.themeMode]);
 
   const updateSettings = async (newSettings: Partial<StoreSettings>) => {
     if (!user?.tenantId) throw new Error('Tenant not found');

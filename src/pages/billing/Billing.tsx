@@ -35,6 +35,7 @@ import { formatCurrency } from '../../utils/currency';
 
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
+import { toJsDate } from '../../utils/date';
 
 const WALK_IN_CUSTOMER: Customer = {
   id: 'walk-in',
@@ -113,14 +114,21 @@ export default function Billing() {
       try {
         const qRecentInvoices = query(
           collection(db, 'invoices'),
-          where('tenantId', '==', user.tenantId),
-          orderBy('createdAt', 'desc'),
-          limit(5)
+          where('tenantId', '==', user.tenantId)
         );
         const snapshot = await getDocs(qRecentInvoices);
+        
+        // Map and sort client-side to prevent requiring a composite index
+        const invoices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+        invoices.sort((a, b) => {
+          const dateA = toJsDate(a.createdAt);
+          const dateB = toJsDate(b.createdAt);
+          return dateB.getTime() - dateA.getTime();
+        });
+
         const recentProductIds = new Set<string>();
-        snapshot.docs.forEach(doc => {
-          const items = doc.data().items as InvoiceItem[];
+        invoices.slice(0, 5).forEach(inv => {
+          const items = inv.items as InvoiceItem[];
           items.forEach(item => recentProductIds.add(item.productId));
         });
         

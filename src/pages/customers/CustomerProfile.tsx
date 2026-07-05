@@ -57,8 +57,7 @@ export default function CustomerProfile() {
     const q = query(
       collection(db, 'invoices'), 
       where('tenantId', '==', user.tenantId),
-      where('customerId', '==', id),
-      orderBy('createdAt', 'desc')
+      where('customerId', '==', id)
     );
     
     const unsubInvoices = onSnapshot(q, (snapshot) => {
@@ -66,6 +65,14 @@ export default function CustomerProfile() {
         ...doc.data(),
         id: doc.id
       } as Invoice));
+      
+      // Client-side sort by createdAt desc
+      items.sort((a, b) => {
+        const dateA = toJsDate(a.createdAt);
+        const dateB = toJsDate(b.createdAt);
+        return dateB.getTime() - dateA.getTime();
+      });
+      
       setInvoices(items);
     });
 

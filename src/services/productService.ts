@@ -51,17 +51,19 @@ export const productService = {
         }
       }
 
-      // Check SKU uniqueness for this tenant
-      const skuQuery = query(
-        collection(db, COLLECTION_NAME), 
-        where('tenantId', '==', tenantId),
-        where('sku', '==', sanitized.sku)
-      );
-      const skuSnap = await getDocs(skuQuery);
-      if (!skuSnap.empty) throw new Error('SKU already exists');
+      // Check SKU uniqueness for this tenant if provided
+      if (sanitized.sku && sanitized.sku.trim() !== '') {
+        const skuQuery = query(
+          collection(db, COLLECTION_NAME), 
+          where('tenantId', '==', tenantId),
+          where('sku', '==', sanitized.sku)
+        );
+        const skuSnap = await getDocs(skuQuery);
+        if (!skuSnap.empty) throw new Error('SKU already exists');
+      }
 
-      // Check Barcode uniqueness for this tenant
-      if (sanitized.barcode) {
+      // Check Barcode uniqueness for this tenant if provided
+      if (sanitized.barcode && sanitized.barcode.trim() !== '') {
         const barcodeQuery = query(
           collection(db, COLLECTION_NAME), 
           where('tenantId', '==', tenantId),
@@ -107,8 +109,8 @@ export const productService = {
 
       if (sanitized.stockQuantity !== undefined && sanitized.stockQuantity < 0) throw new Error('Stock quantity cannot be negative');
       
-      // SKU uniqueness check if changed
-      if (sanitized.sku) {
+      // SKU uniqueness check if changed and not empty
+      if (sanitized.sku && sanitized.sku.trim() !== '') {
         const skuQuery = query(
           collection(db, COLLECTION_NAME), 
           where('tenantId', '==', tenantId),
@@ -116,6 +118,17 @@ export const productService = {
         );
         const skuSnap = await getDocs(skuQuery);
         if (skuSnap.docs.some(d => d.id !== id)) throw new Error('SKU already exists');
+      }
+
+      // Barcode uniqueness check if changed and not empty
+      if (sanitized.barcode && sanitized.barcode.trim() !== '') {
+        const barcodeQuery = query(
+          collection(db, COLLECTION_NAME), 
+          where('tenantId', '==', tenantId),
+          where('barcode', '==', sanitized.barcode)
+        );
+        const barcodeSnap = await getDocs(barcodeQuery);
+        if (barcodeSnap.docs.some(d => d.id !== id)) throw new Error('Barcode already exists');
       }
 
       return await updateDoc(productRef, {

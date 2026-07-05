@@ -1,19 +1,43 @@
 @import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
 
+:root {
+  --color-primary-val: #0f766e;
+  --color-secondary-val: #14b8a6;
+  --color-accent-val: #f59e0b;
+  --color-danger-val: #ef4444;
+  --color-success-val: #22c55e;
+  --color-background-val: #f8fafc;
+  --color-surface-val: #ffffff;
+  --color-text-val: #1e293b;
+  --color-border-val: #e2e8f0;
+}
+
+.dark {
+  --color-primary-val: #2dd4bf;
+  --color-secondary-val: #14b8a6;
+  --color-accent-val: #fbbf24;
+  --color-danger-val: #f87171;
+  --color-success-val: #4ade80;
+  --color-background-val: #0b0f19;
+  --color-surface-val: #131b2e;
+  --color-text-val: #f8fafc;
+  --color-border-val: #1e293b;
+}
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-heading: "Poppins", sans-serif;
 
-  --color-primary: #0f766e;
-  --color-secondary: #14b8a6;
-  --color-accent: #f59e0b;
-  --color-danger: #ef4444;
-  --color-success: #22c55e;
-  --color-background: #f8fafc;
-  --color-surface: #ffffff;
-  --color-text: #1e293b;
-  --color-border: #e2e8f0;
+  --color-primary: var(--color-primary-val);
+  --color-secondary: var(--color-secondary-val);
+  --color-accent: var(--color-accent-val);
+  --color-danger: var(--color-danger-val);
+  --color-success: var(--color-success-val);
+  --color-background: var(--color-background-val);
+  --color-surface: var(--color-surface-val);
+  --color-text: var(--color-text-val);
+  --color-border: var(--color-border-val);
 
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
@@ -50,7 +74,7 @@
 }
 
 .glass-morphism {
-  @apply bg-white/80 backdrop-blur-md border border-white/20;
+  @apply bg-surface/80 backdrop-blur-md border border-border/20;
 }
 
 .page-transition {

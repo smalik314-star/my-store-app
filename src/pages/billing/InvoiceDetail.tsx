@@ -25,7 +25,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { InvoiceTemplate } from '../../components/billing/InvoiceTemplate';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
@@ -77,13 +77,16 @@ export default function InvoiceDetail() {
     
     setIsGeneratingPDF(true);
     try {
+      console.log('Generating PDF from printRef...');
       const canvas = await html2canvas(printRef.current, {
         scale: 2,
         useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff'
+        logging: true, // Enable logging for debugging
+        backgroundColor: '#ffffff',
+        windowWidth: 1200 // Force standard desktop viewport width during capture to prevent mobile layout squishing
       });
       
+      console.log('Canvas generated successfully:', canvas.width, 'x', canvas.height);
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       
@@ -97,7 +100,8 @@ export default function InvoiceDetail() {
       pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
       heightLeft -= pageHeight;
       
-      while (heightLeft >= 0) {
+      // Use strict > 0 to prevent empty/duplicate pages on single-page invoices
+      while (heightLeft > 0.5) {
         position = heightLeft - imgHeight;
         pdf.addPage();
         pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
@@ -106,9 +110,9 @@ export default function InvoiceDetail() {
       
       pdf.save(`Invoice_${invoice.invoiceNumber}.pdf`);
       showToast('PDF generated and downloaded successfully', 'success');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to generate PDF:', error);
-      showToast('Failed to generate PDF. Please try again.', 'danger');
+      showToast(`Failed to generate PDF: ${error?.message || 'Please try again'}`, 'danger');
     } finally {
       setIsGeneratingPDF(false);
     }

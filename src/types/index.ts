@@ -60,6 +60,7 @@ export interface Product {
   minimumStock: number;
   batchNumber: string;
   expiryDate: any; // Firebase Timestamp
+  manufacturingDate?: any; // Firebase Timestamp
   rackLocation?: string;
   description?: string;
   imageUrl?: string;
