@@ -14,10 +14,11 @@ import {
   startAfter,
   QueryConstraint,
   getDoc,
+  setDoc,
   increment
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { Product, Tenant } from '../types';
+import { Product, Tenant, StockMovement } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 const COLLECTION_NAME = 'products';
@@ -46,8 +47,15 @@ export const productService = {
       const tenantDoc = await getDoc(tenantRef);
       if (tenantDoc.exists()) {
         const tenant = tenantDoc.data() as Tenant;
-        if (tenant.usage.productsCount >= tenant.limits.maxProducts) {
+        const usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+        const limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+        
+        if (usage.productsCount >= limits.maxProducts) {
           throw new Error('Product limit reached. Please upgrade your plan.');
+        }
+
+        if (!tenant.usage || !tenant.limits) {
+          await setDoc(tenantRef, { usage, limits }, { merge: true });
         }
       }
 
@@ -244,6 +252,40 @@ export const productService = {
       }
     }, (error) => {
       console.error('Products Subscription Error:', error);
+    });
+  },
+
+  subscribeToStockMovements(
+    tenantId: string,
+    callback: (movements: StockMovement[]) => void,
+    limitCount: number = 50
+  ) {
+    if (!tenantId) return () => {};
+    
+    const q = query(
+      collection(db, 'stockMovements'),
+      where('tenantId', '==', tenantId)
+    );
+    
+    return onSnapshot(q, (snapshot) => {
+      try {
+        const movements = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as StockMovement[];
+        
+        movements.sort((a, b) => {
+          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
+          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+          return dateB.getTime() - dateA.getTime();
+        });
+        
+        callback(movements.slice(0, limitCount));
+      } catch (err) {
+        console.error('Stock Movements Subscription Processing Error:', err);
+      }
+    }, (error) => {
+      console.error('Stock Movements Subscription Error:', error);
     });
   }
 };

@@ -12,7 +12,7 @@ import {
 import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
 import { formatCurrency } from '../../utils/currency';
-import { toJsDate } from '../../utils/date';
+import { toJsDate, formatDate } from '../../utils/date';
 import { Logo } from '../common/Logo';
 
 interface InvoiceTemplateProps {
@@ -63,10 +63,15 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <span className="w-1/3 text-right">Amt</span>
           </div>
           {invoice.items.map((item, idx) => (
-            <div key={idx} className="flex justify-between py-0.5">
-              <span className="w-1/2 truncate">{item.name}</span>
-              <span className="w-1/6 text-center">{item.quantity}</span>
-              <span className="w-1/3 text-right">{formatCurrency(item.total)}</span>
+            <div key={idx} className="py-1 border-b border-gray-100 last:border-0">
+              <div className="flex justify-between">
+                <span className="w-1/2 truncate font-bold">{item.name}</span>
+                <span className="w-1/6 text-center">{item.quantity}</span>
+                <span className="w-1/3 text-right">{formatCurrency(item.total)}</span>
+              </div>
+              <div className="text-[8px] text-gray-500">
+                Batch: {item.batchNumber || 'N/A'} | Exp: {item.expiryDate ? formatDate(item.expiryDate, { month: '2-digit', year: '2-digit' }) : 'N/A'}
+              </div>
             </div>
           ))}
         </div>
@@ -188,32 +193,40 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-background/20 border-y border-border">
-              <th className="px-10 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest">Description</th>
-              <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">SKU</th>
-              <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">Qty</th>
-              <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-right">Unit Price</th>
-              <th className="px-10 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-right">Amount</th>
+              <th className="px-8 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest">Medicine Description</th>
+              <th className="px-4 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">Batch</th>
+              <th className="px-4 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">Mfg</th>
+              <th className="px-4 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">Expiry</th>
+              <th className="px-4 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">Qty</th>
+              <th className="px-4 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-right">Rate</th>
+              <th className="px-8 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-right">Amount</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/50">
             {invoice.items.map((item, idx) => (
               <tr key={idx} className="hover:bg-background/20 transition-colors">
-                <td className="px-10 py-6">
+                <td className="px-8 py-6">
                   <div className="flex flex-col">
                     <span className="text-sm font-black text-text">{item.name}</span>
                     <span className="text-[9px] font-bold text-text/30 uppercase">Medicine Item</span>
                   </div>
                 </td>
-                <td className="px-6 py-6 text-center">
-                  <span className="text-xs font-mono text-text/40">{item.sku}</span>
+                <td className="px-4 py-6 text-center">
+                  <span className="text-xs font-bold text-text">{item.batchNumber || '—'}</span>
                 </td>
-                <td className="px-6 py-6 text-center">
+                <td className="px-4 py-6 text-center">
+                  <span className="text-xs text-text/60">{item.manufacturingDate ? formatDate(item.manufacturingDate) : '—'}</span>
+                </td>
+                <td className="px-4 py-6 text-center">
+                  <span className="text-xs text-text/60">{item.expiryDate ? formatDate(item.expiryDate) : '—'}</span>
+                </td>
+                <td className="px-4 py-6 text-center">
                   <span className="text-sm font-black text-text">{item.quantity}</span>
                 </td>
-                <td className="px-6 py-6 text-right">
+                <td className="px-4 py-6 text-right">
                   <span className="text-sm font-bold text-text/60">{formatCurrency(item.price)}</span>
                 </td>
-                <td className="px-10 py-6 text-right">
+                <td className="px-8 py-6 text-right">
                   <span className="text-sm font-black text-text">{formatCurrency(item.price * item.quantity)}</span>
                 </td>
               </tr>

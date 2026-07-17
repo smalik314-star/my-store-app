@@ -16,6 +16,7 @@ import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { useToast } from '../../context/ToastContext';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import { InventoryIntelligence } from '../../components/inventory/InventoryIntelligence';
+import { InventoryDashboard } from '../../components/inventory/InventoryDashboard';
 import { toJsDate } from '../../utils/date';
 
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -27,6 +28,7 @@ export default function Inventory() {
   const [searchParams, setSearchParams] = useSearchParams();
   const editId = searchParams.get('edit');
   const viewId = searchParams.get('view');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger'>('dashboard');
 
   const [products, setProducts] = useState<Product[]>([]);
   const [intelligence, setIntelligence] = useState<Record<string, ProductIntelligence>>({});
@@ -267,106 +269,149 @@ export default function Inventory() {
         </div>
       </div>
 
-      <InventoryIntelligence 
-        intelligence={intelligence} 
-        loading={intelligenceLoading} 
-      />
-
-      <ProductFilters 
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        selectedCategory={selectedCategory}
-        setSelectedCategory={setSelectedCategory}
-        selectedStatus={selectedStatus}
-        setSelectedStatus={setSelectedStatus}
-        selectedExpiryStatus={selectedExpiryStatus}
-        setSelectedExpiryStatus={setSelectedExpiryStatus}
-        priceRange={priceRange}
-        setPriceRange={setPriceRange}
-        barcodeInput={barcodeInput}
-        setBarcodeInput={setBarcodeInput}
-        onBarcodeScan={handleBarcodeScan}
-      />
-
-      <div className="flex flex-col gap-4">
-        {/* Bulk Actions Bar */}
-        <AnimatePresence>
-          {selectedIds.length > 0 && (
-            <motion.div
-              initial={{ y: 50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 50, opacity: 0 }}
-              className="fixed bottom-6 left-6 right-6 lg:left-auto lg:right-8 lg:bottom-8 lg:w-auto z-40 flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-primary text-white rounded-3xl shadow-2xl shadow-primary/40 border border-white/20"
-            >
-              <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
-                <div className="flex items-center gap-4">
-                  <span className="text-sm font-black uppercase tracking-widest">{selectedIds.length} Selected</span>
-                  <div className="h-6 w-[1px] bg-white/20 hidden md:block" />
-                </div>
-                <button 
-                  onClick={() => setSelectedIds([])}
-                  className="text-xs font-bold hover:underline opacity-60 hover:opacity-100"
-                >
-                  Clear Selection
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                <button 
-                  onClick={() => setIsBulkDeleting(true)}
-                  className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-danger hover:bg-danger/80 rounded-2xl text-xs font-bold transition-all shadow-lg shadow-danger/20"
-                >
-                  <Trash2 className="h-4 w-4" /> Delete
-                </button>
-                <div className="flex-1 md:flex-none flex items-center gap-2">
-                  <button 
-                    onClick={async () => {
-                      if (!user?.tenantId) return;
-                      setFormLoading(true);
-                      try {
-                        await Promise.all(selectedIds.map(id => productService.updateProduct(user.tenantId!, id, { updatedAt: new Date() })));
-                        showToast(`${selectedIds.length} items marked as reviewed`, 'success');
-                        setSelectedIds([]);
-                      } finally { setFormLoading(false); }
-                    }}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
-                  >
-                    <CheckCircle2 className="h-4 w-4" /> Review
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+      {/* Elegant Dual-Tab Selector */}
+      <div className="flex border-b border-border bg-background/50 backdrop-blur-sm sticky top-0 z-30 pt-2 pb-0 mb-2 gap-2">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={cn(
+            "pb-3.5 px-6 text-[10.5px] font-black uppercase tracking-widest border-b-2 transition-all duration-200 cursor-pointer relative",
+            activeTab === 'dashboard' 
+              ? "border-primary text-primary" 
+              : "border-transparent text-text/40 hover:text-text/75"
           )}
-        </AnimatePresence>
-
-        <div className="flex items-center justify-between px-2">
-          <div className="flex items-center gap-2">
-            <h3 className="text-[10px] font-black text-text/40 uppercase tracking-widest">Inventory Ledger</h3>
-            <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black">
-              {products.length} ITEMS FOUND
-            </span>
-          </div>
-        </div>
-        
-        <ProductTable 
-          products={products} 
-          intelligence={intelligence}
-          loading={loading}
-          selectedIds={selectedIds}
-          onSelect={setSelectedIds}
-          onEdit={(p) => { setEditingProduct(p); setShowForm(true); }}
-          onDelete={(p) => setDeletingProduct(p)}
-          onView={(p) => setSelectedProduct(p)}
-          emptyAction={
-            <Button 
-              variant="primary" 
-              onClick={() => setShowForm(true)}
-              leftIcon={<Plus className="h-4 w-4" />}
-            >
-              Add Your First Product
-            </Button>
-          }
-        />
+        >
+          {activeTab === 'dashboard' && (
+            <motion.div layoutId="inventory-active-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+          Dashboard Overview
+        </button>
+        <button
+          onClick={() => setActiveTab('ledger')}
+          className={cn(
+            "pb-3.5 px-6 text-[10.5px] font-black uppercase tracking-widest border-b-2 transition-all duration-200 cursor-pointer relative",
+            activeTab === 'ledger' 
+              ? "border-primary text-primary" 
+              : "border-transparent text-text/40 hover:text-text/75"
+          )}
+        >
+          {activeTab === 'ledger' && (
+            <motion.div layoutId="inventory-active-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+          )}
+          Stock Ledger ({products.length})
+        </button>
       </div>
+
+      {activeTab === 'dashboard' ? (
+        <InventoryDashboard 
+          products={products} 
+          intelligence={intelligence} 
+          onViewProduct={(p) => setSelectedProduct(p)} 
+          onEditProduct={(p) => { setEditingProduct(p); setShowForm(true); }} 
+        />
+      ) : (
+        <>
+          <InventoryIntelligence 
+            intelligence={intelligence} 
+            loading={intelligenceLoading} 
+          />
+
+          <ProductFilters 
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            selectedCategory={selectedCategory}
+            setSelectedCategory={setSelectedCategory}
+            selectedStatus={selectedStatus}
+            setSelectedStatus={setSelectedStatus}
+            selectedExpiryStatus={selectedExpiryStatus}
+            setSelectedExpiryStatus={setSelectedExpiryStatus}
+            priceRange={priceRange}
+            setPriceRange={setPriceRange}
+            barcodeInput={barcodeInput}
+            setBarcodeInput={setBarcodeInput}
+            onBarcodeScan={handleBarcodeScan}
+          />
+
+          <div className="flex flex-col gap-4">
+            {/* Bulk Actions Bar */}
+            <AnimatePresence>
+              {selectedIds.length > 0 && (
+                <motion.div
+                  initial={{ y: 50, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: 50, opacity: 0 }}
+                  className="fixed bottom-6 left-6 right-6 lg:left-auto lg:right-8 lg:bottom-8 lg:w-auto z-40 flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-primary text-white rounded-3xl shadow-2xl shadow-primary/40 border border-white/20"
+                >
+                  <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
+                    <div className="flex items-center gap-4">
+                      <span className="text-sm font-black uppercase tracking-widest">{selectedIds.length} Selected</span>
+                      <div className="h-6 w-[1px] bg-white/20 hidden md:block" />
+                    </div>
+                    <button 
+                      onClick={() => setSelectedIds([])}
+                      className="text-xs font-bold hover:underline opacity-60 hover:opacity-100"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                    <button 
+                      onClick={() => setIsBulkDeleting(true)}
+                      className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-3 bg-danger hover:bg-danger/80 rounded-2xl text-xs font-bold transition-all shadow-lg shadow-danger/20"
+                    >
+                      <Trash2 className="h-4 w-4" /> Delete
+                    </button>
+                    <div className="flex-1 md:flex-none flex items-center gap-2">
+                      <button 
+                        onClick={async () => {
+                          if (!user?.tenantId) return;
+                          setFormLoading(true);
+                          try {
+                            await Promise.all(selectedIds.map(id => productService.updateProduct(user.tenantId!, id, { updatedAt: new Date() })));
+                            showToast(`${selectedIds.length} items marked as reviewed`, 'success');
+                            setSelectedIds([]);
+                          } finally { setFormLoading(false); }
+                        }}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white/10 hover:bg-white/20 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+                      >
+                        <CheckCircle2 className="h-4 w-4" /> Review
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="flex items-center justify-between px-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-[10px] font-black text-text/40 uppercase tracking-widest">Inventory Ledger</h3>
+                <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black">
+                  {products.length} ITEMS FOUND
+                </span>
+              </div>
+            </div>
+            
+            <ProductTable 
+              products={products} 
+              intelligence={intelligence}
+              loading={loading}
+              selectedIds={selectedIds}
+              onSelect={setSelectedIds}
+              onEdit={(p) => { setEditingProduct(p); setShowForm(true); }}
+              onDelete={(p) => setDeletingProduct(p)}
+              onView={(p) => setSelectedProduct(p)}
+              emptyAction={
+                <Button 
+                  variant="primary" 
+                  onClick={() => setShowForm(true)}
+                  leftIcon={<Plus className="h-4 w-4" />}
+                >
+                  Add Your First Product
+                </Button>
+              }
+            />
+          </div>
+        </>
+      )}
 
       {/* Modals & Sidebars */}
       <AnimatePresence mode="wait">

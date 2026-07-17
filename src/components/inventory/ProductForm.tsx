@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, AlertCircle, Package, IndianRupee, Calendar, MapPin, 
@@ -18,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { brandService } from '../../services/brandService';
 import { db } from '../../firebase/config';
 import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
+import { MedicineAutocomplete } from '../common/MedicineAutocomplete';
 
 interface ProductFormProps {
   product?: Product;
@@ -195,6 +196,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   const [showAutofillConfirm, setShowAutofillConfirm] = useState(false);
 
   const [masterSuggestions, setMasterSuggestions] = useState<MasterMedicine[]>([]);
+  const [masterBrandSuggestions, setMasterBrandSuggestions] = useState<string[]>([]);
 
   // Synchronize debounced values
   useEffect(() => {
@@ -214,6 +216,17 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       setMasterSuggestions([]);
     }
   }, [debouncedProductName]);
+
+  // Search local IndexedDB Master Medicine database for brands when brand input changes
+  useEffect(() => {
+    if (debouncedBrandName.trim().length >= 2) {
+      medicineMasterService.searchBrands(debouncedBrandName).then(results => {
+        setMasterBrandSuggestions(results);
+      });
+    } else {
+      setMasterBrandSuggestions([]);
+    }
+  }, [debouncedBrandName]);
 
   // Initialize master medicine default samples on load so the dropdown isn't empty initially
   useEffect(() => {
@@ -376,12 +389,18 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     }
   }
 
-  const brandSuggestions = debouncedBrandName.trim() === ''
-    ? []
-    : allBrands.filter(brandName => 
-        brandName.toLowerCase().includes(debouncedBrandName.toLowerCase()) &&
-        brandName.toLowerCase() !== brandNameInput.toLowerCase()
-      );
+  const brandSuggestions = useMemo(() => {
+    if (debouncedBrandName.trim() === '') return [];
+    
+    const localMatch = allBrands.filter(brandName => 
+      brandName.toLowerCase().includes(debouncedBrandName.toLowerCase()) &&
+      brandName.toLowerCase() !== brandNameInput.toLowerCase()
+    );
+
+    // Combine local brand suggestions with master database brand suggestions and keep unique values
+    const combined = Array.from(new Set([...localMatch, ...masterBrandSuggestions]));
+    return combined;
+  }, [allBrands, debouncedBrandName, brandNameInput, masterBrandSuggestions]);
 
   const combinedSuggestions = [
     ...uniqueProductsSuggestions.slice(0, 5).map(p => ({ type: 'inventory' as const, data: p })),
@@ -777,58 +796,17 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
                   Brand Name *
                 </label>
-                <div className="relative">
-                  <Tag className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
-                  <input
-                    name="brand"
-                    value={brandNameInput}
-                    onChange={(e) => {
-                      setBrandNameInput(e.target.value);
-                      setShowBrandDropdown(true);
-                      setBrandActiveIndex(-1);
-                    }}
-                    onFocus={() => setShowBrandDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowBrandDropdown(false), 200)}
-                    onKeyDown={handleBrandKeyDown}
-                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
-                    placeholder="e.g. Calpol"
-                    autoComplete="off"
-                    required
-                  />
-                </div>
-
-                {/* Suggestions Dropdown */}
-                {showBrandDropdown && (
-                  <div className="absolute left-0 right-0 top-[100%] z-[100] mt-1 max-h-60 overflow-y-auto bg-surface border border-border rounded-xl shadow-lg">
-                    {brandSuggestions.length > 0 ? (
-                      <ul className="divide-y divide-border/50">
-                        {brandSuggestions.map((brandName, idx) => (
-                          <li
-                            key={brandName}
-                            className={cn(
-                              "px-4 py-2.5 cursor-pointer text-xs font-semibold transition-colors flex items-center justify-between",
-                              brandActiveIndex === idx ? "bg-primary/10 text-primary" : "text-text hover:bg-background"
-                            )}
-                            onMouseEnter={() => setBrandActiveIndex(idx)}
-                            onMouseDown={() => {
-                              setBrandNameInput(brandName);
-                              setShowBrandDropdown(false);
-                            }}
-                          >
-                            <span>{brandName}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      debouncedBrandName.trim() !== '' && (
-                        <div className="px-4 py-3 text-xs font-bold text-text/40 bg-background/50 flex flex-col gap-1 select-none">
-                          <span className="text-text/60">No matching brand found</span>
-                          <span className="text-[10px] text-primary/80 font-medium">Will be saved as new brand: "{debouncedBrandName}"</span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
+                <MedicineAutocomplete
+                  type="brand"
+                  value={brandNameInput}
+                  onChange={setBrandNameInput}
+                  onSelect={(brand) => {
+                    setBrandNameInput(brand as string);
+                  }}
+                  placeholder="e.g. Calpol"
+                  required
+                  name="brand"
+                />
               </div>
 
               {/* Batch Number */}

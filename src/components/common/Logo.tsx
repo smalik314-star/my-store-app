@@ -9,19 +9,55 @@ interface LogoProps {
 export function Logo({ className = 'h-8 w-8', variant = 'color' }: LogoProps) {
   const { settings } = useSettings();
   const [imgError, setImgError] = useState(false);
+  const [base64Src, setBase64Src] = useState<string | null>(null);
 
-  // If the logo changes, reset the error state to allow retrying
+  // If the logo changes, reset the error state and base64 src to allow retrying
   useEffect(() => {
     setImgError(false);
+    setBase64Src(null);
+  }, [settings?.logoURL]);
+
+  useEffect(() => {
+    if (!settings?.logoURL) {
+      setBase64Src(null);
+      return;
+    }
+
+    let active = true;
+    const convertToBase64 = async () => {
+      try {
+        const response = await fetch(settings.logoURL, { mode: 'cors' });
+        if (!response.ok) throw new Error('Fetch logo failed');
+        const blob = await response.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (active) {
+            setBase64Src(reader.result as string);
+          }
+        };
+        reader.readAsDataURL(blob);
+      } catch (err) {
+        console.warn('[Logo] Failed to pre-convert external logo to base64, falling back to original URL:', err);
+        if (active) {
+          setBase64Src(settings.logoURL);
+        }
+      }
+    };
+
+    convertToBase64();
+    return () => {
+      active = false;
+    };
   }, [settings?.logoURL]);
 
   if (settings?.logoURL && !imgError) {
     return (
       <img
-        src={settings.logoURL}
+        src={base64Src || settings.logoURL}
         alt={settings.storeName || 'PharmaFlow'}
         onError={() => setImgError(true)}
         referrerPolicy="no-referrer"
+        crossOrigin="anonymous"
         className={`${className} object-contain rounded-xl`}
       />
     );

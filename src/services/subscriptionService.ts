@@ -10,8 +10,11 @@ export const subscriptionService = {
     if (!snap.exists()) return { allowed: false, message: 'Tenant not found' };
     
     const tenant = snap.data() as Tenant;
-    const current = tenant.usage[type];
-    const limit = tenant.limits[type];
+    const usage = tenant?.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+    const limits = tenant?.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+    
+    const current = usage[type] || 0;
+    const limit = limits[type] || (type === 'invoicesCount' ? 50 : type === 'productsCount' ? 100 : 1);
     
     if (current >= limit) {
       return { 

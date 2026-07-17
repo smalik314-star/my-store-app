@@ -227,6 +227,44 @@ class MedicineMasterService {
   }
 
   /**
+   * Search brands instantly using index prefix matching (extremely fast O(log N))
+   */
+  async searchBrands(queryText: string, limit: number = 30): Promise<string[]> {
+    if (!queryText || queryText.trim().length < 2) return [];
+    
+    const db = await this.init();
+    const searchTerm = queryText.toLowerCase().trim();
+
+    return new Promise((resolve) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const index = store.index('brand_lower');
+
+      const results = new Set<string>();
+
+      const range = IDBKeyRange.bound(searchTerm, searchTerm + '\uffff');
+      const request = index.openCursor(range);
+
+      request.onsuccess = (event: any) => {
+        const cursor = event.target.result;
+        if (cursor && results.size < limit) {
+          const item = cursor.value;
+          if (item.brand) {
+            results.add(item.brand);
+          }
+          cursor.continue();
+        } else {
+          resolve(Array.from(results));
+        }
+      };
+
+      request.onerror = () => {
+        resolve(Array.from(results));
+      };
+    });
+  }
+
+  /**
    * Loads high-quality sample data if the IndexedDB is empty
    */
   async loadDefaultSamples(): Promise<void> {

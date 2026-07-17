@@ -17,11 +17,43 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Invoice, Product, Customer, Tenant } from '../types';
-import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { handleFirestoreError, OperationType, logFirestoreOperation } from '../utils/firestore-errors';
 import { tenantService } from './tenantService';
 import { toJsDate } from '../utils/date';
 
 const COLLECTION_NAME = 'invoices';
+
+function sanitizeForFirestore(obj: any): any {
+  if (obj === undefined) {
+    return null;
+  }
+  if (obj === null) {
+    return null;
+  }
+  if (obj instanceof Date) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeForFirestore);
+  }
+  if (typeof obj === 'object') {
+    if (typeof obj.toDate === 'function') {
+      return obj;
+    }
+    if (obj.constructor && obj.constructor.name !== 'Object') {
+      return obj;
+    }
+    const result: any = {};
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (val !== undefined) {
+        result[key] = sanitizeForFirestore(val);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
 
 export const invoiceService = {
   async generateInvoiceNumber(tenantId: string, prefix: string = 'INV'): Promise<string> {
@@ -30,6 +62,7 @@ export const invoiceService = {
     const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
     const year = new Date().getFullYear();
     
+    logFirestoreOperation(OperationType.GET, `counters/invoices_${tenantId}`, 'pending', { prefix, year });
     try {
       const result = await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
@@ -46,9 +79,11 @@ export const invoiceService = {
         return nextNumber;
       });
       
-      return `${prefix}-${year}-${result.toString().padStart(6, '0')}`;
+      const generatedNum = `${prefix}-${year}-${result.toString().padStart(6, '0')}`;
+      logFirestoreOperation(OperationType.GET, `counters/invoices_${tenantId}`, 'success', { generatedNum });
+      return generatedNum;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'counters');
+      handleFirestoreError(error, OperationType.WRITE, `counters/invoices_${tenantId}`);
       return ''; // unreachable
     }
   },
@@ -56,24 +91,60 @@ export const invoiceService = {
   async saveInvoice(tenantId: string, invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'>) {
     if (!tenantId) throw new Error('Tenant ID required');
 
+    logFirestoreOperation(OperationType.WRITE, COLLECTION_NAME, 'pending', { invoiceData });
     try {
-      return await runTransaction(db, async (transaction) => {
-        // 0. Check Limits
+      const createdInvoiceId = await runTransaction(db, async (transaction) => {
+        // --- READS SECTION ---
+        
+        // 1. Get Tenant Doc
         const tenantRef = doc(db, 'tenants', tenantId);
         const tenantDoc = await transaction.get(tenantRef);
-        if (tenantDoc.exists()) {
-          const tenant = tenantDoc.data() as Tenant;
-          if (tenant.usage.invoicesCount >= tenant.limits.maxInvoices) {
-            throw new Error('Monthly invoice limit reached. Please upgrade your plan.');
+        
+        // 2. Get all unique Product Docs needed for this invoice
+        const productDocsMap = new Map<string, any>();
+        for (const item of invoiceData.items) {
+          if (!productDocsMap.has(item.productId)) {
+            const productRef = doc(db, 'products', item.productId);
+            const productDoc = await transaction.get(productRef);
+            productDocsMap.set(item.productId, productDoc);
           }
         }
 
-        // 1. Verify stock and ownership for all items
-        for (const item of invoiceData.items) {
-          const productRef = doc(db, 'products', item.productId);
-          const productDoc = await transaction.get(productRef);
+        // 3. Get Customer Doc (if applicable)
+        let customerDoc = null;
+        let customerRef = null;
+        if (invoiceData.customerId && invoiceData.customerId !== 'walk-in') {
+          customerRef = doc(db, 'customers', invoiceData.customerId);
+          customerDoc = await transaction.get(customerRef);
+        }
+
+        // --- VALIDATION AND IN-MEMORY PREPARATION ---
+
+        // Verify Tenant Limits
+        let tenantExists = false;
+        let tenantHasUsageAndLimits = true;
+        let usage = { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+        let limits = { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+
+        if (tenantDoc.exists()) {
+          tenantExists = true;
+          const tenant = tenantDoc.data() as Tenant;
+          usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+          limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
           
-          if (!productDoc.exists() || productDoc.data().tenantId !== tenantId) {
+          if (usage.invoicesCount >= limits.maxInvoices) {
+            throw new Error('Monthly invoice limit reached. Please upgrade your plan.');
+          }
+
+          if (!tenant.usage || !tenant.limits) {
+            tenantHasUsageAndLimits = false;
+          }
+        }
+
+        // Verify Product Stock and Ownership
+        for (const item of invoiceData.items) {
+          const productDoc = productDocsMap.get(item.productId);
+          if (!productDoc || !productDoc.exists() || productDoc.data().tenantId !== tenantId) {
             throw new Error(`Product ${item.name} not found or unauthorized.`);
           }
           
@@ -81,6 +152,13 @@ export const invoiceService = {
           if (product.stockQuantity < item.quantity) {
             throw new Error(`Insufficient stock for ${item.name}. Available: ${product.stockQuantity}`);
           }
+        }
+
+        // --- WRITES SECTION ---
+
+        // 1. Initialize Tenant Usage & Limits if they didn't exist
+        if (!tenantHasUsageAndLimits && tenantExists) {
+          transaction.set(tenantRef, sanitizeForFirestore({ usage, limits }), { merge: true });
         }
 
         // 2. Create Invoice
@@ -91,119 +169,135 @@ export const invoiceService = {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-        transaction.set(invoiceRef, invoice);
+        transaction.set(invoiceRef, sanitizeForFirestore(invoice));
 
-        // 3. Deduct Stock (with FEFO Batch deduction)
+        // 3. Deduct Stock and Log Stock Movements
+        const updatedProducts = new Map<string, Product>();
         for (const item of invoiceData.items) {
-          const productRef = doc(db, 'products', item.productId);
-          const productDoc = await transaction.get(productRef);
+          const productDoc = productDocsMap.get(item.productId);
+          const product = updatedProducts.get(item.productId) || (productDoc.data() as Product);
           
-          if (productDoc.exists()) {
-            const product = productDoc.data() as Product;
-            const previousStock = product.stockQuantity || 0;
-            const newStock = Math.max(0, previousStock - item.quantity);
+          const previousStock = product.stockQuantity || 0;
+          const newStock = Math.max(0, previousStock - item.quantity);
 
-            let batchesList = product.batches ? [...product.batches] : [];
-            
-            // Sort by expiry date ascending for FEFO
-            batchesList.sort((a, b) => {
-              const dateA = toJsDate(a.expiryDate).getTime();
-              const dateB = toJsDate(b.expiryDate).getTime();
-              return dateA - dateB;
-            });
+          let batchesList = product.batches ? [...product.batches] : [];
+          
+          // Sort by expiry date ascending for FEFO
+          batchesList.sort((a, b) => {
+            const dateA = toJsDate(a.expiryDate).getTime();
+            const dateB = toJsDate(b.expiryDate).getTime();
+            return dateA - dateB;
+          });
 
-            let remainingToDeduct = item.quantity;
-            for (let i = 0; i < batchesList.length; i++) {
-              if (remainingToDeduct <= 0) break;
-              const b = batchesList[i];
-              if (b.quantity > 0) {
-                const deduct = Math.min(b.quantity, remainingToDeduct);
-                b.quantity -= deduct;
-                remainingToDeduct -= deduct;
-              }
+          let remainingToDeduct = item.quantity;
+          for (let i = 0; i < batchesList.length; i++) {
+            if (remainingToDeduct <= 0) break;
+            const b = batchesList[i];
+            if (b.quantity > 0) {
+              const deduct = Math.min(b.quantity, remainingToDeduct);
+              b.quantity -= deduct;
+              remainingToDeduct -= deduct;
             }
-
-            // Fallback: If still remaining, subtract from first batch even if it goes negative
-            if (remainingToDeduct > 0 && batchesList.length > 0) {
-              batchesList[0].quantity -= remainingToDeduct;
-            }
-
-            // Recalculate nearest active batch
-            const activeBatches = batchesList.filter(b => b.quantity > 0);
-            const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
-
-            const updatedFields: Partial<Product> = {
-              stockQuantity: newStock,
-              batches: batchesList,
-              updatedAt: serverTimestamp()
-            };
-
-            if (currentBatch) {
-              updatedFields.batchNumber = currentBatch.batchNumber;
-              updatedFields.expiryDate = currentBatch.expiryDate;
-              updatedFields.manufacturingDate = currentBatch.mfgDate;
-              updatedFields.purchasePrice = currentBatch.purchasePrice;
-              updatedFields.sellingPrice = currentBatch.salePrice;
-            }
-
-            transaction.update(productRef, updatedFields);
-
-            // Log Stock Movement
-            const movementRef = doc(collection(db, 'stockMovements'));
-            transaction.set(movementRef, {
-              id: movementRef.id,
-              tenantId,
-              type: "SALE_OUT",
-              productId: item.productId,
-              productName: item.name,
-              batchNumber: currentBatch ? currentBatch.batchNumber : 'N/A',
-              quantity: -item.quantity,
-              previousStock,
-              newStock,
-              invoiceId: invoiceRef.id,
-              createdAt: serverTimestamp()
-            });
           }
+
+          // Fallback: If still remaining, subtract from first batch even if it goes negative
+          if (remainingToDeduct > 0 && batchesList.length > 0) {
+            batchesList[0].quantity -= remainingToDeduct;
+          }
+
+          // Recalculate nearest active batch
+          const activeBatches = batchesList.filter(b => b.quantity > 0);
+          const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
+
+          const updatedFields: Product = {
+            ...product,
+            stockQuantity: newStock,
+            batches: batchesList,
+            updatedAt: serverTimestamp() as any
+          };
+
+          if (currentBatch) {
+            updatedFields.batchNumber = currentBatch.batchNumber ?? 'N/A';
+            updatedFields.expiryDate = currentBatch.expiryDate ?? null;
+            updatedFields.manufacturingDate = currentBatch.mfgDate ?? null;
+            updatedFields.purchasePrice = currentBatch.purchasePrice ?? 0;
+            updatedFields.sellingPrice = currentBatch.salePrice ?? 0;
+          }
+
+          updatedProducts.set(item.productId, updatedFields);
+
+          // Log Stock Movement
+          const movementRef = doc(collection(db, 'stockMovements'));
+          transaction.set(movementRef, sanitizeForFirestore({
+            id: movementRef.id,
+            tenantId,
+            type: "SALE_OUT",
+            productId: item.productId,
+            productName: item.name,
+            batchNumber: currentBatch ? (currentBatch.batchNumber ?? 'N/A') : 'N/A',
+            quantity: -item.quantity,
+            previousStock,
+            newStock,
+            invoiceId: invoiceRef.id,
+            createdAt: serverTimestamp()
+          }));
+        }
+
+        // Apply product stock updates
+        for (const [productId, updatedProduct] of updatedProducts.entries()) {
+          const productRef = doc(db, 'products', productId);
+          const fieldsToUpdate: any = {
+            stockQuantity: updatedProduct.stockQuantity,
+            batches: updatedProduct.batches,
+            updatedAt: serverTimestamp()
+          };
+          if (updatedProduct.batchNumber) {
+            fieldsToUpdate.batchNumber = updatedProduct.batchNumber;
+            fieldsToUpdate.expiryDate = updatedProduct.expiryDate ?? null;
+            fieldsToUpdate.manufacturingDate = updatedProduct.manufacturingDate ?? null;
+            fieldsToUpdate.purchasePrice = updatedProduct.purchasePrice ?? 0;
+            fieldsToUpdate.sellingPrice = updatedProduct.sellingPrice ?? 0;
+          }
+          transaction.update(productRef, sanitizeForFirestore(fieldsToUpdate));
         }
 
         // 4. Update Customer Stats
-        if (invoiceData.customerId && invoiceData.customerId !== 'walk-in') {
-          const customerRef = doc(db, 'customers', invoiceData.customerId);
-          const customerDoc = await transaction.get(customerRef);
-          
-          if (customerDoc.exists() && customerDoc.data().tenantId === tenantId) {
-            const updateData: any = {
-              totalPurchases: increment(invoiceData.grandTotal),
-              updatedAt: serverTimestamp()
-            };
+        if (customerDoc && customerRef && customerDoc.exists() && customerDoc.data().tenantId === tenantId) {
+          const updateData: any = {
+            totalPurchases: increment(invoiceData.grandTotal),
+            updatedAt: serverTimestamp()
+          };
 
-            if (invoiceData.paymentStatus === 'paid') {
-              updateData.totalPaid = increment(invoiceData.grandTotal);
-            } else if (invoiceData.paymentStatus === 'due') {
-              updateData.outstandingBalance = increment(invoiceData.grandTotal);
-            }
-
-            transaction.update(customerRef, updateData);
+          if (invoiceData.paymentStatus === 'paid') {
+            updateData.totalPaid = increment(invoiceData.grandTotal);
+          } else if (invoiceData.paymentStatus === 'due') {
+            updateData.outstandingBalance = increment(invoiceData.grandTotal);
           }
+
+          transaction.update(customerRef, sanitizeForFirestore(updateData));
         }
 
         // 5. Update Tenant Usage
-        transaction.update(tenantRef, {
-          'usage.invoicesCount': increment(1),
-          updatedAt: serverTimestamp()
-        });
+        if (tenantExists) {
+          transaction.update(tenantRef, {
+            'usage.invoicesCount': increment(1),
+            updatedAt: serverTimestamp()
+          });
+        }
 
         // 6. Add Audit Log
         const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
-        transaction.set(logRef, {
+        transaction.set(logRef, sanitizeForFirestore({
           action: 'CREATE_INVOICE',
           targetId: invoiceRef.id,
           userId: auth.currentUser?.uid || null,
           timestamp: serverTimestamp(),
-        });
+        }));
 
         return invoiceRef.id;
       });
+      logFirestoreOperation(OperationType.WRITE, `${COLLECTION_NAME}/${createdInvoiceId}`, 'success', { createdInvoiceId });
+      return createdInvoiceId;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }
@@ -212,6 +306,7 @@ export const invoiceService = {
   async getInvoicesPaginated(tenantId: string, pageSize: number = 10, lastInvoice?: any) {
     if (!tenantId) throw new Error('Tenant ID required');
 
+    logFirestoreOperation(OperationType.LIST, COLLECTION_NAME, 'pending', { pageSize, hasLastInvoice: !!lastInvoice });
     try {
       let q = query(
         collection(db, COLLECTION_NAME),
@@ -233,6 +328,7 @@ export const invoiceService = {
         return dateB.getTime() - dateA.getTime();
       });
 
+      logFirestoreOperation(OperationType.LIST, COLLECTION_NAME, 'success', { count: invoices.length });
       return {
         invoices,
         lastDoc: snapshot.docs[snapshot.docs.length - 1]
@@ -245,6 +341,7 @@ export const invoiceService = {
   async deleteInvoice(tenantId: string, invoiceId: string) {
     if (!tenantId) throw new Error('Tenant ID required');
 
+    logFirestoreOperation(OperationType.DELETE, `${COLLECTION_NAME}/${invoiceId}`, 'pending');
     try {
       await runTransaction(db, async (transaction) => {
         const invoiceRef = doc(db, COLLECTION_NAME, invoiceId);
@@ -275,12 +372,12 @@ export const invoiceService = {
               // Create a fallback batch if no batches exist
               batchesList.push({
                 batchNumber: product.batchNumber || 'FIT-001',
-                mfgDate: product.manufacturingDate || serverTimestamp(),
-                expiryDate: product.expiryDate || serverTimestamp(),
+                mfgDate: product.manufacturingDate || new Date(),
+                expiryDate: product.expiryDate || new Date(),
                 purchasePrice: product.purchasePrice || 0,
                 salePrice: product.sellingPrice || 0,
                 quantity: item.quantity,
-                createdAt: serverTimestamp()
+                createdAt: new Date()
               });
             }
 
@@ -308,11 +405,11 @@ export const invoiceService = {
               updatedFields.sellingPrice = currentBatch.salePrice;
             }
 
-            transaction.update(productRef, updatedFields);
+            transaction.update(productRef, sanitizeForFirestore(updatedFields));
 
             // Log Stock Movement Reversal
             const movementRef = doc(collection(db, 'stockMovements'));
-            transaction.set(movementRef, {
+            transaction.set(movementRef, sanitizeForFirestore({
               id: movementRef.id,
               tenantId,
               type: "SALE_RETURN",
@@ -324,7 +421,7 @@ export const invoiceService = {
               newStock,
               invoiceId,
               createdAt: serverTimestamp()
-            });
+            }));
           }
         }
 
@@ -345,29 +442,33 @@ export const invoiceService = {
               updateData.outstandingBalance = increment(-invoice.grandTotal);
             }
 
-            transaction.update(customerRef, updateData);
+            transaction.update(customerRef, sanitizeForFirestore(updateData));
           }
         }
 
         // 3. Update Tenant Usage
         const tenantRef = doc(db, 'tenants', tenantId);
-        transaction.update(tenantRef, {
-          'usage.invoicesCount': increment(-1),
-          updatedAt: serverTimestamp()
-        });
+        const tenantDoc = await transaction.get(tenantRef);
+        if (tenantDoc.exists()) {
+          transaction.update(tenantRef, {
+            'usage.invoicesCount': increment(-1),
+            updatedAt: serverTimestamp()
+          });
+        }
 
         // 4. Audit Log
         const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
-        transaction.set(logRef, {
+        transaction.set(logRef, sanitizeForFirestore({
           action: 'DELETE_INVOICE',
           targetId: invoiceId,
           userId: auth.currentUser?.uid || null,
           timestamp: serverTimestamp(),
-        });
+        }));
 
         // 5. Delete Invoice
         transaction.delete(invoiceRef);
       });
+      logFirestoreOperation(OperationType.DELETE, `${COLLECTION_NAME}/${invoiceId}`, 'success');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${COLLECTION_NAME}/${invoiceId}`);
     }

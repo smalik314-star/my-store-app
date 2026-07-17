@@ -2,6 +2,7 @@ import {
   doc, 
   getDoc, 
   setDoc, 
+  deleteDoc,
   serverTimestamp, 
   updateDoc, 
   increment,
@@ -101,17 +102,53 @@ export const tenantService = {
     return snap.docs.map(doc => doc.data());
   },
 
-  async addUserToTenant(tenantId: string, email: string, role: UserRole) {
-    // This is a simplified version. In production, you'd send an invite or check if user exists.
-    // For now, we'll assume we can link by email if the user signs up.
-    // We store pending invites in a separate collection.
-    const inviteRef = doc(collection(db, 'invites'));
-    await setDoc(inviteRef, {
-      tenantId,
-      email,
-      role,
-      status: 'pending',
-      createdAt: serverTimestamp(),
-    });
+  async addUserToTenant(tenantId: string, email: string, role: UserRole, name?: string, phone?: string) {
+    const userId = `user_${Math.random().toString(36).substr(2, 9)}`;
+    const userRef = doc(db, 'tenants', tenantId, 'users', userId);
+    
+    try {
+      await setDoc(userRef, {
+        uid: userId,
+        tenantId,
+        role,
+        email,
+        name: name || '',
+        phone: phone || '',
+        status: 'active',
+        addedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error adding user to tenant:', error);
+      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
+      throw error;
+    }
+  },
+
+  async updateUserInTenant(tenantId: string, userId: string, data: { role: UserRole; name?: string; phone?: string; email?: string }) {
+    const userRef = doc(db, 'tenants', tenantId, 'users', userId);
+    try {
+      await updateDoc(userRef, {
+        role: data.role,
+        name: data.name || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error updating user in tenant:', error);
+      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
+      throw error;
+    }
+  },
+
+  async deleteUserFromTenant(tenantId: string, userId: string) {
+    const userRef = doc(db, 'tenants', tenantId, 'users', userId);
+    try {
+      await deleteDoc(userRef);
+    } catch (error) {
+      console.error('Error deleting user from tenant:', error);
+      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
+      throw error;
+    }
   }
 };

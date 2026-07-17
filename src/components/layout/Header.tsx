@@ -13,7 +13,9 @@ import {
   Check, 
   Volume2, 
   VolumeX, 
-  ShieldAlert 
+  ShieldAlert,
+  Settings,
+  LogOut
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../common/Button';
@@ -31,7 +33,7 @@ interface HeaderProps {
 }
 
 export function Header({ onMenuClick, pageTitle }: HeaderProps) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -42,6 +44,10 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
+
+  // User Profile Dropdown states
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   // Notifications states
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -61,7 +67,25 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
 
   const getPageTitle = () => {
     if (pageTitle) return pageTitle;
-    const path = location.pathname.split('/').pop() || 'Dashboard';
+    
+    const pathname = location.pathname;
+    if (pathname.startsWith('/invoice/')) {
+      if (pathname.endsWith('/print')) {
+        return 'Print Invoice';
+      }
+      return 'Invoice Detail';
+    }
+    if (pathname.startsWith('/customers/')) {
+      return 'Customer Profile';
+    }
+    if (pathname.startsWith('/purchases/')) {
+      if (pathname.endsWith('/new')) {
+        return 'New Purchase Entry';
+      }
+      return 'Purchase Detail';
+    }
+    
+    const path = pathname.split('/').pop() || 'Dashboard';
     return path.charAt(0).toUpperCase() + path.slice(1);
   };
 
@@ -250,11 +274,14 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
     prevCountRef.current = notifications.length;
   }, [notifications.length]);
 
-  // Click outside to close notifications dropdown
+  // Click outside to close notifications and profile dropdowns
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setNotifOpen(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -490,20 +517,103 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
               </AnimatePresence>
             </div>
 
-            <div className="flex items-center gap-2 md:gap-3 md:pl-6 md:border-l md:border-border">
-              <div className="hidden md:block text-right">
-                <p className="text-sm font-semibold text-text leading-none">
-                  {user?.displayName || 'User'}
-                </p>
-                <p className="text-xs text-text/40 mt-1 capitalize">{user?.role || 'Staff'}</p>
-              </div>
-              <div className="h-9 w-9 rounded-full bg-background border border-border overflow-hidden flex items-center justify-center font-semibold text-text/60 text-xs shrink-0 bg-primary/10 text-primary">
-                {user?.photoURL ? (
-                  <img src={user.photoURL} alt="User Avatar" className="h-full w-full object-cover" />
-                ) : (
-                  user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U'
+            <div className="relative" ref={profileRef}>
+              <button
+                onClick={() => setProfileOpen(!profileOpen)}
+                className="flex items-center gap-2 md:gap-3 md:pl-6 md:border-l md:border-border hover:opacity-85 active:opacity-75 transition-all text-left cursor-pointer focus:outline-none"
+                id="user-profile-menu-btn"
+              >
+                <div className="hidden md:block text-right">
+                  <p className="text-sm font-semibold text-text leading-none">
+                    {user?.displayName || 'User'}
+                  </p>
+                  <p className="text-xs text-text/40 mt-1 capitalize">{user?.role || 'Staff'}</p>
+                </div>
+                <div className="h-9 w-9 rounded-full bg-background border border-border overflow-hidden flex items-center justify-center font-semibold text-text/60 text-xs shrink-0 bg-primary/10 text-primary transition-transform duration-200 hover:scale-105">
+                  {user?.photoURL ? (
+                    <img src={user.photoURL} alt="User Avatar" className="h-full w-full object-cover" />
+                  ) : (
+                    user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U'
+                  )}
+                </div>
+              </button>
+
+              <AnimatePresence>
+                {profileOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-64 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col"
+                    id="user-profile-dropdown"
+                  >
+                    {/* User Header Info */}
+                    <div className="p-4 border-b border-border bg-background/50">
+                      <p className="text-sm font-bold text-text truncate">{user?.displayName || 'User'}</p>
+                      <p className="text-xs text-text/40 truncate mt-0.5">{user?.email || 'No email'}</p>
+                      <span className="inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-black uppercase bg-primary/10 text-primary tracking-widest">
+                        {user?.role || 'Staff'}
+                      </span>
+                    </div>
+
+                    {/* Navigation Actions */}
+                    <div className="p-1.5 space-y-0.5">
+                      <button
+                        onClick={() => {
+                          setProfileOpen(false);
+                          navigate('/settings');
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-xs font-semibold text-text/70 hover:text-text hover:bg-background transition-colors cursor-pointer"
+                        id="dropdown-settings-btn"
+                      >
+                        <Settings className="h-4 w-4 text-text/40" />
+                        <span>Account Settings</span>
+                      </button>
+
+                      {user?.role === 'admin' && (
+                        <button
+                          onClick={() => {
+                            setProfileOpen(false);
+                            navigate('/users');
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-xs font-semibold text-text/70 hover:text-text hover:bg-background transition-colors cursor-pointer"
+                          id="dropdown-users-btn"
+                        >
+                          <Users className="h-4 w-4 text-text/40" />
+                          <span>Manage Team</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          setProfileOpen(false);
+                          navigate('/subscription');
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-xs font-semibold text-text/70 hover:text-text hover:bg-background transition-colors cursor-pointer"
+                        id="dropdown-subscription-btn"
+                      >
+                        <Package className="h-4 w-4 text-text/40" />
+                        <span>My Subscription</span>
+                      </button>
+                    </div>
+
+                    {/* Separator & Logout */}
+                    <div className="border-t border-border p-1.5">
+                      <button
+                        onClick={() => {
+                          setProfileOpen(false);
+                          logout();
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left text-xs font-semibold text-danger hover:bg-danger/10 transition-colors cursor-pointer"
+                        id="dropdown-logout-btn"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </motion.div>
                 )}
-              </div>
+              </AnimatePresence>
             </div>
           </div>
         </div>

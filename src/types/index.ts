@@ -154,7 +154,10 @@ export interface Customer {
 export interface InvoiceItem {
   productId: string;
   name: string;
-  sku: string;
+  sku?: string;
+  batchNumber?: string;
+  expiryDate?: any;
+  manufacturingDate?: any;
   quantity: number;
   price: number;
   gst: number;
