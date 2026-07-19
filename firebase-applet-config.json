@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0627817589",
-  "appId": "1:109777514808:web:2b990877e0453186dd51cd",
-  "apiKey": "AIzaSyCvGNmuSgw2Hu6eHnEK18MWp_6GLhb5j3A",
-  "authDomain": "gen-lang-client-0627817589.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-pharmaflow-17500397-f099-4531-a8a4-a5ad18ba27d1",
-  "storageBucket": "gen-lang-client-0627817589.firebasestorage.app",
-  "messagingSenderId": "109777514808",
-  "measurementId": ""
+  "projectId": "testing-pharmaflow",
+  "appId": "1:710526461338:web:3f0d7afc6566282f0c8623",
+  "apiKey": "AIzaSyDK8-EeJK2_gBHYtDeHnIlJaJuzkkLQQ4w",
+  "authDomain": "testing-pharmaflow.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "testing-pharmaflow.firebasestorage.app",
+  "messagingSenderId": "710526461338",
+  "measurementId": "G-ZD20NVBYY2"
 }
