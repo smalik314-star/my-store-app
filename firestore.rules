@@ -19,7 +19,7 @@ service cloud.firestore {
     function validTenantUsage(usage) {
       return usage.invoicesCount is int && usage.invoicesCount >= 0
         && usage.productsCount is int && usage.productsCount >= 0
-        && usage.usersCount is int && usage.usersCount >= 1;
+        && (!('usersCount' in usage) || (usage.usersCount is int && usage.usersCount >= 0));
     }
     function validFreeTenant() {
       return request.resource.data.keys().hasOnly(['id','name','ownerId','plan','status','usage','limits','createdAt','updatedAt'])
@@ -228,3 +228,4 @@ service cloud.firestore {
     }
   }
 }
+
