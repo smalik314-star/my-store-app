@@ -103,7 +103,7 @@ export const invoiceService = {
         // 2. Get all unique Product Docs needed for this invoice
         const productDocsMap = new Map<string, any>();
         for (const item of invoiceData.items) {
-          if (!productDocsMap.has(item.productId)) {
+          if (item.productId && !productDocsMap.has(item.productId)) {
             const productRef = doc(db, 'products', item.productId);
             const productDoc = await transaction.get(productRef);
             productDocsMap.set(item.productId, productDoc);
@@ -142,15 +142,17 @@ export const invoiceService = {
         }
 
         // Verify Product Stock and Ownership
-        for (const item of invoiceData.items) {
-          const productDoc = productDocsMap.get(item.productId);
-          if (!productDoc || !productDoc.exists() || productDoc.data().tenantId !== tenantId) {
-            throw new Error(`Product ${item.name} not found or unauthorized.`);
-          }
-          
-          const product = productDoc.data() as Product;
-          if (product.stockQuantity < item.quantity) {
-            throw new Error(`Insufficient stock for ${item.name}. Available: ${product.stockQuantity}`);
+        if (!invoiceData.isQuickBill) {
+          for (const item of invoiceData.items) {
+            const productDoc = productDocsMap.get(item.productId);
+            if (!productDoc || !productDoc.exists() || productDoc.data().tenantId !== tenantId) {
+              throw new Error(`Product ${item.name} not found or unauthorized.`);
+            }
+            
+            const product = productDoc.data() as Product;
+            if (product.stockQuantity < item.quantity) {
+              throw new Error(`Insufficient stock for ${item.name}. Available: ${product.stockQuantity}`);
+            }
           }
         }
 
@@ -173,92 +175,94 @@ export const invoiceService = {
 
         // 3. Deduct Stock and Log Stock Movements
         const updatedProducts = new Map<string, Product>();
-        for (const item of invoiceData.items) {
-          const productDoc = productDocsMap.get(item.productId);
-          const product = updatedProducts.get(item.productId) || (productDoc.data() as Product);
-          
-          const previousStock = product.stockQuantity || 0;
-          const newStock = Math.max(0, previousStock - item.quantity);
+        if (!invoiceData.isQuickBill) {
+          for (const item of invoiceData.items) {
+            const productDoc = productDocsMap.get(item.productId);
+            const product = updatedProducts.get(item.productId) || (productDoc.data() as Product);
+            
+            const previousStock = product.stockQuantity || 0;
+            const newStock = Math.max(0, previousStock - item.quantity);
 
-          let batchesList = product.batches ? [...product.batches] : [];
-          
-          // Sort by expiry date ascending for FEFO
-          batchesList.sort((a, b) => {
-            const dateA = toJsDate(a.expiryDate).getTime();
-            const dateB = toJsDate(b.expiryDate).getTime();
-            return dateA - dateB;
-          });
+            let batchesList = product.batches ? [...product.batches] : [];
+            
+            // Sort by expiry date ascending for FEFO
+            batchesList.sort((a, b) => {
+              const dateA = toJsDate(a.expiryDate).getTime();
+              const dateB = toJsDate(b.expiryDate).getTime();
+              return dateA - dateB;
+            });
 
-          let remainingToDeduct = item.quantity;
-          for (let i = 0; i < batchesList.length; i++) {
-            if (remainingToDeduct <= 0) break;
-            const b = batchesList[i];
-            if (b.quantity > 0) {
-              const deduct = Math.min(b.quantity, remainingToDeduct);
-              b.quantity -= deduct;
-              remainingToDeduct -= deduct;
+            let remainingToDeduct = item.quantity;
+            for (let i = 0; i < batchesList.length; i++) {
+              if (remainingToDeduct <= 0) break;
+              const b = batchesList[i];
+              if (b.quantity > 0) {
+                const deduct = Math.min(b.quantity, remainingToDeduct);
+                b.quantity -= deduct;
+                remainingToDeduct -= deduct;
+              }
             }
+
+            // Fallback: If still remaining, subtract from first batch even if it goes negative
+            if (remainingToDeduct > 0 && batchesList.length > 0) {
+              batchesList[0].quantity -= remainingToDeduct;
+            }
+
+            // Recalculate nearest active batch
+            const activeBatches = batchesList.filter(b => b.quantity > 0);
+            const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
+
+            const updatedFields: Product = {
+              ...product,
+              stockQuantity: newStock,
+              batches: batchesList,
+              updatedAt: serverTimestamp() as any
+            };
+
+            if (currentBatch) {
+              updatedFields.batchNumber = currentBatch.batchNumber ?? 'N/A';
+              updatedFields.expiryDate = currentBatch.expiryDate ?? null;
+              updatedFields.manufacturingDate = currentBatch.mfgDate ?? null;
+              updatedFields.purchasePrice = currentBatch.purchasePrice ?? 0;
+              updatedFields.sellingPrice = currentBatch.salePrice ?? 0;
+            }
+
+            updatedProducts.set(item.productId, updatedFields);
+
+            // Log Stock Movement
+            const movementRef = doc(collection(db, 'stockMovements'));
+            transaction.set(movementRef, sanitizeForFirestore({
+              id: movementRef.id,
+              tenantId,
+              type: "SALE_OUT",
+              productId: item.productId,
+              productName: item.name,
+              batchNumber: currentBatch ? (currentBatch.batchNumber ?? 'N/A') : 'N/A',
+              quantity: -item.quantity,
+              previousStock,
+              newStock,
+              invoiceId: invoiceRef.id,
+              createdAt: serverTimestamp()
+            }));
           }
 
-          // Fallback: If still remaining, subtract from first batch even if it goes negative
-          if (remainingToDeduct > 0 && batchesList.length > 0) {
-            batchesList[0].quantity -= remainingToDeduct;
+          // Apply product stock updates
+          for (const [productId, updatedProduct] of updatedProducts.entries()) {
+            const productRef = doc(db, 'products', productId);
+            const fieldsToUpdate: any = {
+              stockQuantity: updatedProduct.stockQuantity,
+              batches: updatedProduct.batches,
+              updatedAt: serverTimestamp()
+            };
+            if (updatedProduct.batchNumber) {
+              fieldsToUpdate.batchNumber = updatedProduct.batchNumber;
+              fieldsToUpdate.expiryDate = updatedProduct.expiryDate ?? null;
+              fieldsToUpdate.manufacturingDate = updatedProduct.manufacturingDate ?? null;
+              fieldsToUpdate.purchasePrice = updatedProduct.purchasePrice ?? 0;
+              fieldsToUpdate.sellingPrice = updatedProduct.sellingPrice ?? 0;
+            }
+            transaction.update(productRef, sanitizeForFirestore(fieldsToUpdate));
           }
-
-          // Recalculate nearest active batch
-          const activeBatches = batchesList.filter(b => b.quantity > 0);
-          const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
-
-          const updatedFields: Product = {
-            ...product,
-            stockQuantity: newStock,
-            batches: batchesList,
-            updatedAt: serverTimestamp() as any
-          };
-
-          if (currentBatch) {
-            updatedFields.batchNumber = currentBatch.batchNumber ?? 'N/A';
-            updatedFields.expiryDate = currentBatch.expiryDate ?? null;
-            updatedFields.manufacturingDate = currentBatch.mfgDate ?? null;
-            updatedFields.purchasePrice = currentBatch.purchasePrice ?? 0;
-            updatedFields.sellingPrice = currentBatch.salePrice ?? 0;
-          }
-
-          updatedProducts.set(item.productId, updatedFields);
-
-          // Log Stock Movement
-          const movementRef = doc(collection(db, 'stockMovements'));
-          transaction.set(movementRef, sanitizeForFirestore({
-            id: movementRef.id,
-            tenantId,
-            type: "SALE_OUT",
-            productId: item.productId,
-            productName: item.name,
-            batchNumber: currentBatch ? (currentBatch.batchNumber ?? 'N/A') : 'N/A',
-            quantity: -item.quantity,
-            previousStock,
-            newStock,
-            invoiceId: invoiceRef.id,
-            createdAt: serverTimestamp()
-          }));
-        }
-
-        // Apply product stock updates
-        for (const [productId, updatedProduct] of updatedProducts.entries()) {
-          const productRef = doc(db, 'products', productId);
-          const fieldsToUpdate: any = {
-            stockQuantity: updatedProduct.stockQuantity,
-            batches: updatedProduct.batches,
-            updatedAt: serverTimestamp()
-          };
-          if (updatedProduct.batchNumber) {
-            fieldsToUpdate.batchNumber = updatedProduct.batchNumber;
-            fieldsToUpdate.expiryDate = updatedProduct.expiryDate ?? null;
-            fieldsToUpdate.manufacturingDate = updatedProduct.manufacturingDate ?? null;
-            fieldsToUpdate.purchasePrice = updatedProduct.purchasePrice ?? 0;
-            fieldsToUpdate.sellingPrice = updatedProduct.sellingPrice ?? 0;
-          }
-          transaction.update(productRef, sanitizeForFirestore(fieldsToUpdate));
         }
 
         // 4. Update Customer Stats
@@ -272,6 +276,11 @@ export const invoiceService = {
             updateData.totalPaid = increment(invoiceData.grandTotal);
           } else if (invoiceData.paymentStatus === 'due') {
             updateData.outstandingBalance = increment(invoiceData.grandTotal);
+          } else if (invoiceData.paymentStatus === 'partial') {
+            const amtReceived = (invoiceData as any).amountReceived || 0;
+            const amtDue = invoiceData.grandTotal - amtReceived;
+            updateData.totalPaid = increment(amtReceived);
+            updateData.outstandingBalance = increment(amtDue);
           }
 
           transaction.update(customerRef, sanitizeForFirestore(updateData));
@@ -440,6 +449,11 @@ export const invoiceService = {
               updateData.totalPaid = increment(-invoice.grandTotal);
             } else if (invoice.paymentStatus === 'due') {
               updateData.outstandingBalance = increment(-invoice.grandTotal);
+            } else if (invoice.paymentStatus === 'partial') {
+              const amtReceived = (invoice as any).amountReceived || 0;
+              const amtDue = invoice.grandTotal - amtReceived;
+              updateData.totalPaid = increment(-amtReceived);
+              updateData.outstandingBalance = increment(-amtDue);
             }
 
             transaction.update(customerRef, sanitizeForFirestore(updateData));

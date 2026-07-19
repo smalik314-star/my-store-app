@@ -1,4 +1,5 @@
 import { motion } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { AlertCircle, Calendar, ChevronRight } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Product } from '../../types';
@@ -14,6 +15,8 @@ interface AlertPanelProps {
 }
 
 export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
+  const navigate = useNavigate();
+
   if (loading) {
     return (
       <Card className="p-0 overflow-hidden">
@@ -59,6 +62,7 @@ export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: idx * 0.05 }}
+              onClick={() => navigate(`/inventory?view=${item.id}`)}
               className={cn(
                 "group flex items-center gap-4 p-3 rounded-xl border transition-all hover:shadow-md cursor-pointer",
                 isStock ? "border-danger/10 bg-danger/5 hover:bg-danger/10" : "border-warning/10 bg-warning/5 hover:bg-warning/10"
@@ -85,7 +89,10 @@ export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
       </div>
       
       {items.length > 0 && (
-        <button className="w-full py-3 text-[11px] font-bold text-text/40 hover:text-primary transition-colors border-t border-border bg-background/30">
+        <button 
+          onClick={() => navigate(isStock ? '/low-stock' : '/expiry-alerts')}
+          className="w-full py-3 text-[11px] font-bold text-text/40 hover:text-primary transition-colors border-t border-border bg-background/30"
+        >
           VIEW ALL {isStock ? 'STOCK' : 'EXPIRING'}
         </button>
       )}

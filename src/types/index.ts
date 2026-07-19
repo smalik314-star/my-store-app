@@ -31,6 +31,10 @@ export interface Tenant {
   };
   createdAt: any;
   updatedAt: any;
+  trialStartedAt?: string;
+  trialEndsAt?: string;
+  invites?: string[];
+  isTrialExtended?: boolean;
 }
 
 export interface TenantUser {
@@ -177,6 +181,9 @@ export interface Invoice {
   grandTotal: number;
   paymentStatus: 'paid' | 'due' | 'partial';
   paymentMethod: 'cash' | 'upi' | 'card' | 'credit';
+  amountReceived?: number;
+  outstandingAmount?: number;
+  isQuickBill?: boolean;
   createdAt: any;
   updatedAt: any;
 }
@@ -199,6 +206,7 @@ export interface StoreSettings {
   invoicePrefix: string;
   themeMode: 'light' | 'dark';
   userId?: string;
+  showDashboardCharts?: boolean;
   updatedAt: any;
 }
 

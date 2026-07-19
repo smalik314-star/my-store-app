@@ -28,15 +28,19 @@ export function KpiCard({
 }: KpiCardProps) {
   if (loading) {
     return (
-      <Card className="p-6">
-        <div className="animate-pulse flex flex-col gap-4">
+      <Card className="p-6 border-white/20 relative overflow-hidden">
+        <div className="animate-pulse flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <div className="h-4 w-24 bg-border rounded" />
-            <div className="h-10 w-10 bg-border rounded-xl" />
+            <div className="h-4 w-20 bg-text/5 rounded-md" />
+            <div className="h-10 w-10 bg-text/5 rounded-xl" />
           </div>
-          <div className="h-8 w-20 bg-border rounded" />
-          <div className="h-4 w-32 bg-border rounded" />
+          <div className="flex flex-col mt-1 gap-2">
+            <div className="h-8 w-24 bg-text/10 rounded-lg" />
+            <div className="h-4 w-32 bg-text/5 rounded-md mt-1" />
+          </div>
         </div>
+        {/* Decorative subtle gradient */}
+        <div className="absolute -right-4 -bottom-4 w-24 h-24 rounded-full bg-primary/5 blur-2xl" />
       </Card>
     );
   }

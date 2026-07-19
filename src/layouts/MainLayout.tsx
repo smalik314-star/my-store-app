@@ -3,12 +3,23 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from '../components/layout/Sidebar';
 import { Header } from '../components/layout/Header';
 import { AIAssistant } from '../components/ai/AIAssistant';
+import { QuickBillModal } from '../components/billing/QuickBillModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils/cn';
 
 export default function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [quickBillOpen, setQuickBillOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOpenQuickBill = () => {
+      setQuickBillOpen(true);
+    };
+
+    window.addEventListener('open-quick-bill', handleOpenQuickBill);
+    return () => window.removeEventListener('open-quick-bill', handleOpenQuickBill);
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -42,6 +53,9 @@ export default function MainLayout() {
         </div>
         <AIAssistant />
       </main>
+
+      {/* Global Quick Bill Modal Overlay */}
+      <QuickBillModal isOpen={quickBillOpen} onClose={() => setQuickBillOpen(false)} />
     </div>
   );
 }

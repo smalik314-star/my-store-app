@@ -37,6 +37,7 @@ import { Product, StockMovement } from '../../types';
 import { ProductIntelligence } from '../../services/inventoryIntelligenceService';
 import { productService } from '../../services/productService';
 import { useAuth } from '../../context/AuthContext';
+import { useSettings } from '../../context/SettingsContext';
 import { formatCurrency } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
 import { motion, AnimatePresence } from 'motion/react';
@@ -53,6 +54,7 @@ const COLORS = ['#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
 
 export function InventoryDashboard({ products, intelligence, onViewProduct, onEditProduct }: InventoryDashboardProps) {
   const { user } = useAuth();
+  const { settings } = useSettings();
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(true);
   const [movementSearch, setMovementSearch] = useState('');
@@ -290,42 +292,103 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
       </div>
 
       {/* 2. Visual Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Chart A: Stock Value Distribution by Category (7 cols) */}
-        <Card className="lg:col-span-7 p-6 border-border bg-surface flex flex-col justify-between">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-black text-text uppercase tracking-widest">Inventory Financial Distribution</h3>
-              <p className="text-[10px] font-bold text-text/40 tracking-wider uppercase">Stock Valuation By Drug Category (INR)</p>
+      {(settings?.showDashboardCharts ?? true) && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Chart A: Stock Value Distribution by Category (7 cols) */}
+          <Card className="lg:col-span-7 p-6 border-border bg-surface flex flex-col justify-between">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-text uppercase tracking-widest">Inventory Financial Distribution</h3>
+                <p className="text-[10px] font-bold text-text/40 tracking-wider uppercase">Stock Valuation By Drug Category (INR)</p>
+              </div>
+              <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-1 rounded-md uppercase tracking-wider">
+                Valuation density
+              </span>
             </div>
-            <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-1 rounded-md uppercase tracking-wider">
-              Valuation density
-            </span>
-          </div>
 
-          {stockByCategoryData.length === 0 ? (
-            <div className="h-[280px] flex flex-col items-center justify-center text-text/30 font-bold text-xs uppercase">
-              No product stock data to display
+            {stockByCategoryData.length === 0 ? (
+              <div className="h-[280px] flex flex-col items-center justify-center text-text/30 font-bold text-xs uppercase">
+                No product stock data to display
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                <div className="md:col-span-6 h-[260px] w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={stockByCategoryData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={65}
+                        outerRadius={95}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {stockByCategoryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        formatter={(value: any) => [formatCurrency(value), 'Valuation']}
+                        contentStyle={{ 
+                          borderRadius: '16px', 
+                          border: '1px solid #E2E8F0', 
+                          backgroundColor: '#FFF', 
+                          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.05)',
+                          fontFamily: 'Inter, sans-serif',
+                          fontSize: '11px',
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Legend List */}
+                <div className="md:col-span-6 space-y-2 max-h-[260px] overflow-y-auto custom-scrollbar pr-2">
+                  {stockByCategoryData.map((item, idx) => (
+                    <div key={item.name} className="flex items-center justify-between p-2 rounded-xl hover:bg-background/50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                        <span className="text-[11px] font-black text-text/70 uppercase tracking-wider truncate max-w-[120px]">{item.name}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[11.5px] font-black text-text block">{formatCurrency(item.value)}</span>
+                        <span className="text-[9px] font-bold text-text/30 uppercase">{item.count} Units</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Chart B: Top Products by Valuation (5 cols) */}
+          <Card className="lg:col-span-5 p-6 border-border bg-surface flex flex-col justify-between">
+            <div className="mb-6">
+              <h3 className="text-sm font-black text-text uppercase tracking-widest">Highest Capital Assets</h3>
+              <p className="text-[10px] font-bold text-text/40 tracking-wider uppercase">Top Products by Stock Value (INR)</p>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-              <div className="md:col-span-6 h-[260px] w-full flex items-center justify-center">
+
+            {topProductsData.length === 0 ? (
+              <div className="h-[280px] flex flex-col items-center justify-center text-text/30 font-bold text-xs uppercase">
+                Add products with stock value
+              </div>
+            ) : (
+              <div className="h-[260px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={stockByCategoryData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={65}
-                      outerRadius={95}
-                      paddingAngle={3}
-                      dataKey="value"
-                    >
-                      {stockByCategoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
+                  <BarChart data={topProductsData} layout="vertical" margin={{ left: -10, right: 10, top: 0, bottom: 0 }}>
+                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 'bold', fill: '#94A3B8' }} />
+                    <YAxis 
+                      dataKey="name" 
+                      type="category" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      width={90}
+                      tickFormatter={(name) => name.length > 12 ? `${name.substring(0, 10)}...` : name}
+                      tick={{ fontSize: 9.5, fontWeight: 'black', fill: '#64748B' }} 
+                    />
+                    <Tooltip
                       formatter={(value: any) => [formatCurrency(value), 'Valuation']}
                       contentStyle={{ 
                         borderRadius: '16px', 
@@ -337,77 +400,18 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
                         fontWeight: 'bold'
                       }}
                     />
-                  </PieChart>
+                    <Bar dataKey="value" fill="#0EA5E9" radius={[0, 8, 8, 0]}>
+                      {topProductsData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
-
-              {/* Legend List */}
-              <div className="md:col-span-6 space-y-2 max-h-[260px] overflow-y-auto custom-scrollbar pr-2">
-                {stockByCategoryData.map((item, idx) => (
-                  <div key={item.name} className="flex items-center justify-between p-2 rounded-xl hover:bg-background/50 transition-colors">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                      <span className="text-[11px] font-black text-text/70 uppercase tracking-wider truncate max-w-[120px]">{item.name}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[11.5px] font-black text-text block">{formatCurrency(item.value)}</span>
-                      <span className="text-[9px] font-bold text-text/30 uppercase">{item.count} Units</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-
-        {/* Chart B: Top Products by Valuation (5 cols) */}
-        <Card className="lg:col-span-5 p-6 border-border bg-surface flex flex-col justify-between">
-          <div className="mb-6">
-            <h3 className="text-sm font-black text-text uppercase tracking-widest">Highest Capital Assets</h3>
-            <p className="text-[10px] font-bold text-text/40 tracking-wider uppercase">Top Products by Stock Value (INR)</p>
-          </div>
-
-          {topProductsData.length === 0 ? (
-            <div className="h-[280px] flex flex-col items-center justify-center text-text/30 font-bold text-xs uppercase">
-              Add products with stock value
-            </div>
-          ) : (
-            <div className="h-[260px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topProductsData} layout="vertical" margin={{ left: -10, right: 10, top: 0, bottom: 0 }}>
-                  <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 'bold', fill: '#94A3B8' }} />
-                  <YAxis 
-                    dataKey="name" 
-                    type="category" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    width={90}
-                    tickFormatter={(name) => name.length > 12 ? `${name.substring(0, 10)}...` : name}
-                    tick={{ fontSize: 9.5, fontWeight: 'black', fill: '#64748B' }} 
-                  />
-                  <Tooltip
-                    formatter={(value: any) => [formatCurrency(value), 'Valuation']}
-                    contentStyle={{ 
-                      borderRadius: '16px', 
-                      border: '1px solid #E2E8F0', 
-                      backgroundColor: '#FFF', 
-                      boxShadow: '0 10px 25px -5px rgba(0,0,0,0.05)',
-                      fontFamily: 'Inter, sans-serif',
-                      fontSize: '11px',
-                      fontWeight: 'bold'
-                    }}
-                  />
-                  <Bar dataKey="value" fill="#0EA5E9" radius={[0, 8, 8, 0]}>
-                    {topProductsData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </Card>
-      </div>
+            )}
+          </Card>
+        </div>
+      )}
 
       {/* 3. Alerts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

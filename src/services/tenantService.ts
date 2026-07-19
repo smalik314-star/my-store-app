@@ -96,6 +96,38 @@ export const tenantService = {
     });
   },
 
+  async startProTrial(tenantId: string) {
+    const tenantRef = doc(db, 'tenants', tenantId);
+    const now = new Date();
+    const trialEnds = new Date();
+    trialEnds.setDate(now.getDate() + 30);
+
+    const limits = { maxInvoices: 1000, maxProducts: 5000, maxUsers: 5 };
+
+    await updateDoc(tenantRef, {
+      plan: 'pro',
+      limits: limits,
+      trialStartedAt: now.toISOString(),
+      trialEndsAt: trialEnds.toISOString(),
+      invites: [],
+      isTrialExtended: false,
+      updatedAt: serverTimestamp(),
+    });
+  },
+
+  async updateInvites(tenantId: string, invites: string[], isTrialExtended: boolean, newTrialEndsAt?: string) {
+    const tenantRef = doc(db, 'tenants', tenantId);
+    const updates: any = {
+      invites,
+      isTrialExtended,
+      updatedAt: serverTimestamp(),
+    };
+    if (newTrialEndsAt) {
+      updates.trialEndsAt = newTrialEndsAt;
+    }
+    await updateDoc(tenantRef, updates);
+  },
+
   async getTenantUsers(tenantId: string) {
     const usersRef = collection(db, 'tenants', tenantId, 'users');
     const snap = await getDocs(usersRef);

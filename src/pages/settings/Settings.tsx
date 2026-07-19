@@ -61,7 +61,8 @@ export default function Settings() {
     cgstRate: 9,
     sgstRate: 9,
     invoicePrefix: 'INV',
-    themeMode: 'light' as 'light' | 'dark'
+    themeMode: 'light' as 'light' | 'dark',
+    showDashboardCharts: true
   });
 
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -105,7 +106,8 @@ export default function Settings() {
         cgstRate: settings.cgstRate ?? 9,
         sgstRate: settings.sgstRate ?? 9,
         invoicePrefix: settings.invoicePrefix || 'INV',
-        themeMode: settings.themeMode || 'light'
+        themeMode: settings.themeMode || 'light',
+        showDashboardCharts: settings.showDashboardCharts ?? true
       });
     }
   }, [settings]);
@@ -603,7 +605,7 @@ export default function Settings() {
         </Card>
 
         {/* Medicine Database Master Section */}
-        <Card className="p-8 space-y-6">
+        <Card className="md:col-span-2 p-8 space-y-6">
           <div className="flex items-center justify-between pb-4 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
@@ -639,13 +641,13 @@ export default function Settings() {
                 <p className="text-[10px] font-medium text-text/50 leading-normal">
                   IndexedDB manages storage in your local browser. It keeps searches <span className="font-bold text-primary">under 5 milliseconds</span> even with 250,000 records, offline, and with zero impact on performance.
                 </p>
-                <div className="flex gap-2 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2 pt-2">
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleLoadDemoMeds}
                     disabled={importingMeds}
-                    className="text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5"
+                    className="text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 py-2.5 w-full"
                   >
                     <Sparkles className="h-3.5 w-3.5 text-primary" />
                     Load Demo (150)
@@ -656,7 +658,7 @@ export default function Settings() {
                       size="sm"
                       onClick={handleClearMasterDatabase}
                       disabled={importingMeds}
-                      className="text-[9px] font-black uppercase tracking-widest border border-danger/20 bg-danger/5 hover:bg-danger/10 text-danger flex items-center gap-1.5 animate-none"
+                      className="text-[9px] font-black uppercase tracking-widest border border-danger/20 bg-danger/5 hover:bg-danger/10 text-danger flex items-center justify-center gap-1.5 animate-none py-2.5 w-full"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       Clear Index
@@ -954,6 +956,25 @@ export default function Settings() {
                   <div className="h-10 w-full bg-[#0a0a0a] border border-white/10 rounded-lg" />
                   <span className="text-[10px] font-black uppercase tracking-widest">Dark Mode</span>
                 </button>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-border/50">
+              <div className="flex items-center justify-between p-4 bg-background border border-border rounded-2xl">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-black text-text uppercase">Dashboard Visual Graphs</p>
+                  <p className="text-[10px] font-bold text-text/40">Show or hide analytics charts on Dashboard and Inventory screens</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    name="showDashboardCharts"
+                    checked={formData.showDashboardCharts}
+                    onChange={handleInputChange}
+                    className="sr-only peer" 
+                  />
+                  <div className="w-11 h-6 bg-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
               </div>
             </div>
           </div>

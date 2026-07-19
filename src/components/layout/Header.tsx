@@ -15,7 +15,8 @@ import {
   VolumeX, 
   ShieldAlert,
   Settings,
-  LogOut
+  LogOut,
+  Zap
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../common/Button';
@@ -369,10 +370,20 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
           </div>
 
           <div className="flex items-center gap-2 md:gap-6 shrink-0">
+            {/* Quick Bill Trigger Button */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
+              className="flex items-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 text-xs font-black text-white bg-accent hover:bg-accent/90 rounded-xl transition-all shadow-md shadow-accent/15 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+              id="global-quick-bill-trigger"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Quick Bill</span>
+            </button>
+
             {/* Interactive Search Bar Clickable Target */}
             <button 
               onClick={() => setSearchOpen(true)}
-              className="hidden md:flex items-center gap-3 px-4 py-2 text-sm text-text/40 hover:text-text/70 bg-background hover:bg-background/80 border border-border rounded-xl transition-all cursor-pointer min-w-[240px] text-left shadow-sm"
+              className="hidden md:flex items-center gap-3 px-4 py-2.5 text-sm text-text/40 hover:text-text/70 bg-background hover:bg-background/80 border border-border rounded-xl transition-all cursor-pointer min-w-[240px] text-left shadow-sm"
               id="global-search-desktop-trigger"
             >
               <Search className="h-4 w-4 shrink-0 text-text/30" />

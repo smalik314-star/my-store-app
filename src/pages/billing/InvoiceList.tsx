@@ -294,14 +294,14 @@ export default function InvoiceList() {
       <Card className="overflow-hidden border-border bg-surface shadow-xl">
         <div className="p-6 space-y-6">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1 p-1 bg-background/50 rounded-2xl border border-border w-fit">
+            <div className="flex flex-wrap items-center gap-3 max-w-full">
+              <div className="flex items-center gap-1 p-1 bg-background/50 rounded-2xl border border-border w-fit overflow-x-auto scrollbar-none">
                 {['ALL', 'PAID', 'DUE'].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => { setStatusFilter(tab as any); setCurrentPage(1); }}
                     className={cn(
-                      "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                      "px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
                       statusFilter === tab 
                         ? "bg-primary text-white shadow-lg shadow-primary/20" 
                         : "text-text/40 hover:text-text hover:bg-background"
@@ -312,13 +312,13 @@ export default function InvoiceList() {
                 ))}
               </div>
 
-              <div className="flex items-center gap-1 p-1 bg-background/50 rounded-2xl border border-border w-fit">
+              <div className="flex items-center gap-1 p-1 bg-background/50 rounded-2xl border border-border w-fit overflow-x-auto scrollbar-none">
                 {['ALL', 'CASH', 'UPI', 'CARD', 'CREDIT'].map((method) => (
                   <button
                     key={method}
                     onClick={() => { setMethodFilter(method); setCurrentPage(1); }}
                     className={cn(
-                      "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                      "px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
                       methodFilter === method 
                         ? "bg-text text-white shadow-lg shadow-text/10" 
                         : "text-text/40 hover:text-text hover:bg-background"
@@ -421,7 +421,7 @@ export default function InvoiceList() {
                     </td>
                     <td className="px-6 py-5">
                       <Badge 
-                        variant={invoice.paymentStatus === 'paid' ? 'success' : 'warning'}
+                        variant={invoice.paymentStatus === 'paid' ? 'success' : 'danger'}
                         className="font-black text-[9px] min-w-[70px] justify-center"
                       >
                         {invoice.paymentStatus.toUpperCase()}
@@ -474,7 +474,7 @@ export default function InvoiceList() {
                     <span className="text-[10px] font-bold text-text/30 uppercase">{invoice.items.length} items</span>
                   </div>
                 </div>
-                <Badge variant={invoice.paymentStatus === 'paid' ? 'success' : 'warning'}>
+                <Badge variant={invoice.paymentStatus === 'paid' ? 'success' : 'danger'}>
                   {invoice.paymentStatus.toUpperCase()}
                 </Badge>
               </div>

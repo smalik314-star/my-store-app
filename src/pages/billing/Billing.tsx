@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, onSnapshot, getDocs, where, limit, orderBy, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, getDocs, where, limit, addDoc, Timestamp, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { Product, Customer, InvoiceItem, Invoice } from '../../types';
 import { Card } from '../../components/common/Card';
@@ -7,37 +7,37 @@ import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { 
   Search, 
-  ShoppingCart, 
   Trash2, 
   Plus, 
-  Minus, 
   User, 
   CreditCard, 
   Receipt, 
   AlertCircle,
   Package,
-  ScanLine,
-  ChevronRight,
-  ArrowRight,
-  Save,
+  ChevronDown,
   X,
   UserPlus,
-  TrendingUp
+  Send,
+  Calendar,
+  CheckCircle,
+  Clock,
+  QrCode,
+  Smartphone,
+  RefreshCw,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { invoiceService } from '../../services/invoiceService';
 import { customerService } from '../../services/customerService';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
 import { formatCurrency } from '../../utils/currency';
-import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
-
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
-import { toJsDate, formatDate } from '../../utils/date';
+import { toJsDate } from '../../utils/date';
 
 const WALK_IN_CUSTOMER: Customer = {
   id: 'walk-in',
@@ -53,86 +53,59 @@ const WALK_IN_CUSTOMER: Customer = {
 };
 
 export default function Billing() {
-  const formatDateForInput = (dateVal: any) => {
-    if (!dateVal) return '';
-    try {
-      const d = toJsDate(dateVal);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
-    } catch (e) {
-      return '';
-    }
-  };
-
   const { user } = useAuth();
   const { settings } = useSettings();
-  const [searchParams] = useSearchParams();
-  const preSelectedCustomerId = searchParams.get('customerId');
-  
+  const { showToast } = useToast();
+  const navigate = useNavigate();
+
+  // Primary POS States
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [masterSuggestions, setMasterSuggestions] = useState<MasterMedicine[]>([]);
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
-
-  // Debounce search term changes
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 300);
-    return () => clearTimeout(handler);
-  }, [searchTerm]);
-
-  // Query master medicine database in IndexedDB
-  useEffect(() => {
-    if (debouncedSearchTerm.trim().length >= 2) {
-      medicineMasterService.search(debouncedSearchTerm).then(results => {
-        setMasterSuggestions(results);
-      });
-    } else {
-      setMasterSuggestions([]);
-    }
-  }, [debouncedSearchTerm]);
-
-  const [customerSearch, setCustomerSearch] = useState('');
+  const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
   
+  // Selection states
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(WALK_IN_CUSTOMER);
-  const [cart, setCart] = useState<InvoiceItem[]>([]);
-  const [discount, setDiscount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card' | 'credit'>('cash');
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'due'>('paid');
-  
-  const { showToast } = useToast();
-  
-  const navigate = useNavigate();
-  const productSearchRef = useRef<HTMLInputElement>(null);
-  const customerSearchRef = useRef<HTMLInputElement>(null);
-  
-  const [quickMode, setQuickMode] = useState(true);
-  const [recentProducts, setRecentProducts] = useState<Product[]>([]);
-  const [recentCustomers, setRecentCustomers] = useState<Customer[]>([]);
-
-  // Navigation states for dropdowns
-  const [productActiveIndex, setProductActiveIndex] = useState(0);
-  const [customerActiveIndex, setCustomerActiveIndex] = useState(0);
-  const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
-
-  // Quick Add Customer Modal States
-  const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
-  const [newCustomerName, setNewCustomerName] = useState('');
-  const [newCustomerPhone, setNewCustomerPhone] = useState('');
-  const [newCustomerAddress, setNewCustomerAddress] = useState('');
-  const [newCustomerBalance, setNewCustomerBalance] = useState<number>(0);
+  const [recentCustomers, setRecentCustomers] = useState<Customer[]>([]);
+  
+  // Inline Add Customer
+  const [showInlineAddCustomer, setShowInlineAddCustomer] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
-  // Fetch initial data (Products and Customers subscriptions)
+  // Cart/Table Items
+  const [cart, setCart] = useState<InvoiceItem[]>([
+    { productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 } // start with one blank row
+  ]);
+  const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
+
+  // Collapsible Extra Details
+  const [showMoreDetails, setShowMoreDetails] = useState(false);
+  const [discount, setDiscount] = useState<number>(0);
+  const [customInvoiceDate, setCustomInvoiceDate] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
+
+  // Payment configuration
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'due' | 'partial'>('paid');
+  const [amountReceived, setAmountReceived] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card' | 'credit'>('cash');
+
+  // Success Confirmation modal
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [savedInvoice, setSavedInvoice] = useState<any>(null);
+
+  // Focus references
+  const customerInputRef = useRef<HTMLInputElement>(null);
+
+  // Load products, customers, and recent bills subscriptions
   useEffect(() => {
     if (!user?.tenantId) return;
 
+    // Sub to Products
     const qProducts = query(
       collection(db, 'products'),
       where('tenantId', '==', user.tenantId)
@@ -142,6 +115,7 @@ export default function Billing() {
       setProducts(items);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
 
+    // Sub to Customers
     const qCustomers = query(
       collection(db, 'customers'),
       where('tenantId', '==', user.tenantId)
@@ -149,399 +123,45 @@ export default function Billing() {
     const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
       setCustomers(items);
-      
-      // Auto-select if customerId in URL
-      if (preSelectedCustomerId) {
-        const found = items.find(c => c.id === preSelectedCustomerId);
-        if (found) setSelectedCustomer(found);
-      }
-
-      // Recent customers (last 3 for quick select)
-      setRecentCustomers(items.slice(0, 3));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'customers'));
+
+    // Sub to Invoices for local history
+    const qInvoices = query(
+      collection(db, 'invoices'),
+      where('tenantId', '==', user.tenantId),
+      orderBy('createdAt', 'desc'),
+      limit(10)
+    );
+    const unsubInvoices = onSnapshot(qInvoices, (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Invoice));
+      setRecentInvoices(items);
+
+      // Derive top recently billed customers from invoices
+      const uniqueCustIds = new Set<string>();
+      const recentCusts: Customer[] = [];
+      
+      items.forEach(inv => {
+        if (inv.customerId !== 'walk-in' && !uniqueCustIds.has(inv.customerId)) {
+          uniqueCustIds.add(inv.customerId);
+        }
+      });
+
+      // Match against customers fetched
+      const unsubCustomersList = onSnapshot(qCustomers, (custSnap) => {
+        const allCusts = custSnap.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
+        const matched = allCusts.filter(c => uniqueCustIds.has(c.id)).slice(0, 4);
+        setRecentCustomers(matched);
+      });
+
+      return () => unsubCustomersList();
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'invoices'));
 
     return () => {
       unsubProducts();
       unsubCustomers();
+      unsubInvoices();
     };
-  }, [user?.tenantId, preSelectedCustomerId]);
-
-  // Fetch recent products separately to prevent subscription loop
-  useEffect(() => {
-    if (!user?.tenantId || products.length === 0) return;
-
-    const fetchRecentItems = async () => {
-      try {
-        const qRecentInvoices = query(
-          collection(db, 'invoices'),
-          where('tenantId', '==', user.tenantId)
-        );
-        const snapshot = await getDocs(qRecentInvoices);
-        
-        // Map and sort client-side to prevent requiring a composite index
-        const invoices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
-        invoices.sort((a, b) => {
-          const dateA = toJsDate(a.createdAt);
-          const dateB = toJsDate(b.createdAt);
-          return dateB.getTime() - dateA.getTime();
-        });
-
-        const recentProductIds = new Set<string>();
-        invoices.slice(0, 5).forEach(inv => {
-          const items = inv.items as InvoiceItem[];
-          items.forEach(item => recentProductIds.add(item.productId));
-        });
-        
-        const recentList = products.filter(p => recentProductIds.has(p.id)).slice(0, 10);
-        setRecentProducts(recentList);
-      } catch (err) {
-        console.error('Error fetching recent products:', err);
-      }
-    };
-
-    fetchRecentItems();
-  }, [user?.tenantId, products.length]);
-
-  // Keyboard Shortcuts (Standard POS shortcuts like F2, F4, F8, F9, Ctrl+S, Ctrl+N, Esc)
-  useEffect(() => {
-    const handleShortcuts = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        handleSaveInvoice();
-      } else if (e.key === 'F4') {
-        e.preventDefault();
-        setCart([]);
-        setDiscount(0);
-        setSelectedCustomer(WALK_IN_CUSTOMER);
-        showToast('New invoice started', 'success');
-      } else if (e.key === 'F8') {
-        e.preventDefault();
-        customerSearchRef.current?.focus();
-        setShowCustomerDropdown(true);
-      } else if (e.key === 'F9') {
-        e.preventDefault();
-        productSearchRef.current?.focus();
-        setShowProductDropdown(true);
-      } else if (e.key === 'Escape') {
-        if (isAddCustomerOpen) {
-          e.preventDefault();
-          setIsAddCustomerOpen(false);
-          showToast('Closed add customer dialog', 'info');
-          return;
-        }
-
-        const activeEl = document.activeElement;
-        if (activeEl === productSearchRef.current) {
-          e.preventDefault();
-          setSearchTerm('');
-          setShowProductDropdown(false);
-          productSearchRef.current?.blur();
-          showToast('Product input cleared', 'info');
-        } else if (activeEl === customerSearchRef.current) {
-          e.preventDefault();
-          setCustomerSearch('');
-          setShowCustomerDropdown(false);
-          customerSearchRef.current?.blur();
-          showToast('Customer input cleared', 'info');
-        } else {
-          // If neither is focused but there's search text, clear it
-          if (searchTerm || customerSearch || showProductDropdown || showCustomerDropdown) {
-            e.preventDefault();
-            setSearchTerm('');
-            setCustomerSearch('');
-            setShowProductDropdown(false);
-            setShowCustomerDropdown(false);
-            showToast('Search inputs cleared', 'info');
-          }
-        }
-      }
-
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          handleSaveInvoice();
-        }
-        switch (e.key.toLowerCase()) {
-          case 'n':
-            e.preventDefault();
-            setCart([]);
-            setDiscount(0);
-            setSelectedCustomer(WALK_IN_CUSTOMER);
-            showToast('New invoice started', 'success');
-            break;
-          case 's':
-            e.preventDefault();
-            handleSaveInvoice();
-            break;
-          case 'p':
-            e.preventDefault();
-            if (cart.length > 0) {
-              window.print();
-            } else {
-              showToast('Cannot print empty invoice', 'warning');
-            }
-            break;
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleShortcuts);
-    return () => window.removeEventListener('keydown', handleShortcuts);
-  }, [cart, selectedCustomer, discount, isAddCustomerOpen, searchTerm, customerSearch, showProductDropdown, showCustomerDropdown]);
-
-  // Smart Discount Suggestions
-  const suggestedDiscount = useMemo(() => {
-    const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-    
-    if (subtotal > 10000) return { amount: Math.floor(subtotal * 0.1), label: 'High Value (10%)' };
-    if (subtotal > 5000) return { amount: Math.floor(subtotal * 0.05), label: 'Preferred (5%)' };
-    if (selectedCustomer.id !== 'walk-in' && selectedCustomer.totalPurchases > 50000) {
-      return { amount: Math.floor(subtotal * 0.03), label: 'Loyalty (3%)' };
-    }
-    return null;
-  }, [cart, selectedCustomer]);
-
-  // Unified Product Search/Scan input handler
-  const handleProductSearchChange = (val: string) => {
-    setSearchTerm(val);
-    setProductActiveIndex(0);
-    setShowProductDropdown(true);
-
-    if (val.trim()) {
-      // Direct exact match scan for speed (SKU or Barcode)
-      const exactMatch = products.find(p => 
-        (p.barcode && p.barcode.toLowerCase() === val.trim().toLowerCase()) || 
-        (p.sku && p.sku.toLowerCase() === val.trim().toLowerCase())
-      );
-      if (exactMatch) {
-        addToCart(exactMatch);
-        setSearchTerm('');
-        setShowProductDropdown(false);
-      }
-    }
-  };
-
-  const handleProductKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      setSearchTerm('');
-      setShowProductDropdown(false);
-      productSearchRef.current?.blur();
-      showToast('Product input cleared', 'info');
-      return;
-    }
-
-    if (!showProductDropdown || combinedSuggestions.length === 0) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setProductActiveIndex(prev => (prev + 1) % combinedSuggestions.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setProductActiveIndex(prev => (prev - 1 + combinedSuggestions.length) % combinedSuggestions.length);
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      const activeSuggestion = combinedSuggestions[productActiveIndex] || combinedSuggestions[0];
-      if (activeSuggestion) {
-        if (activeSuggestion.type === 'inventory') {
-          addToCart(activeSuggestion.data);
-          setSearchTerm('');
-          setShowProductDropdown(false);
-        } else {
-          handleSelectMasterMedicine(activeSuggestion.data);
-        }
-      }
-    }
-  };
-
-  // Customer search input handlers
-  const handleCustomerSearchChange = (val: string) => {
-    setCustomerSearch(val);
-    setCustomerActiveIndex(0);
-    setShowCustomerDropdown(true);
-  };
-
-  const handleCustomerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      setCustomerSearch('');
-      setShowCustomerDropdown(false);
-      customerSearchRef.current?.blur();
-      showToast('Customer input cleared', 'info');
-      return;
-    }
-
-    if (!showCustomerDropdown || filteredCustomers.length === 0) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setCustomerActiveIndex(prev => (prev + 1) % filteredCustomers.length);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setCustomerActiveIndex(prev => (prev - 1 + filteredCustomers.length) % filteredCustomers.length);
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      const activeCustomer = filteredCustomers[customerActiveIndex] || filteredCustomers[0];
-      if (activeCustomer) {
-        setSelectedCustomer(activeCustomer);
-        setCustomerSearch('');
-        setShowCustomerDropdown(false);
-        showToast(`Customer selected: ${activeCustomer.name}`, 'success');
-        
-        // Auto focus the product search box for quick item billing!
-        setTimeout(() => {
-          productSearchRef.current?.focus();
-          setShowProductDropdown(true);
-        }, 50);
-      }
-    }
-  };
-
-  // Quick Add Customer Save
-  const handleQuickAddCustomer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user?.tenantId) return;
-    if (!newCustomerName || !newCustomerPhone) {
-      showToast('Name and Phone are required!', 'danger');
-      return;
-    }
-    setIsSavingCustomer(true);
-    try {
-      const customerId = await customerService.addCustomer(user.tenantId, {
-        name: newCustomerName,
-        phone: newCustomerPhone,
-        address: newCustomerAddress || 'Counter Sale',
-        outstandingBalance: Number(newCustomerBalance) || 0,
-        totalPurchases: 0,
-        totalPaid: 0,
-      });
-      
-      const newCustomer: Customer = {
-        id: customerId,
-        tenantId: user.tenantId,
-        name: newCustomerName,
-        phone: newCustomerPhone,
-        address: newCustomerAddress || 'Counter Sale',
-        outstandingBalance: Number(newCustomerBalance) || 0,
-        totalPurchases: 0,
-        totalPaid: 0,
-        createdAt: null,
-        updatedAt: null,
-      };
-      
-      setSelectedCustomer(newCustomer);
-      setIsAddCustomerOpen(false);
-      setNewCustomerName('');
-      setNewCustomerPhone('');
-      setNewCustomerAddress('');
-      setNewCustomerBalance(0);
-      showToast('Customer added & selected successfully!', 'success');
-      
-      // Focus product search automatically
-      setTimeout(() => {
-        productSearchRef.current?.focus();
-        setShowProductDropdown(true);
-      }, 50);
-    } catch (error: any) {
-      console.error('Failed to add customer:', error);
-      showToast(error.message || 'Failed to add customer', 'danger');
-    } finally {
-      setIsSavingCustomer(false);
-    }
-  };
-
-  // Filtered lists
-  const filteredProducts = useMemo(() => {
-    const term = (searchTerm || '').trim().toLowerCase();
-    const inStock = products.filter(p => p && (p.stockQuantity ?? 0) > 0);
-    if (!term) {
-      // Show first 10 products with stock by default when focused
-      return inStock.slice(0, 10);
-    }
-    return products.filter(p => {
-      if (!p) return false;
-      const name = (p.name || '').toLowerCase();
-      const sku = (p.sku || '').toLowerCase();
-      const barcode = (p.barcode || '').toLowerCase();
-      const genericName = (p.genericName || '').toLowerCase();
-      const brand = (p.brand || '').toLowerCase();
-      return name.includes(term) || 
-             sku.includes(term) || 
-             barcode.includes(term) ||
-             genericName.includes(term) ||
-             brand.includes(term);
-    }).slice(0, 10);
-  }, [products, searchTerm]);
-
-  const combinedSuggestions = useMemo(() => {
-    return [
-      ...filteredProducts.map(p => ({ type: 'inventory' as const, data: p })),
-      ...masterSuggestions.map(med => ({ type: 'master' as const, data: med }))
-    ];
-  }, [filteredProducts, masterSuggestions]);
-
-  // Handle selecting a master database medicine, automatically logging it to local stock & adding to active invoice
-  const handleSelectMasterMedicine = async (med: MasterMedicine) => {
-    if (!user?.tenantId) return;
-    try {
-      showToast(`Adding ${med.name} from master dataset...`, 'info');
-      
-      const sku = `SKU-${Date.now().toString().slice(-6)}`;
-      const barcode = `BAR-${Date.now().toString().slice(-6)}`;
-      
-      const newProductData = {
-        tenantId: user.tenantId,
-        sku,
-        barcode,
-        name: med.name,
-        brand: med.brand || '',
-        genericName: med.genericName || '',
-        category: med.category || 'Others',
-        manufacturer: med.manufacturer || '',
-        mrp: med.mrp || 100,
-        purchasePrice: med.purchasePrice || 70,
-        sellingPrice: med.sellingPrice || 85,
-        unit: med.unit || 'Strip',
-        stockQuantity: 100, // Safe buffer quantity for active billing
-        minimumStock: 10,
-        batchNumber: 'MASTER-AUTO',
-        expiryDate: Timestamp.fromDate(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)), // 1 year
-        manufacturingDate: Timestamp.fromDate(new Date()),
-        gstPercentage: 12,
-        rackLocation: 'A1',
-        createdAt: Timestamp.now()
-      };
-
-      const docRef = await addDoc(collection(db, 'products'), newProductData);
-      
-      const createdProduct: Product = {
-        id: docRef.id,
-        ...newProductData
-      };
-
-      addToCart(createdProduct);
-      setSearchTerm('');
-      setShowProductDropdown(false);
-      showToast(`${med.name} added to inventory and loaded!`, 'success');
-    } catch (err: any) {
-      console.error('Failed to auto-create master product:', err);
-      showToast('Could not register master product.', 'danger');
-    }
-  };
-
-  const filteredCustomers = useMemo(() => {
-    const term = (customerSearch || '').trim().toLowerCase();
-    if (!term) return [WALK_IN_CUSTOMER];
-    return [
-      WALK_IN_CUSTOMER,
-      ...customers.filter(c => {
-        if (!c) return false;
-        const name = (c.name || '').toLowerCase();
-        const phone = (c.phone || '').toLowerCase();
-        return name.includes(term) || phone.includes(term);
-      })
-    ].slice(0, 5);
-  }, [customers, customerSearch]);
+  }, [user?.tenantId]);
 
   // Cart Calculations
   const totals = useMemo(() => {
@@ -552,461 +172,412 @@ export default function Billing() {
     return { subtotal, gstTotal, grandTotal };
   }, [cart, discount]);
 
-  // Cart Actions
-  const addToCart = (product: Product) => {
+  // Auto-calculated fields when Grand Total updates
+  useEffect(() => {
+    if (paymentStatus === 'paid') {
+      setAmountReceived(totals.grandTotal.toString());
+    } else if (paymentStatus === 'due') {
+      setAmountReceived('0');
+    }
+  }, [totals.grandTotal, paymentStatus]);
+
+  // Handle customer search suggestion filtering
+  const filteredCustomers = useMemo(() => {
+    const term = customerSearch.trim().toLowerCase();
+    if (!term) return [];
+    return customers.filter(c => 
+      c.name.toLowerCase().includes(term) || 
+      c.phone.includes(term)
+    ).slice(0, 5);
+  }, [customers, customerSearch]);
+
+  // Inline Customer Saving
+  const handleSaveCustomerInline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.tenantId) return;
+    if (!newCustName || !newCustPhone) {
+      showToast('Please enter both name and phone number!', 'danger');
+      return;
+    }
+    
+    setIsSavingCustomer(true);
+    try {
+      const customerId = await customerService.addCustomer(user.tenantId, {
+        name: newCustName,
+        phone: newCustPhone,
+        address: 'Counter Sale',
+        outstandingBalance: 0,
+        totalPurchases: 0,
+        totalPaid: 0,
+      });
+
+      const newCust: Customer = {
+        id: customerId!,
+        tenantId: user.tenantId,
+        name: newCustName,
+        phone: newCustPhone,
+        address: 'Counter Sale',
+        outstandingBalance: 0,
+        totalPurchases: 0,
+        totalPaid: 0,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+
+      setSelectedCustomer(newCust);
+      setNewCustName('');
+      setNewCustPhone('');
+      setShowInlineAddCustomer(false);
+      setCustomerSearch('');
+      showToast(`Customer "${newCust.name}" added and selected!`, 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to save customer', 'danger');
+    } finally {
+      setIsSavingCustomer(false);
+    }
+  };
+
+  // Add Item Row Instantly
+  const handleAddItemRow = () => {
+    setCart(prev => [
+      ...prev,
+      { productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 }
+    ]);
+  };
+
+  // Remove Item Row Instantly
+  const handleRemoveItemRow = (index: number) => {
+    setCart(prev => {
+      const copy = [...prev];
+      copy.splice(index, 1);
+      if (copy.length === 0) {
+        return [{ productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 }];
+      }
+      return copy;
+    });
+  };
+
+  // Autocomplete suggestions based on typed input for row index
+  const getProductSuggestions = (rowName: string) => {
+    const term = rowName.trim().toLowerCase();
+    if (!term) return [];
+    return products.filter(p => 
+      p.name.toLowerCase().includes(term) || 
+      (p.genericName && p.genericName.toLowerCase().includes(term)) ||
+      (p.brand && p.brand.toLowerCase().includes(term))
+    ).slice(0, 6);
+  };
+
+  // Auto-fill row with selected product suggestion
+  const handleSelectProductSuggestion = (index: number, product: Product) => {
     if (product.stockQuantity <= 0) {
       showToast(`${product.name} is out of stock!`, 'danger');
       return;
     }
 
-    setCart(prev => {
-      const existing = prev.find(item => item.productId === product.id);
-      if (existing) {
-        if (existing.quantity >= product.stockQuantity) {
-          showToast(`Cannot add more. Only ${product.stockQuantity} available.`, 'danger');
-          return prev;
-        }
-        return prev.map(item => 
-          item.productId === product.id 
-            ? { ...item, quantity: item.quantity + 1, total: (item.quantity + 1) * (item.price + item.gst) }
-            : item
-        );
-      }
-
-      const itemTotal = product.sellingPrice;
-      
-      // Use system GST rates if tax mode is enabled
-      const cgstRate = settings?.taxMode ? (settings.cgstRate || 9) : 0;
-      const sgstRate = settings?.taxMode ? (settings.sgstRate || 9) : 0;
-      const totalTaxRate = cgstRate + sgstRate;
-      
-      // If product has a specific GST, we could use that, but prompt says "Tax calculation rules" in settings.
-      // Usually pharma products have specific GST (5%, 12%, 18%). 
-      // Let's stick to product's gstPercentage but respect settings.taxMode.
-      const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
-      const gstAmount = (product.sellingPrice * effectiveGstRate) / 100;
-      
-      return [...prev, {
-        productId: product.id,
-        name: product.name,
-        sku: product.sku || '',
-        batchNumber: product.batchNumber || '',
-        expiryDate: product.expiryDate || null,
-        manufacturingDate: product.manufacturingDate || null,
-        quantity: 1,
-        price: product.sellingPrice,
-        gst: gstAmount,
-        total: product.sellingPrice + gstAmount
-      }];
-    });
-    setSearchTerm('');
-    productSearchRef.current?.focus();
-  };
-
-  const updateQuantity = (productId: string, delta: number) => {
-    setCart(prev => prev.map(item => {
-      if (item.productId === productId) {
-        const product = products.find(p => p.id === productId);
-        const newQty = Math.max(1, item.quantity + delta);
-        
-        if (product && newQty > product.stockQuantity) {
-          showToast(`Max stock reached for ${item.name}`, 'danger');
-          return item;
-        }
-        
-        return { ...item, quantity: newQty, total: newQty * (item.price + item.gst) };
+    setCart(prev => prev.map((item, i) => {
+      if (i === index) {
+        const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
+        const gstAmount = (product.sellingPrice * effectiveGstRate) / 100;
+        return {
+          productId: product.id,
+          name: product.name,
+          sku: product.sku || '',
+          batchNumber: product.batchNumber || '',
+          expiryDate: product.expiryDate || null,
+          manufacturingDate: product.manufacturingDate || null,
+          quantity: 1,
+          price: product.sellingPrice,
+          gst: gstAmount,
+          total: product.sellingPrice + gstAmount
+        };
       }
       return item;
     }));
+
+    setFocusedRowIndex(null); // Close suggestions
+    showToast(`Loaded ${product.name}`, 'info');
   };
 
-  const updateCartItemField = (productId: string, field: string, value: any) => {
-    setCart(prev => prev.map(item => {
-      if (item.productId === productId) {
-        let updated = { ...item, [field]: value };
+  // Input changes for direct inline table edits
+  const handleRowInputChange = (index: number, field: string, value: any) => {
+    setCart(prev => prev.map((item, i) => {
+      if (i === index) {
+        const updated = { ...item, [field]: value };
         
-        // Recalculate GST and total if price (rate) or quantity changes
-        if (field === 'price' || field === 'quantity') {
-          const product = products.find(p => p.id === productId);
-          const effectiveGstRate = settings?.taxMode ? (product?.gstPercentage || 0) : 0;
-          const rate = field === 'price' ? Number(value) : item.price;
+        // Recalculate calculations live if rates/quantities edit
+        if (field === 'price' || field === 'quantity' || field === 'name') {
           const qty = field === 'quantity' ? Math.max(1, Number(value)) : item.quantity;
+          const rate = field === 'price' ? Math.max(0, Number(value)) : item.price;
           
+          // Use product's gst if product was resolved
+          const matchedProd = products.find(p => p.id === item.productId);
+          const gstRate = matchedProd ? matchedProd.gstPercentage : 12; // default 12% if custom item name
+          const effectiveGstRate = settings?.taxMode ? gstRate : 0;
           const gstAmount = (rate * effectiveGstRate) / 100;
-          updated.price = rate;
+          
           updated.quantity = qty;
+          updated.price = rate;
           updated.gst = gstAmount;
           updated.total = qty * (rate + gstAmount);
         }
-        
         return updated;
       }
       return item;
     }));
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(item => item.productId !== productId));
-  };
-
+  // Save the invoice to backend database
   const handleSaveInvoice = async () => {
     if (!user?.tenantId) return;
-    if (cart.length === 0) {
-      showToast('Cart is empty!', 'danger');
+
+    // Validate requirements
+    if (selectedCustomer.id === 'walk-in' && paymentStatus !== 'paid') {
+      showToast('Walk-in Customers must pay fully (Status: Paid). Choose or register a customer for Credit.', 'danger');
+      return;
+    }
+
+    const validItems = cart.filter(item => item.productId && item.quantity > 0);
+    if (validItems.length === 0) {
+      showToast('Please add at least one valid item from inventory autocomplete.', 'danger');
       return;
     }
 
     setLoading(true);
     try {
-      // Use prefix from settings
       const prefix = settings?.invoicePrefix || 'INV';
       const invoiceNumber = await invoiceService.generateInvoiceNumber(user.tenantId, prefix);
       
-      const invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'> = {
+      const parsedAmtReceived = Number(amountReceived) || 0;
+      const parsedAmtDue = Math.max(0, totals.grandTotal - parsedAmtReceived);
+
+      const invoiceData: any = {
         invoiceNumber,
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.name,
-        items: cart,
-        subtotal: totals.subtotal,
-        gstTotal: totals.gstTotal,
+        items: validItems,
+        subtotal: validItems.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+        gstTotal: validItems.reduce((sum, item) => sum + (item.gst * item.quantity), 0),
         discount,
         grandTotal: totals.grandTotal,
         paymentStatus,
         paymentMethod,
+        amountReceived: parsedAmtReceived,
+        outstandingAmount: parsedAmtDue,
+        createdAt: customInvoiceDate ? Timestamp.fromDate(new Date(customInvoiceDate)) : Timestamp.now()
       };
 
       const invoiceId = await invoiceService.saveInvoice(user.tenantId, invoiceData);
       
-      setTimeout(() => {
-        navigate(`/invoice/${invoiceId}`);
-      }, 1000);
+      // Store saved invoice details for the instant WhatsApp sharing flow
+      setSavedInvoice({
+        id: invoiceId,
+        invoiceNumber,
+        customerName: selectedCustomer.name,
+        customerPhone: selectedCustomer.phone,
+        grandTotal: totals.grandTotal,
+        items: validItems,
+        paymentStatus,
+        amountReceived: parsedAmtReceived,
+        outstandingAmount: parsedAmtDue,
+      });
+
+      setShowSuccessModal(true);
+      showToast('Bill successfully generated & saved to Khata records!', 'success');
+      
+      // Reset POS form
+      setCart([{ productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 }]);
+      setSelectedCustomer(WALK_IN_CUSTOMER);
+      setDiscount(0);
+      setPaymentStatus('paid');
+      setPaymentMethod('cash');
     } catch (error: any) {
-      console.error('Invoice saving failed:', error);
-      showToast(error.message || 'Failed to save invoice', 'danger');
+      console.error('Save failed:', error);
+      showToast(error.message || 'Failed to process transaction', 'danger');
     } finally {
       setLoading(false);
     }
   };
 
+  // Build high-converting Indian regional billing summary and open WhatsApp
+  const handleWhatsAppShare = () => {
+    if (!savedInvoice) return;
+    
+    const storeName = settings?.storeName || 'Pharmacy Store';
+    const cleanPhone = savedInvoice.customerPhone.replace(/\D/g, '');
+    const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+    
+    // Format individual medicine lines nicely
+    const itemLines = savedInvoice.items.map((item: any) => 
+      `• ${item.name} (${item.quantity} x ₹${item.price}) = ₹${(item.total).toFixed(1)}`
+    ).join('\n');
+
+    const paymentText = savedInvoice.paymentStatus === 'paid' 
+      ? `✅ FULLY PAID via ${paymentMethod.toUpperCase()}`
+      : savedInvoice.paymentStatus === 'due'
+        ? `⚠️ OUTSTANDING CREDIT: ₹${savedInvoice.grandTotal}`
+        : `🔸 PARTIAL: Received ₹${savedInvoice.amountReceived}, Due ₹${savedInvoice.outstandingAmount}`;
+
+    const textMessage = 
+`*Bill from ${storeName}*
+-----------------------------
+🧾 *Invoice:* ${savedInvoice.invoiceNumber}
+👤 *Customer:* ${savedInvoice.customerName}
+📱 *Phone:* ${savedInvoice.customerPhone}
+-----------------------------
+*Items:*
+${itemLines}
+
+*Grand Total:* ₹${savedInvoice.grandTotal.toFixed(1)}
+*Payment:* ${paymentText}
+-----------------------------
+Thank you for your visit! 🙏
+_Powered by PharmaFlow_`;
+
+    const encodedText = encodeURIComponent(textMessage);
+    const waUrl = `https://api.whatsapp.com/send?phone=${finalPhone}&text=${encodedText}`;
+    
+    // Use an elegant anchor element injection to safely bypass iframe window popup blocks
+    const link = document.createElement('a');
+    link.href = waUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <PageTransition>
-      <div className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8">
-
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <h1 className="text-4xl font-black text-text tracking-tight flex items-center gap-4">
-            Billing Terminal
-            <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <CreditCard className="h-6 w-6 text-primary" />
+      <div className="p-4 md:p-8 max-w-[1400px] mx-auto space-y-6 pb-20">
+        
+        {/* Header Summary Panel */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-surface p-6 rounded-3xl border border-border shadow-sm">
+          <div>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⚡</span>
+              <h1 className="text-3xl font-black text-text tracking-tight">Express Khata POS</h1>
             </div>
-          </h1>
-          <p className="text-[10px] font-black text-text/30 uppercase tracking-[0.3em] mt-2">
-            {settings?.storeName || 'PharmaFlow'} — Professional Pharmacy Point of Sale
-          </p>
-        </div>
-        <div className="flex items-center gap-4 bg-surface p-2 rounded-2xl border border-border">
-          <div className="flex flex-col items-end px-4">
-            <span className="text-[8px] font-black text-text/30 uppercase tracking-widest">Active Station</span>
-            <span className="text-xs font-black text-text">STATION-01</span>
+            <p className="text-xs font-bold text-text/40 tracking-wider uppercase mt-1">
+              {settings?.storeName || 'Active Station'} • Fast Billing Panel
+            </p>
           </div>
-          <div className="h-8 w-px bg-border" />
-          <div className="flex flex-col px-4">
-            <span className="text-[8px] font-black text-text/30 uppercase tracking-widest">Date & Time</span>
-            <span className="text-xs font-black text-text">{new Date().toLocaleDateString(settings?.dateFormat === 'DD/MM/YYYY' ? 'en-IN' : 'en-US')}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left: Product Search & Customer Selection (4 cols) */}
-        <div className="lg:col-span-4 space-y-6 order-2 lg:order-1">
-          {/* Customer Selection */}
-          <Card className="p-6 border-border bg-surface relative overflow-visible">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <User className="h-5 w-5 text-primary" />
-                </div>
-                <h3 className="text-sm font-black text-text uppercase tracking-widest">Select Customer</h3>
-              </div>
-              <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-1 rounded-md">F8 TO SEARCH</span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => navigate('/invoices')}
+              className="rounded-2xl h-11 text-xs font-bold border-border hover:bg-background flex items-center gap-2"
+            >
+              <FileText className="h-4 w-4 text-text/60" />
+              View Full History
+            </Button>
+            <div className="h-11 px-4 rounded-2xl bg-primary/5 text-primary text-xs font-black uppercase flex items-center gap-2">
+              <span className="h-2.5 w-2.5 bg-success rounded-full animate-pulse" />
+              Realtime Inventory Sync
             </div>
+          </div>
+        </div>
+
+        {/* Core Billing Console GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* Main POS column: Customers and Item Table */}
+          <div className="lg:col-span-8 space-y-6">
             
-            <div className="space-y-4">
-              <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
-                <input
-                  ref={customerSearchRef}
-                  type="text"
-                  placeholder="Type name or phone number..."
-                  value={customerSearch}
-                  onChange={(e) => handleCustomerSearchChange(e.target.value)}
-                  onKeyDown={handleCustomerKeyDown}
-                  onFocus={() => setShowCustomerDropdown(true)}
-                  onBlur={() => setTimeout(() => setShowCustomerDropdown(false), 200)}
-                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-                />
-
-                {/* Customer Results Dropdown */}
-                <AnimatePresence>
-                  {showCustomerDropdown && filteredCustomers.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 5 }}
-                      className="absolute left-0 right-0 top-full mt-2 z-50 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden p-2 space-y-1"
-                    >
-                      <div className="px-3 py-1 text-[8px] font-black text-text/30 uppercase tracking-widest">Suggestions (Arrow Keys + Enter / Tab)</div>
-                      {filteredCustomers.map((customer, idx) => (
-                        <button
-                          key={customer.id}
-                          type="button"
-                          onMouseEnter={() => setCustomerActiveIndex(idx)}
-                          onMouseDown={() => {
-                            setSelectedCustomer(customer);
-                            setCustomerSearch('');
-                            setShowCustomerDropdown(false);
-                            showToast(`Customer selected: ${customer.name}`, 'success');
-                            setTimeout(() => {
-                              productSearchRef.current?.focus();
-                              setShowProductDropdown(true);
-                            }, 50);
-                          }}
-                          className={cn(
-                            "w-full p-3 rounded-xl border transition-all text-left flex items-center justify-between group",
-                            selectedCustomer.id === customer.id 
-                              ? "bg-primary border-primary text-white" 
-                              : (customerActiveIndex === idx 
-                                  ? "bg-primary/10 border-primary/25 text-primary" 
-                                  : "bg-background/50 border-transparent hover:bg-background")
-                          )}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className={cn(
-                              "h-7 w-7 rounded-lg flex items-center justify-center font-black text-[10px]",
-                              selectedCustomer.id === customer.id ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
-                            )}>
-                              {(customer.name || 'C').charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-xs font-black">{customer.name || 'Unnamed'}</span>
-                              <span className={cn(
-                                "text-[8px] font-bold uppercase tracking-widest",
-                                selectedCustomer.id === customer.id ? "text-white/60" : "text-text/30"
-                              )}>{customer.phone || 'N/A'}</span>
-                            </div>
-                          </div>
-                          {customer.outstandingBalance > 0 && (
-                            <Badge variant="warning" className={cn(
-                              "text-[8px] font-black px-1.5 py-0",
-                              selectedCustomer.id === customer.id && "bg-white/20 text-white border-transparent"
-                            )}>
-                              DUE: {formatCurrency(customer.outstandingBalance)}
-                            </Badge>
-                          )}
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-
-              {/* Selected Customer Card summary */}
-              <div className="p-4 rounded-2xl bg-background/50 border border-border flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center font-black text-primary text-sm">
-                    {selectedCustomer.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-xs font-black text-text">{selectedCustomer.name}</span>
-                    <span className="text-[9px] font-bold text-text/40 tracking-wider">{selectedCustomer.phone}</span>
-                  </div>
+            {/* 1. CUSTOMER SELECT & FAST RE-SELECTION */}
+            <Card className="p-6 border-border bg-surface relative overflow-visible shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <User className="h-5 w-5 text-primary" />
+                  <h3 className="text-xs font-black text-text/60 uppercase tracking-widest">Customer Account</h3>
                 </div>
-                {selectedCustomer.id !== 'walk-in' ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCustomer(WALK_IN_CUSTOMER);
-                      showToast('Switched to Walk-In Customer', 'info');
-                    }}
-                    className="text-[10px] font-black text-primary bg-primary/10 hover:bg-primary/20 px-2 py-1 rounded-md transition-all shrink-0"
-                  >
-                    Reset to Walk-In
-                  </button>
-                ) : (
-                  <Badge variant="neutral" className="text-[8px] font-black uppercase shrink-0">
-                    Walk-In Client
+                {selectedCustomer.id !== 'walk-in' && (
+                  <Badge variant="warning" className="text-[10px] font-black uppercase py-0.5">
+                    Credit Active (Udhaar Mode)
                   </Badge>
                 )}
               </div>
 
-              <div className="flex gap-2">
-                {recentCustomers.filter(c => c.id !== selectedCustomer.id).slice(0, 2).map(c => (
+              {/* Autocomplete Input */}
+              <div className="relative">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/30" />
+                    <input
+                      ref={customerInputRef}
+                      type="text"
+                      placeholder="Search customers by Name or Phone..."
+                      value={customerSearch}
+                      onChange={(e) => {
+                        setCustomerSearch(e.target.value);
+                        setShowCustomerDropdown(true);
+                      }}
+                      onFocus={() => setShowCustomerDropdown(true)}
+                      className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
+                    />
+                  </div>
+                  
                   <button
-                    key={c.id}
                     type="button"
-                    onClick={() => {
-                      setSelectedCustomer(c);
-                      showToast(`Customer selected: ${c.name}`, 'success');
-                    }}
-                    className="flex-1 py-2 px-3 rounded-xl border border-border bg-background hover:border-primary/30 transition-all text-left flex items-center gap-2"
+                    onClick={() => setShowInlineAddCustomer(!showInlineAddCustomer)}
+                    className={cn(
+                      "h-[48px] px-4 rounded-2xl border flex items-center gap-2 font-bold text-xs transition-all",
+                      showInlineAddCustomer 
+                        ? "bg-danger/10 border-danger/30 text-danger" 
+                        : "bg-primary/10 border-primary/20 text-primary hover:bg-primary/20"
+                    )}
                   >
-                    <div className="h-5 w-5 rounded-md bg-primary/10 flex items-center justify-center font-black text-[9px] text-primary">
-                      {(c.name || 'C').charAt(0).toUpperCase()}
-                    </div>
-                    <span className="text-[10px] font-black text-text/60 truncate">{(c.name || '').split(' ')[0]}</span>
+                    <UserPlus className="h-4 w-4" />
+                    {showInlineAddCustomer ? 'Cancel' : '+ New Customer'}
                   </button>
-                ))}
-              </div>
-
-              <Button 
-                variant="outline" 
-                className="w-full font-black text-[10px] uppercase h-11 rounded-xl"
-                onClick={() => setIsAddCustomerOpen(true)}
-                leftIcon={<UserPlus className="h-3.5 w-3.5" />}
-              >
-                Quick Add Customer
-              </Button>
-            </div>
-          </Card>
-
-          {/* Product Search & Barcode */}
-          <Card className="p-6 border-border bg-surface relative overflow-visible">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Package className="h-5 w-5 text-primary" />
                 </div>
-                <h3 className="text-sm font-black text-text uppercase tracking-widest">Add Items</h3>
-              </div>
-              <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-1 rounded-md">F9 TO SEARCH / SCAN</span>
-            </div>
-            
-            <div className="space-y-4">
-              <div className="relative group">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
-                <input
-                  ref={productSearchRef}
-                  type="text"
-                  placeholder="Search name, SKU, or Scan Barcode..."
-                  value={searchTerm}
-                  onChange={(e) => handleProductSearchChange(e.target.value)}
-                  onKeyDown={handleProductKeyDown}
-                  onFocus={() => setShowProductDropdown(true)}
-                  onBlur={() => setTimeout(() => setShowProductDropdown(false), 200)}
-                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-                />
-                <ScanLine className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/30" />                 {/* Product Results Dropdown */}
+
+                {/* Search suggestion box */}
                 <AnimatePresence>
-                  {showProductDropdown && (filteredProducts.length > 0 || masterSuggestions.length > 0) && (
+                  {showCustomerDropdown && customerSearch.trim() && (
                     <motion.div
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 5 }}
-                      className="absolute left-0 right-0 top-full mt-2 z-50 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden p-2 space-y-1 max-h-[350px] overflow-y-auto"
+                      className="absolute left-0 right-0 top-full mt-2 z-50 bg-surface border border-border rounded-2xl shadow-xl overflow-hidden p-2 space-y-1"
                     >
-                      {filteredProducts.length > 0 && (
-                        <div>
-                          <div className="px-3 py-1.5 text-[8px] font-black text-text/30 uppercase tracking-widest border-b border-border/40 mb-1">
-                            In-Stock Inventory Matches (Arrow Keys + Enter)
-                          </div>
-                          <div className="space-y-1">
-                            {filteredProducts.map((product, idx) => {
-                              const overallIdx = idx;
-                              return (
-                                <button
-                                  key={product.id}
-                                  type="button"
-                                  onMouseEnter={() => setProductActiveIndex(overallIdx)}
-                                  onMouseDown={() => {
-                                    addToCart(product);
-                                    setSearchTerm('');
-                                    setShowProductDropdown(false);
-                                  }}
-                                  className={cn(
-                                    "w-full p-3 rounded-xl transition-all flex items-center justify-between border text-left",
-                                    productActiveIndex === overallIdx 
-                                      ? "bg-primary/10 border-primary/25 text-primary" 
-                                      : "bg-transparent border-transparent hover:bg-background"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className={cn(
-                                      "h-8 w-8 rounded-lg border flex items-center justify-center transition-all",
-                                      productActiveIndex === overallIdx ? "text-primary border-primary/30 bg-primary/5" : "text-text/20 border-border"
-                                    )}>
-                                      <Package className="h-4 w-4" />
-                                    </div>
-                                    <div className="flex flex-col">
-                                      <span className="text-xs font-black">{product.name}</span>
-                                      <span className="text-[8px] font-bold text-text/40 tracking-wide uppercase">
-                                        Batch: {product.batchNumber || '—'} | Exp: {product.expiryDate ? formatDate(product.expiryDate) : '—'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="flex flex-col items-end">
-                                    <span className="text-xs font-black">{formatCurrency(product.sellingPrice)}</span>
-                                    <Badge variant={product.stockQuantity > 5 ? 'success' : 'warning'} className="text-[8px] py-0 px-1 font-bold">
-                                      {product.stockQuantity} {product.unit}
-                                    </Badge>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {masterSuggestions.length > 0 && (
-                        <div className="pt-2">
-                          <div className="px-3 py-1.5 text-[8px] font-black text-primary bg-primary/5 uppercase tracking-widest flex justify-between items-center rounded-lg mb-1">
-                            <span>From Master Database (250k+ Dataset)</span>
-                            <span className="text-[7.5px] bg-primary/15 text-primary px-1.5 py-0.5 rounded font-black">Instant Bill & Stock</span>
-                          </div>
-                          <div className="space-y-1">
-                            {masterSuggestions.slice(0, 10).map((med, idx) => {
-                              const overallIdx = filteredProducts.length + idx;
-                              return (
-                                <button
-                                  key={med.id || overallIdx}
-                                  type="button"
-                                  onMouseEnter={() => setProductActiveIndex(overallIdx)}
-                                  onMouseDown={() => {
-                                    handleSelectMasterMedicine(med);
-                                  }}
-                                  className={cn(
-                                    "w-full p-3 rounded-xl transition-all flex items-center justify-between border text-left",
-                                    productActiveIndex === overallIdx 
-                                      ? "bg-primary/10 border-primary/25 text-primary" 
-                                      : "bg-transparent border-transparent hover:bg-background"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <div className={cn(
-                                      "h-8 w-8 rounded-lg border flex items-center justify-center transition-all",
-                                      productActiveIndex === overallIdx ? "text-primary border-primary/30 bg-primary/5" : "text-text/20 border-border"
-                                    )}>
-                                      <Plus className="h-4 w-4" />
-                                    </div>
-                                    <div className="flex flex-col">
-                                      <span className="text-xs font-black flex items-center gap-1.5">
-                                        {med.name}
-                                        {med.unit && <span className="text-[8px] font-bold text-primary/70 bg-primary/5 px-1 rounded-sm">{med.unit}</span>}
-                                      </span>
-                                      <span className="text-[8.5px] font-bold text-text/40 tracking-wide">
-                                        Brand: {med.brand || '—'} | Gen: {med.genericName || '—'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="flex flex-col items-end">
-                                    <span className="text-xs font-black">MRP: ₹{med.mrp || med.sellingPrice || 100}</span>
-                                    <span className="text-[8px] font-black text-primary bg-primary/5 px-1 rounded">Auto Stock 100</span>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
+                      {filteredCustomers.length > 0 ? (
+                        filteredCustomers.map(cust => (
+                          <button
+                            key={cust.id}
+                            type="button"
+                            onMouseDown={() => {
+                              setSelectedCustomer(cust);
+                              setCustomerSearch('');
+                              setShowCustomerDropdown(false);
+                            }}
+                            className="w-full p-3 rounded-xl hover:bg-background text-left flex items-center justify-between transition-colors"
+                          >
+                            <div>
+                              <p className="text-xs font-black text-text">{cust.name}</p>
+                              <p className="text-[10px] font-bold text-text/40">{cust.phone}</p>
+                            </div>
+                            {cust.outstandingBalance > 0 && (
+                              <Badge variant="danger" className="text-[9px]">
+                                Due: ₹{cust.outstandingBalance}
+                              </Badge>
+                            )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="p-4 text-center">
+                          <p className="text-xs font-bold text-text/30">No customer found</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewCustName(customerSearch);
+                              setShowInlineAddCustomer(true);
+                              setShowCustomerDropdown(false);
+                            }}
+                            className="text-xs font-black text-primary mt-2 uppercase hover:underline"
+                          >
+                            + Add &quot;{customerSearch}&quot; Immediately
+                          </button>
                         </div>
                       )}
                     </motion.div>
@@ -1014,474 +585,603 @@ export default function Billing() {
                 </AnimatePresence>
               </div>
 
-              {/* Recent Products Quick Bar */}
-              {recentProducts.length > 0 && (
-                <div className="space-y-2 pt-2">
-                  <span className="text-[10px] font-black text-text/30 uppercase tracking-widest ml-1">Recent Items</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {recentProducts.slice(0, 5).map(p => (
+              {/* Inline customer addition panel */}
+              <AnimatePresence>
+                {showInlineAddCustomer && (
+                  <motion.form
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    onSubmit={handleSaveCustomerInline}
+                    className="mt-4 p-4 rounded-2xl bg-primary/5 border border-primary/10 space-y-3 overflow-hidden"
+                  >
+                    <p className="text-[10px] font-black text-primary uppercase tracking-widest">Add New customer</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        placeholder="Customer Full Name"
+                        value={newCustName}
+                        onChange={(e) => setNewCustName(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-xs font-bold"
+                        required
+                      />
+                      <input
+                        type="tel"
+                        maxLength={10}
+                        placeholder="Mobile Number (10 digits)"
+                        value={newCustPhone}
+                        onChange={(e) => setNewCustPhone(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-xs font-bold"
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        type="button"
+                        onClick={() => setShowInlineAddCustomer(false)}
+                        className="rounded-xl font-bold"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        type="submit"
+                        isLoading={isSavingCustomer}
+                        className="rounded-xl font-black uppercase text-[10px] tracking-wider px-6"
+                      >
+                        Save & Select Customer
+                      </Button>
+                    </div>
+                  </motion.form>
+                )}
+              </AnimatePresence>
+
+              {/* Fast Re-selection / Recently billed */}
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-black text-text/30 uppercase tracking-widest mr-1">Recently Billed:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCustomer(WALK_IN_CUSTOMER);
+                    showToast('Counter Sale selected', 'info');
+                  }}
+                  className={cn(
+                    "px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5",
+                    selectedCustomer.id === 'walk-in'
+                      ? "bg-primary border-primary text-white shadow-md shadow-primary/10"
+                      : "bg-background border-border text-text/60 hover:border-text/20"
+                  )}
+                >
+                  🏪 Counter Walk-In
+                </button>
+                {recentCustomers.map(cust => (
+                  <button
+                    key={cust.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCustomer(cust);
+                      showToast(`Customer selected: ${cust.name}`, 'info');
+                    }}
+                    className={cn(
+                      "px-3.5 py-2 rounded-xl text-xs font-bold border transition-all",
+                      selectedCustomer.id === cust.id
+                        ? "bg-primary border-primary text-white shadow-md shadow-primary/10"
+                        : "bg-background border-border text-text/60 hover:border-text/20"
+                    )}
+                  >
+                    👤 {cust.name}
+                  </button>
+                ))}
+              </div>
+            </Card>
+
+            {/* 2. TABLE-STYLE FAST ITEM ENTRY */}
+            <Card className="border-border bg-surface overflow-hidden shadow-sm">
+              <div className="p-6 pb-0 border-b border-border flex items-center justify-between">
+                <div className="flex items-center gap-2 mb-4">
+                  <Package className="h-5 w-5 text-primary" />
+                  <h3 className="text-xs font-black text-text/60 uppercase tracking-widest">Bill Line Items</h3>
+                </div>
+                <Badge variant="success" className="mb-4 text-[10px] font-black">
+                  {cart.filter(item => item.productId).length} items added
+                </Badge>
+              </div>
+
+              {/* Desktop Scrollable Table */}
+              <div className="overflow-x-auto min-h-[250px]">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-background/40 border-b border-border">
+                      <th className="px-4 py-3 text-left text-[10px] font-black text-text/40 uppercase tracking-widest w-12 text-center">#</th>
+                      <th className="px-4 py-3 text-left text-[10px] font-black text-text/40 uppercase tracking-widest min-w-[200px]">Medicine / Item Name</th>
+                      <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-28">Quantity</th>
+                      <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Rate (₹)</th>
+                      <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Amount (₹)</th>
+                      <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {cart.map((item, index) => {
+                      const suggestions = getProductSuggestions(item.name);
+                      return (
+                        <tr key={index} className="hover:bg-background/10 transition-colors relative">
+                          {/* Row Index */}
+                          <td className="px-4 py-3.5 text-center text-xs font-black text-text/30">
+                            {index + 1}
+                          </td>
+                          
+                          {/* Item Autocomplete Name Cell */}
+                          <td className="px-4 py-3.5 relative">
+                            <input
+                              type="text"
+                              placeholder="Search medicine / barcode / SKU..."
+                              value={item.name}
+                              onChange={(e) => handleRowInputChange(index, 'name', e.target.value)}
+                              onFocus={() => setFocusedRowIndex(index)}
+                              className="w-full bg-transparent border-none text-xs font-black text-text focus:outline-none focus:ring-0 placeholder:text-text/20"
+                            />
+                            
+                            {/* Auto-fill dropdown for this specific row */}
+                            <AnimatePresence>
+                              {focusedRowIndex === index && item.name.trim() && suggestions.length > 0 && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: 5 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: 5 }}
+                                  className="absolute left-4 right-4 top-full mt-1.5 z-40 bg-surface border border-border rounded-2xl shadow-2xl p-1 space-y-0.5 max-h-60 overflow-y-auto"
+                                >
+                                  {suggestions.map(prod => (
+                                    <button
+                                      key={prod.id}
+                                      type="button"
+                                      onMouseDown={() => handleSelectProductSuggestion(index, prod)}
+                                      className="w-full p-2.5 hover:bg-background rounded-xl text-left flex items-center justify-between transition-colors"
+                                    >
+                                      <div>
+                                        <p className="text-xs font-black text-text">{prod.name}</p>
+                                        <div className="flex items-center gap-1.5 mt-0.5 text-[9px] font-bold text-text/30 uppercase">
+                                          <span>Batch: {prod.batchNumber}</span>
+                                          <span>•</span>
+                                          <span>Exp: {prod.expiryDate ? toJsDate(prod.expiryDate).toLocaleDateString() : 'N/A'}</span>
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="text-xs font-black text-primary">₹{prod.sellingPrice}</p>
+                                        <p className={cn(
+                                          "text-[9px] font-bold uppercase",
+                                          prod.stockQuantity <= 5 ? "text-danger" : "text-success"
+                                        )}>
+                                          Stock: {prod.stockQuantity}
+                                        </p>
+                                      </div>
+                                    </button>
+                                  ))}
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </td>
+
+                          {/* Quantity Cell */}
+                          <td className="px-4 py-3.5 text-center">
+                            <div className="flex items-center justify-center gap-1 bg-background/50 rounded-lg p-0.5 border border-border w-24 mx-auto">
+                              <button
+                                type="button"
+                                onClick={() => handleRowInputChange(index, 'quantity', Math.max(1, item.quantity - 1))}
+                                className="h-6 w-6 rounded flex items-center justify-center text-xs text-text/60 hover:bg-background font-black"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min={1}
+                                value={item.quantity}
+                                onChange={(e) => handleRowInputChange(index, 'quantity', e.target.value)}
+                                className="w-8 bg-transparent text-center text-xs font-black focus:outline-none focus:ring-0 border-none p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRowInputChange(index, 'quantity', item.quantity + 1)}
+                                className="h-6 w-6 rounded flex items-center justify-center text-xs text-text/60 hover:bg-background font-black"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* Rate Cell */}
+                          <td className="px-4 py-3.5 text-right font-bold text-xs">
+                            <input
+                              type="number"
+                              min={0}
+                              value={item.price || ''}
+                              placeholder="0"
+                              onChange={(e) => handleRowInputChange(index, 'price', e.target.value)}
+                              className="w-20 bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none"
+                            />
+                          </td>
+
+                          {/* Amount (GST calculated) */}
+                          <td className="px-4 py-3.5 text-right font-black text-xs text-text">
+                            ₹{item.total ? item.total.toFixed(2) : '0.00'}
+                          </td>
+
+                          {/* Row Remove */}
+                          <td className="px-4 py-3.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItemRow(index)}
+                              className="h-8 w-8 rounded-lg flex items-center justify-center text-text/20 hover:text-danger hover:bg-danger/10 transition-colors"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Table Footer: Instant Item Insertion */}
+              <div className="p-4 bg-background/20 border-t border-border flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleAddItemRow}
+                  className="px-5 py-3 rounded-2xl bg-primary text-white font-black text-xs flex items-center gap-2 hover:bg-primary/95 transition-all shadow-md shadow-primary/10"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Medicine Row Instantly
+                </button>
+                <div className="text-right flex items-center gap-2">
+                  <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Running Total:</span>
+                  <span className="text-lg font-black text-text">
+                    {formatCurrency(totals.subtotal + totals.gstTotal)}
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            {/* 3. OPTIONAL COLLAPSIBLE SECTION */}
+            <div className="border border-border/60 bg-surface rounded-3xl overflow-hidden shadow-sm">
+              <button
+                type="button"
+                onClick={() => setShowMoreDetails(!showMoreDetails)}
+                className="w-full p-5 flex items-center justify-between font-black text-xs text-text/60 uppercase tracking-widest hover:bg-background/20 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-primary" />
+                  <span>Configure Bill details (Discount, Custom Date, Tax)</span>
+                </div>
+                <ChevronDown className={cn("h-4 w-4 transition-transform duration-300", showMoreDetails ? "rotate-180" : "")} />
+              </button>
+
+              <AnimatePresence>
+                {showMoreDetails && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="p-6 border-t border-border bg-background/20 grid grid-cols-1 md:grid-cols-3 gap-4"
+                  >
+                    <div>
+                      <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest mb-1.5">Discount Value (₹)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="Enter direct discount in Rupees..."
+                        value={discount || ''}
+                        onChange={(e) => setDiscount(Number(e.target.value) || 0)}
+                        className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-xs font-bold outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest mb-1.5">Custom Invoice Date</label>
+                      <input
+                        type="date"
+                        value={customInvoiceDate}
+                        onChange={(e) => setCustomInvoiceDate(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-xs font-bold outline-none text-text/60"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest mb-1.5">GST Calculation Mode</label>
+                      <div className="flex items-center gap-2 h-11 px-4 rounded-xl border border-border bg-surface">
+                        <span className="h-2 w-2 bg-success rounded-full" />
+                        <span className="text-xs font-bold text-text/60">
+                          {settings?.taxMode ? 'Automated Tax Rules ON' : 'Direct Store Rates'}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+          </div>
+
+          {/* Right sidebar column: Checkout and payment settings (4 cols) */}
+          <div className="lg:col-span-4 space-y-6">
+            
+            {/* CHECKOUT CARD */}
+            <Card className="p-6 border-border bg-surface relative overflow-hidden shadow-md flex flex-col justify-between min-h-[450px]">
+              
+              <div>
+                <div className="flex items-center gap-2 mb-6">
+                  <CreditCard className="h-5 w-5 text-primary" />
+                  <h3 className="text-xs font-black text-text/60 uppercase tracking-widest">Billing & Payment</h3>
+                </div>
+
+                {/* Subtotal stack */}
+                <div className="space-y-3.5 border-b border-border pb-6">
+                  <div className="flex justify-between items-center text-xs font-bold text-text/40">
+                    <span>Subtotal</span>
+                    <span>{formatCurrency(totals.subtotal)}</span>
+                  </div>
+                  {totals.gstTotal > 0 && (
+                    <div className="flex justify-between items-center text-xs font-bold text-text/40">
+                      <span>GST Component</span>
+                      <span>{formatCurrency(totals.gstTotal)}</span>
+                    </div>
+                  )}
+                  {discount > 0 && (
+                    <div className="flex justify-between items-center text-xs font-bold text-danger">
+                      <span>Discount Coupon</span>
+                      <span>-{formatCurrency(discount)}</span>
+                    </div>
+                  )}
+                  
+                  {/* Huge Grand Total Display */}
+                  <div className="pt-2 flex justify-between items-baseline">
+                    <span className="text-sm font-black text-text uppercase">Total Amount</span>
+                    <span className="text-3xl font-black text-primary tracking-tight">
+                      {formatCurrency(totals.grandTotal)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* PAYMENT STATUS TOGGLES */}
+                <div className="pt-6 space-y-4">
+                  <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest">Payment Status (Khata Entry)</label>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['paid', 'due', 'partial'] as const).map((status) => (
                       <button
-                        key={p.id}
+                        key={status}
                         type="button"
                         onClick={() => {
-                          addToCart(p);
+                          setPaymentStatus(status);
+                          if (status === 'paid') {
+                            setPaymentMethod('cash');
+                          } else if (status === 'due') {
+                            setPaymentMethod('credit');
+                          }
                         }}
-                        className="px-2.5 py-1.5 rounded-xl border border-border bg-background/50 hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center gap-1.5 group"
+                        className={cn(
+                          "py-3 rounded-xl text-xs font-black uppercase tracking-wider border transition-all",
+                          paymentStatus === status 
+                            ? "bg-primary border-primary text-white shadow-md shadow-primary/10" 
+                            : "bg-background border-border text-text/60 hover:border-text/20"
+                        )}
                       >
-                        <Plus className="h-3 w-3 text-text/40 group-hover:text-primary" />
-                        <span className="text-[10.5px] font-black text-text/60 group-hover:text-text">{p.name}</span>
+                        {status}
                       </button>
                     ))}
                   </div>
-                </div>
-              )}
 
-              {/* In-Stock Medicines (Quick Add Catalog) */}
-              <div className="space-y-2 pt-3 border-t border-border/50">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black text-text/40 uppercase tracking-widest ml-1 flex items-center gap-1.5">
-                    <span className="inline-block w-2 h-2 rounded-full bg-success animate-pulse" />
-                    In-Stock Medicines (Quick Add)
-                  </span>
-                  <span className="text-[9px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-                    {products.filter(p => p.stockQuantity > 0).length} Items
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 gap-1.5 max-h-[240px] overflow-y-auto pr-1 scrollbar-thin">
-                  {products.filter(p => p.stockQuantity > 0).map(p => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        addToCart(p);
-                      }}
-                      className="p-2.5 rounded-xl border border-border bg-background/30 hover:border-primary/30 hover:bg-primary/5 transition-all flex items-center justify-between text-left group"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="h-7 w-7 rounded-lg bg-primary/5 border border-primary/10 text-primary flex items-center justify-center shrink-0 group-hover:bg-primary/10 transition-all">
-                          <Package className="h-3.5 w-3.5" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-black text-text truncate group-hover:text-primary transition-colors">{p.name}</p>
-                          <p className="text-[9px] font-bold text-text/40 tracking-wide uppercase">
-                            Batch: {p.batchNumber || '—'} | Exp: {p.expiryDate ? formatDate(p.expiryDate) : '—'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0 flex items-center gap-3">
+                  {/* Partial configuration options */}
+                  <AnimatePresence>
+                    {paymentStatus === 'partial' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-3 pt-2 overflow-hidden"
+                      >
                         <div>
-                          <p className="text-xs font-black text-text">{formatCurrency(p.sellingPrice)}</p>
-                          <span className={cn(
-                            "text-[8px] font-bold px-1 py-0.5 rounded",
-                            p.stockQuantity > 10 ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
-                          )}>
-                            Stock: {p.stockQuantity}
+                          <label className="block text-[9px] font-black text-text/30 uppercase tracking-widest mb-1">Amount Received (₹)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={totals.grandTotal}
+                            value={amountReceived}
+                            onChange={(e) => setAmountReceived(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-border bg-background text-sm font-black outline-none focus:border-primary text-text"
+                          />
+                        </div>
+                        <div className="flex justify-between items-center text-xs font-bold text-text/40 bg-background/50 p-2.5 rounded-xl border border-border">
+                          <span>Balance Due (Udhaar Ledger)</span>
+                          <span className="text-danger font-black">
+                            {formatCurrency(Math.max(0, totals.grandTotal - (Number(amountReceived) || 0)))}
                           </span>
                         </div>
-                        <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-all">
-                          <Plus className="h-3.5 w-3.5" />
-                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Payment Mode */}
+                  {paymentStatus !== 'due' && (
+                    <div className="space-y-2 pt-2">
+                      <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest">Payment Method</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['cash', 'upi', 'card'] as const).map((method) => (
+                          <button
+                            key={method}
+                            type="button"
+                            onClick={() => setPaymentMethod(method)}
+                            className={cn(
+                              "py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all flex flex-col items-center justify-center gap-1",
+                              paymentMethod === method 
+                                ? "bg-text border-text text-white" 
+                                : "bg-background border-border text-text/60 hover:border-text/20"
+                            )}
+                          >
+                            {method === 'upi' ? <QrCode className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
+                            <span>{method}</span>
+                          </button>
+                        ))}
                       </div>
-                    </button>
-                  ))}
-                  {products.filter(p => p.stockQuantity > 0).length === 0 && (
-                    <div className="text-center py-6 bg-background/10 rounded-xl border border-dashed border-border">
-                      <Package className="h-5 w-5 text-text/20 mx-auto mb-1" />
-                      <p className="text-[10px] font-bold text-text/40">No medicines in stock</p>
                     </div>
                   )}
+
                 </div>
               </div>
+
+              {/* SAVE AND SHARE CTA BUTTON */}
+              <div className="pt-6">
+                <Button
+                  variant="primary"
+                  type="button"
+                  onClick={handleSaveInvoice}
+                  isLoading={loading}
+                  className="w-full py-4.5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-primary/20 flex items-center justify-center gap-2 bg-success text-white border-transparent hover:bg-success/95"
+                >
+                  <Send className="h-5 w-5" />
+                  Save & Share Bill
+                </Button>
+              </div>
+
+            </Card>
+
+          </div>
+
+        </div>
+
+        {/* 4. HISTORY VIEW: SIMPLE LIST AT THE BOTTOM */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Receipt className="h-5 w-5 text-primary" />
+            <h3 className="text-xs font-black text-text/60 uppercase tracking-widest">Recent POS Transactions</h3>
+          </div>
+          
+          <Card className="overflow-hidden border-border bg-surface shadow-sm">
+            <div className="divide-y divide-border/40">
+              {recentInvoices.slice(0, 5).map((inv) => {
+                const isPaid = inv.paymentStatus === 'paid';
+                return (
+                  <div
+                    key={inv.id}
+                    onClick={() => navigate(`/invoice/${inv.id}`)}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-background/20 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "h-9 w-9 rounded-xl flex items-center justify-center text-xs font-black uppercase",
+                        isPaid ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
+                      )}>
+                        {isPaid ? 'PA' : 'UD'}
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-text group-hover:text-primary transition-colors">
+                          {inv.customerName}
+                        </p>
+                        <p className="text-[10px] font-bold text-text/30 uppercase tracking-wider">
+                          Invoice: {inv.invoiceNumber} • {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between sm:justify-end gap-6">
+                      <div className="text-left sm:text-right">
+                        <p className="text-sm font-black text-text">{formatCurrency(inv.grandTotal)}</p>
+                        <p className="text-[9px] font-bold text-text/30 uppercase">
+                          {inv.paymentMethod}
+                        </p>
+                      </div>
+                      <Badge 
+                        variant={isPaid ? 'success' : 'danger'}
+                        className="font-black text-[9px] uppercase tracking-wider py-0.5"
+                      >
+                        {inv.paymentStatus}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })}
+              
+              {recentInvoices.length === 0 && (
+                <div className="p-8 text-center text-xs font-bold text-text/30">
+                  No billing transactions logged yet. Let&apos;s start!
+                </div>
+              )}
             </div>
           </Card>
         </div>
 
-        {/* Center: Cart Table (8 cols total, nested) */}
-        <div className="lg:col-span-8 grid grid-cols-1 lg:grid-cols-8 gap-8 order-1 lg:order-2">
-          {/* Cart Section (5 cols) */}
-          <div className="lg:col-span-5 space-y-6 order-1">
-            <Card className="p-0 overflow-hidden border-border bg-surface h-full flex flex-col">
-              <div className="p-6 border-b border-border bg-background/30 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <ShoppingCart className="h-5 w-5 text-primary" />
-                  </div>
-                  <h3 className="text-sm font-black text-text uppercase tracking-widest">Active Cart</h3>
-                </div>
-                <Badge variant="neutral" className="font-black px-4">{cart.length} ITEMS</Badge>
-              </div>
-
-              <div className="flex-1 overflow-auto max-h-[400px] lg:max-h-[600px] scrollbar-thin">
-                <div className="min-w-[850px]">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-background/20 border-b border-border sticky top-0 z-10">
-                        <th className="px-4 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest">Medicine</th>
-                        <th className="px-3 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-center w-[110px]">Batch</th>
-                        <th className="px-3 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-center w-[140px]">Mfg Date</th>
-                        <th className="px-3 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-center w-[140px]">Expiry Date</th>
-                        <th className="px-3 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-center w-[130px]">Qty</th>
-                        <th className="px-3 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-right w-[110px]">Rate</th>
-                        <th className="px-4 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-right w-[110px]">Price</th>
-                        <th className="px-4 py-4 text-[10px] font-black text-text/40 uppercase tracking-widest text-center w-[60px]">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      <AnimatePresence mode="popLayout">
-                        {cart.map((item) => (
-                          <motion.tr
-                            layout
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: 20 }}
-                            key={item.productId}
-                            className="group hover:bg-background/30 transition-all"
-                          >
-                            <td className="px-4 py-3">
-                              <span className="text-xs font-black text-text leading-tight block truncate max-w-[150px]">{item.name}</span>
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              <input
-                                type="text"
-                                value={item.batchNumber || ''}
-                                onChange={(e) => updateCartItemField(item.productId, 'batchNumber', e.target.value)}
-                                className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-xs font-bold text-center focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none"
-                                placeholder="Batch"
-                              />
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              <input
-                                type="date"
-                                value={formatDateForInput(item.manufacturingDate)}
-                                onChange={(e) => updateCartItemField(item.productId, 'manufacturingDate', e.target.value ? new Date(e.target.value) : null)}
-                                className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-[11px] font-bold text-center focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none"
-                              />
-                            </td>
-                            <td className="px-2 py-3 text-center">
-                              <input
-                                type="date"
-                                value={formatDateForInput(item.expiryDate)}
-                                onChange={(e) => updateCartItemField(item.productId, 'expiryDate', e.target.value ? new Date(e.target.value) : null)}
-                                className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-[11px] font-bold text-center focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none"
-                              />
-                            </td>
-                            <td className="px-2 py-3">
-                              <div className="flex items-center justify-center gap-1 bg-background/50 rounded-xl p-1 w-fit mx-auto border border-border">
-                                <button 
-                                  onClick={() => updateQuantity(item.productId, -1)}
-                                  className="h-7 w-7 rounded-lg hover:bg-surface flex items-center justify-center text-text/40 hover:text-text transition-all shrink-0"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </button>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={item.quantity}
-                                  onChange={(e) => {
-                                    const val = Math.max(1, parseInt(e.target.value) || 1);
-                                    updateCartItemField(item.productId, 'quantity', val);
-                                  }}
-                                  className="w-10 text-center bg-transparent text-xs font-black text-text focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                />
-                                <button 
-                                  onClick={() => updateQuantity(item.productId, 1)}
-                                  className="h-7 w-7 rounded-lg hover:bg-surface flex items-center justify-center text-text/40 hover:text-text transition-all shrink-0"
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </button>
-                              </div>
-                            </td>
-                            <td className="px-2 py-3 text-right">
-                              <div className="relative">
-                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-text/30 font-bold">₹</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={item.price}
-                                  onChange={(e) => updateCartItemField(item.productId, 'price', Number(e.target.value))}
-                                  className="w-20 pl-5 pr-2 py-1.5 rounded-lg border border-border bg-background text-xs font-black text-right focus:ring-2 focus:ring-primary/10 focus:border-primary outline-none"
-                                />
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex flex-col">
-                                <span className="text-xs font-black text-text">{formatCurrency(item.total)}</span>
-                                <span className="text-[8px] font-bold text-text/30 uppercase">Incl. GST</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <button 
-                                onClick={() => removeFromCart(item.productId)}
-                                className="h-8 w-8 rounded-lg hover:bg-danger/10 text-text/20 hover:text-danger transition-all inline-flex items-center justify-center"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
-                          </motion.tr>
-                        ))}
-                      </AnimatePresence>
-                      {cart.length === 0 && (
-                        <tr>
-                          <td colSpan={8} className="py-32 text-center">
-                            <div className="flex flex-col items-center">
-                              <div className="h-20 w-20 rounded-[2rem] bg-background border border-border flex items-center justify-center mb-4">
-                                <ShoppingCart className="h-8 w-8 text-text/10" />
-                              </div>
-                              <span className="text-sm font-black text-text/20 uppercase tracking-widest">Cart is currently empty</span>
-                              <span className="text-[9px] font-bold text-text/10 uppercase mt-2">Add products to begin checkout</span>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          {/* Checkout Summary (3 cols) */}
-          <div className="lg:col-span-3 space-y-6 order-2">
-            <Card className="p-6 border-border bg-surface space-y-8">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <Receipt className="h-5 w-5 text-primary" />
-                </div>
-                <h3 className="text-sm font-black text-text uppercase tracking-widest">Order Summary</h3>
-              </div>
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between text-sm font-bold text-text/60">
-                  <span className="uppercase tracking-widest text-[10px]">Subtotal</span>
-                  <span>{formatCurrency(totals.subtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm font-bold text-text/60">
-                  <span className="uppercase tracking-widest text-[10px]">Tax (GST)</span>
-                  <span className="text-success">+ {formatCurrency(totals.gstTotal)}</span>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm font-bold text-text/60">
-                    <span className="uppercase tracking-widest text-[10px]">Discount</span>
-                    <span className="text-danger">- {formatCurrency(discount)}</span>
-                  </div>
-                  
-                  {suggestedDiscount && (
-                    <motion.button
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      onClick={() => setDiscount(suggestedDiscount.amount)}
-                      className="w-full p-3 rounded-xl bg-success/5 border border-success/20 flex items-center justify-between group hover:bg-success/10 transition-all"
-                    >
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="h-3.5 w-3.5 text-success" />
-                        <span className="text-[10px] font-black text-success uppercase tracking-widest">{suggestedDiscount.label}</span>
-                      </div>
-                      <span className="text-xs font-black text-success">Apply {formatCurrency(suggestedDiscount.amount)}</span>
-                    </motion.button>
-                  )}
-
-                  <input
-                    type="number"
-                    placeholder="Apply Discount (INR)"
-                    value={discount || ''}
-                    onChange={(e) => setDiscount(Number(e.target.value))}
-                    className="w-full px-4 py-3 rounded-xl border border-border bg-background focus:ring-4 focus:ring-danger/5 focus:border-danger transition-all outline-none text-xs font-bold"
-                  />
-                </div>
-                
-                <div className="h-px bg-border my-2" />
-                
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-black text-text uppercase tracking-widest">Grand Total</span>
-                  <span className="text-3xl font-black text-primary tracking-tighter">{formatCurrency(totals.grandTotal)}</span>
-                </div>
-              </div>
-
-              <div className="space-y-4 pt-4 border-t border-border">
-                <div className="space-y-3">
-                  <span className="text-[10px] font-black text-text/40 uppercase tracking-widest block ml-1">Payment Method</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['cash', 'upi', 'card', 'credit'].map(method => (
-                      <button
-                        key={method}
-                        onClick={() => setPaymentMethod(method as any)}
-                        className={cn(
-                          "py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all",
-                          paymentMethod === method 
-                            ? "bg-text text-white border-text shadow-lg shadow-text/10" 
-                            : "bg-background border-border hover:border-primary/30"
-                        )}
-                      >
-                        {method}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <span className="text-[10px] font-black text-text/40 uppercase tracking-widest block ml-1">Payment Status</span>
-                  <div className="flex gap-2 p-1 bg-background rounded-xl border border-border">
-                    <button
-                      onClick={() => setPaymentStatus('paid')}
-                      className={cn(
-                        "flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                        paymentStatus === 'paid' ? "bg-success text-white shadow-md shadow-success/20" : "text-text/30"
-                      )}
-                    >
-                      Paid
-                    </button>
-                    <button
-                      disabled={selectedCustomer.id === 'walk-in'}
-                      onClick={() => setPaymentStatus('due')}
-                      className={cn(
-                        "flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                        paymentStatus === 'due' ? "bg-warning text-white shadow-md shadow-warning/20" : "text-text/30",
-                        selectedCustomer.id === 'walk-in' && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      Credit/Due
-                    </button>
-                  </div>
-                  {selectedCustomer.id === 'walk-in' && (
-                    <span className="text-[8px] font-bold text-danger uppercase block text-center">Walk-in customers cannot have credit</span>
-                  )}
-                </div>
-              </div>
-
-              <Button 
-                variant="primary" 
-                className="w-full font-black uppercase tracking-[0.2em] h-20 rounded-[2rem] shadow-2xl shadow-primary/30 text-lg group"
-                isLoading={loading}
-                onClick={handleSaveInvoice}
-                rightIcon={<ArrowRight className="h-6 w-6 group-hover:translate-x-1 transition-transform" />}
+        {/* COMPLETED SUCCESS DIALOG / MODAL (SAFE TO BYPASS IFRAME BLOCKS) */}
+        <AnimatePresence>
+          {showSuccessModal && savedInvoice && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-surface border border-border rounded-3xl p-6 shadow-2xl max-w-md w-full space-y-6"
               >
-                Complete Sale
-              </Button>
-            </Card>
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile Sticky Total Bar */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface border-t border-border p-4 pb-safe z-40 flex items-center justify-between shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
-        <div className="flex flex-col">
-          <span className="text-[8px] font-black text-text/30 uppercase tracking-widest">Total Amount</span>
-          <span className="text-xl font-black text-primary">{formatCurrency(totals.grandTotal)}</span>
-        </div>
-        <Button 
-          variant="primary" 
-          className="px-8 h-12 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-primary/20"
-          onClick={handleSaveInvoice}
-          isLoading={loading}
-          rightIcon={<ArrowRight className="h-4 w-4" />}
-        >
-          Checkout
-        </Button>
-      </div>
-
-      {/* Quick Add Customer Modal */}
-      <AnimatePresence>
-        {isAddCustomerOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-surface border border-border rounded-3xl p-6 w-full max-w-md shadow-2xl relative"
-            >
-              <button
-                type="button"
-                onClick={() => setIsAddCustomerOpen(false)}
-                className="absolute top-4 right-4 p-2 hover:bg-background rounded-full transition-colors text-text/40 hover:text-text"
-              >
-                <X className="h-5 w-5" />
-              </button>
-              
-              <div className="flex items-center gap-3 mb-6">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                  <UserPlus className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-md font-black text-text uppercase tracking-widest">Quick Add Customer</h3>
-                  <p className="text-[9px] font-bold text-text/40 tracking-wider uppercase">Add client to system & select instantly</p>
-                </div>
-              </div>
-              
-              <form onSubmit={handleQuickAddCustomer} className="space-y-4">
-                <div>
-                  <label className="block text-[8px] font-black text-text/40 uppercase tracking-widest mb-1.5 ml-1">Customer Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter name (e.g., Rajesh Kumar)"
-                    value={newCustomerName}
-                    onChange={(e) => setNewCustomerName(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-[8px] font-black text-text/40 uppercase tracking-widest mb-1.5 ml-1">Phone Number *</label>
-                  <input
-                    type="tel"
-                    required
-                    pattern="[0-9]{10}"
-                    maxLength={10}
-                    placeholder="Enter 10-digit phone number"
-                    value={newCustomerPhone}
-                    onChange={(e) => setNewCustomerPhone(e.target.value.replace(/\D/g, ''))}
-                    className="w-full px-4 py-3 rounded-xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-[8px] font-black text-text/40 uppercase tracking-widest mb-1.5 ml-1">Address</label>
-                  <input
-                    type="text"
-                    placeholder="Enter address (optional)"
-                    value={newCustomerAddress}
-                    onChange={(e) => setNewCustomerAddress(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-                  />
+                <div className="flex flex-col items-center text-center space-y-3">
+                  <div className="h-14 w-14 rounded-full bg-success/10 flex items-center justify-center text-success">
+                    <CheckCircle className="h-8 w-8" />
+                  </div>
+                  <h3 className="text-xl font-black text-text tracking-tight uppercase">Invoice Saved Successfully!</h3>
+                  <p className="text-xs font-bold text-text/40">
+                    Invoice #{savedInvoice.invoiceNumber} registered in Ledger.
+                  </p>
                 </div>
 
-                <div>
-                  <label className="block text-[8px] font-black text-text/40 uppercase tracking-widest mb-1.5 ml-1">Opening Due Balance (INR)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={newCustomerBalance || ''}
-                    onChange={(e) => setNewCustomerBalance(Number(e.target.value))}
-                    className="w-full px-4 py-3 rounded-xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
-                  />
+                {/* mini slip layout */}
+                <div className="p-4 rounded-2xl bg-background border border-border space-y-2.5">
+                  <div className="flex justify-between text-xs font-bold text-text/40">
+                    <span>Customer:</span>
+                    <span className="text-text font-black">{savedInvoice.customerName}</span>
+                  </div>
+                  <div className="flex justify-between text-xs font-bold text-text/40">
+                    <span>Outstanding:</span>
+                    <span className={cn("font-black", savedInvoice.outstandingAmount > 0 ? "text-danger" : "text-success")}>
+                      ₹{savedInvoice.outstandingAmount.toFixed(1)}
+                    </span>
+                  </div>
+                  <div className="h-px bg-border my-2" />
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-xs font-black text-text/60">Total Amount:</span>
+                    <span className="text-xl font-black text-primary">₹{savedInvoice.grandTotal.toFixed(1)}</span>
+                  </div>
                 </div>
 
-                <div className="flex gap-3 pt-2">
-                  <Button
+                <div className="grid grid-cols-1 gap-2">
+                  <button
                     type="button"
-                    variant="outline"
-                    className="flex-1 font-black text-[10px] uppercase h-11 rounded-xl"
-                    onClick={() => setIsAddCustomerOpen(false)}
+                    onClick={handleWhatsAppShare}
+                    className="w-full py-3.5 rounded-xl bg-success text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-success/10 hover:bg-success/95 transition-all flex items-center justify-center gap-2"
                   >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="primary"
-                    className="flex-1 font-black text-[10px] uppercase h-11 rounded-xl shadow-lg shadow-primary/20"
-                    isLoading={isSavingCustomer}
+                    <Send className="h-4 w-4" />
+                    Instant WhatsApp Share
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSuccessModal(false);
+                      navigate(`/invoice/${savedInvoice.id}`);
+                    }}
+                    className="w-full py-3 rounded-xl border border-border hover:bg-background text-text/60 font-bold text-xs transition-colors"
                   >
-                    Save & Select
-                  </Button>
+                    View Invoice PDF / Receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSuccessModal(false)}
+                    className="w-full py-3 rounded-xl hover:bg-background text-text font-black text-xs uppercase tracking-widest transition-colors"
+                  >
+                    Start New Bill
+                  </button>
                 </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+      </div>
     </PageTransition>
   );
 }

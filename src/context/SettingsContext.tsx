@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS: StoreSettings = {
   sgstRate: 9,
   invoicePrefix: 'INV',
   themeMode: 'light',
+  showDashboardCharts: true,
   updatedAt: null,
 };
 

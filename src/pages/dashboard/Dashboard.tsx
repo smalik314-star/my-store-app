@@ -7,12 +7,14 @@ import {
   ShoppingBag,
   IndianRupee,
   Plus,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 import { PageContainer, SectionHeader } from '../../components/common/PageContainer';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
+import { useSettings } from '../../context/SettingsContext';
 import { dashboardService, DashboardStats } from '../../services/dashboardService';
 import { KpiCard } from '../../components/dashboard/KpiCard';
 import { AlertPanel } from '../../components/dashboard/AlertPanel';
@@ -26,6 +28,7 @@ import { PageTransition } from '../../components/common/PageTransition';
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
@@ -100,13 +103,6 @@ export default function Dashboard() {
     navigate(path);
   };
 
-  if (loading) {
-    return (
-      <div className="p-4 md:p-6 lg:p-8">
-        <SkeletonDashboard />
-      </div>
-    );
-  }
 
   return (
     <PageTransition>
@@ -120,6 +116,15 @@ export default function Dashboard() {
           <Button 
             variant="outline" 
             size="sm" 
+            className="font-bold hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
+            leftIcon={<Zap className="h-4 w-4" />}
+            onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
+          >
+            ⚡ Quick Bill
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
             className="hidden md:flex font-bold"
             onClick={() => handleQuickAction('/inventory')}
           >
@@ -130,7 +135,7 @@ export default function Dashboard() {
             size="sm" 
             className="font-bold shadow-lg shadow-primary/20"
             leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => handleQuickAction('/invoices')}
+            onClick={() => handleQuickAction('/billing')}
           >
             New Invoice
           </Button>
@@ -203,11 +208,13 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content Area */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          <DashboardCharts 
-            invoices={recentInvoices} 
-            products={alerts.lowStock} // Using lowStock as a proxy for product data for now
-            loading={loading} 
-          />
+          {(settings?.showDashboardCharts ?? true) && (
+            <DashboardCharts 
+              invoices={recentInvoices} 
+              products={alerts.lowStock} // Using lowStock as a proxy for product data for now
+              loading={loading} 
+            />
+          )}
           <RecentInvoices invoices={recentInvoices} loading={loading} />
         </div>
 
@@ -217,7 +224,7 @@ export default function Dashboard() {
             <h3 className="text-sm font-bold text-primary uppercase tracking-widest">Quick Actions</h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
               <button 
-                onClick={() => handleQuickAction('/invoices')}
+                onClick={() => handleQuickAction('/billing')}
                 className="flex items-center justify-between p-4 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group"
               >
                 <div className="flex items-center gap-3">

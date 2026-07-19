@@ -1,4 +1,5 @@
 import { motion } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { ReceiptText, ExternalLink } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Invoice } from '../../types';
@@ -12,6 +13,8 @@ interface RecentInvoicesProps {
 }
 
 export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
+  const navigate = useNavigate();
+
   if (loading) {
     return (
       <Card className="p-0 overflow-hidden flex flex-col">
@@ -37,7 +40,10 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
             <p className="text-[11px] text-text/40 font-bold uppercase tracking-wider">Latest sales activity</p>
           </div>
         </div>
-        <button className="text-xs font-bold text-primary hover:bg-primary/5 px-4 py-2 rounded-xl transition-all border border-primary/20">
+        <button 
+          onClick={() => navigate('/invoices')}
+          className="text-xs font-bold text-primary hover:bg-primary/5 px-4 py-2 rounded-xl transition-all border border-primary/20"
+        >
           VIEW JOURNAL
         </button>
       </div>
@@ -71,6 +77,7 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.03 }}
+                  onClick={() => navigate(`/invoice/${inv.id}`)}
                   className="group hover:bg-primary/5 transition-colors cursor-pointer"
                 >
                   <td className="px-6 py-4">
