@@ -6,6 +6,7 @@ import { Button } from '../../components/common/Button';
 import { Card } from '../../components/common/Card';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '../../components/common/Logo';
+import { Link } from 'react-router-dom';
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -86,13 +87,14 @@ export default function Login() {
 
           <div className="mt-8 pt-8 border-t border-border/50 text-center">
             <p className="text-xs text-text/40 leading-relaxed">
-              By signing in, you agree to our <span className="text-primary font-semibold cursor-pointer">Terms of Service</span> and <span className="text-primary font-semibold cursor-pointer">Privacy Policy</span>.
+              By signing in, you agree to the service terms and acknowledge our{' '}
+              <Link to="/privacy" className="text-primary font-semibold underline">Privacy & Data Policy</Link>.
             </p>
           </div>
         </Card>
 
         <p className="mt-8 text-center text-sm text-text/40">
-          PharmaFlow Module 2: Authentication System
+          Secure pharmacy inventory and billing
         </p>
       </motion.div>
     </div>

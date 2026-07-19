@@ -183,6 +183,7 @@ export const invoiceService = {
         const invoice = {
           ...invoiceData,
           tenantId,
+          createdBy: auth.currentUser?.uid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };

@@ -39,8 +39,10 @@ import { useToast } from '../../context/ToastContext';
 import { SkeletonForm } from '../../components/common/Skeleton';
 import { motion, AnimatePresence } from 'motion/react';
 import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Settings() {
+  const { user } = useAuth();
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
   const [isSaving, setIsSaving] = useState(false);
   const { showToast } = useToast();
@@ -125,7 +127,11 @@ export default function Settings() {
   const uploadLogoFile = async (file: File) => {
     setUploadingLogo(true);
     try {
-      const storageRef = ref(storage, `logos/store_logo_${Date.now()}`);
+      if (!user?.tenantId) throw new Error('Tenant not found.');
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+        throw new Error('Only JPG, PNG or WebP images up to 5 MB are allowed.');
+      }
+      const storageRef = ref(storage, `tenants/${user.tenantId}/logos/store_logo_${Date.now()}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       setFormData(prev => ({ ...prev, logoURL: url }));

@@ -633,7 +633,9 @@ export default function InvoiceDetail() {
       if (!idToken) throw new Error('Please sign in again before sending email.');
       
       console.log('[Email Share] Sending request to express backend endpoint...');
-      const response = await fetch('/api/send-email', {
+      const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      if (!apiBaseUrl) throw new Error('Email service is not configured for this deployment.');
+      const response = await fetch(`${apiBaseUrl}/api/send-email`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

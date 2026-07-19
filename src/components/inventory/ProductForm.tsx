@@ -592,7 +592,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       if (imageFile) {
         setIsUploading(true);
         const storageId = product?.id || `temp_${Date.now()}`;
-        imageUrl = await uploadProductImage(imageFile, storageId, (progress) => setUploadProgress(progress));
+        imageUrl = await uploadProductImage(imageFile, user.tenantId, storageId, (progress) => setUploadProgress(progress));
         setIsUploading(false);
       }
 

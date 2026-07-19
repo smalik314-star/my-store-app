@@ -1,0 +1,35 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+    function inTenant(tenantId) {
+      return signedIn()
+        && userDoc().data.status == 'active'
+        && userDoc().data.tenantId == tenantId;
+    }
+    function canWrite(tenantId) {
+      return inTenant(tenantId) && userDoc().data.role in ['owner', 'admin', 'staff'];
+    }
+    function validImage() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    match /tenants/{tenantId}/products/{fileName} {
+      allow read: if inTenant(tenantId);
+      allow create, update: if canWrite(tenantId) && validImage();
+      allow delete: if canWrite(tenantId);
+    }
+    match /tenants/{tenantId}/logos/{fileName} {
+      allow read: if inTenant(tenantId);
+      allow create, update: if inTenant(tenantId)
+        && userDoc().data.role in ['owner', 'admin'] && validImage();
+      allow delete: if inTenant(tenantId) && userDoc().data.role in ['owner', 'admin'];
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

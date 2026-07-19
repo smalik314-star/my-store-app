@@ -68,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     if (auth) {
+      sessionStorage.removeItem('pharmaflow_ai_history');
       await signOut(auth);
     }
     window.location.href = '/login';

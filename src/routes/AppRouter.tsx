@@ -21,6 +21,7 @@ const Settings = lazy(() => import('../pages/settings/Settings'));
 const Subscription = lazy(() => import('../pages/subscription/Subscription'));
 const UserManagement = lazy(() => import('../pages/users/UserManagement'));
 const Login = lazy(() => import('../pages/auth/Login'));
+const Privacy = lazy(() => import('../pages/legal/Privacy'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
 // Purchases pages
@@ -40,6 +41,7 @@ export function AppRouter() {
             path="/login" 
             element={user ? <Navigate to="/dashboard" replace /> : <Login />} 
           />
+          <Route path="/privacy" element={<Privacy />} />
 
           {/* Dedicated Print Route (No Layout) */}
           <Route element={<ProtectedRoute />}>

@@ -17,6 +17,24 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const emailAttempts = new Map<string, { count: number; resetAt: number }>();
 
+  app.disable('x-powered-by');
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    const allowedOrigin = process.env.ALLOWED_ORIGIN;
+    if (allowedOrigin && req.headers.origin === allowedOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+      res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') {
+      res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   // Set higher request body limit to accommodate PDF base64 payloads
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
@@ -46,6 +64,9 @@ async function startServer() {
     }
     if (String(subject).length > 200 || String(body).length > 10000 || String(pdfBase64 || '').length > 10_000_000) {
       return res.status(413).json({ error: 'Email content is too large.' });
+    }
+    if (pdfBase64 && !String(pdfBase64).startsWith('JVBERi0')) {
+      return res.status(400).json({ error: 'Attachment must be a valid PDF.' });
     }
 
     try {
@@ -93,7 +114,7 @@ async function startServer() {
       if (pdfBase64) {
         console.log(`[Email Backend] Attaching PDF file: ${filename || 'invoice.pdf'}`);
         attachments.push({
-          filename: filename || 'invoice.pdf',
+          filename: String(filename || 'invoice.pdf').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120),
           content: Buffer.from(pdfBase64, 'base64'),
           contentType: 'application/pdf',
         });

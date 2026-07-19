@@ -53,13 +53,14 @@ export function logFirestoreOperation(
   details?: any,
   error?: any
 ) {
+  // Never expose customer, invoice, tenant or auth metadata in production consoles.
+  if (!import.meta.env.DEV) return;
   const logData = {
     timestamp: new Date().toISOString(),
     operationType,
     path,
     status,
     userId: auth?.currentUser?.uid || 'anonymous/none',
-    userEmail: auth?.currentUser?.email || 'none',
     userEmailVerified: auth?.currentUser?.emailVerified || false,
     isOnline: navigator.onLine,
     details: details ? sanitizeForLogging(details) : undefined,

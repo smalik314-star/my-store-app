@@ -16,7 +16,7 @@ const STORAGE_KEY = 'pharmaflow_ai_history';
 
 export function AIProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AIState>(() => {
-    const savedHistory = localStorage.getItem(STORAGE_KEY);
+    const savedHistory = sessionStorage.getItem(STORAGE_KEY);
     return {
       history: savedHistory ? JSON.parse(savedHistory) : [],
       isOpen: false,
@@ -26,7 +26,8 @@ export function AIProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.history.slice(-10)));
+    // AI prompts can contain business/customer context. Keep them only for this tab session.
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state.history.slice(-10)));
   }, [state.history]);
 
   useEffect(() => {
@@ -66,7 +67,10 @@ export function AIProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const clearHistory = () => setState(prev => ({ ...prev, history: [] }));
+  const clearHistory = () => {
+    sessionStorage.removeItem(STORAGE_KEY);
+    setState(prev => ({ ...prev, history: [] }));
+  };
 
   return (
     <AIContext.Provider value={{ ...state, toggleOpen, close, open, ask, clearHistory }}>

@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import appletConfig from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -25,9 +26,16 @@ let storage: any;
 if (isConfigValid) {
   try {
     app = initializeApp(firebaseConfig);
+    const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
+    if (appCheckSiteKey && typeof window !== 'undefined') {
+      initializeAppCheck(app, {
+        provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+        isTokenAutoRefreshEnabled: true,
+      });
+    }
     auth = getAuth(app);
     const dbId = firebaseConfig.firestoreDatabaseId;
-    console.log('Firebase initialized successfully. Firestore Database ID:', dbId);
+    if (import.meta.env.DEV) console.info('Firebase initialized successfully.');
     db = getFirestore(app, dbId);
     storage = getStorage(app);
   } catch (error) {

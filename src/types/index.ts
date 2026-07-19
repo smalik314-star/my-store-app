@@ -181,6 +181,7 @@ export interface InvoiceItem {
 export interface Invoice {
   id: string;
   tenantId: string;
+  createdBy?: string;
   invoiceNumber: string;
   customerId: string;
   customerName: string;

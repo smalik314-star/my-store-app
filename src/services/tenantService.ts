@@ -9,9 +9,11 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  addDoc,
+  writeBatch
 } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { db, auth } from '../firebase/config';
 import { Tenant, SubscriptionPlan, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
@@ -131,27 +133,35 @@ export const tenantService = {
   async getTenantUsers(tenantId: string) {
     const usersRef = collection(db, 'tenants', tenantId, 'users');
     const snap = await getDocs(usersRef);
-    return snap.docs.map(doc => doc.data());
+    const invitationsSnap = await getDocs(query(
+      collection(db, 'invitations'),
+      where('tenantId', '==', tenantId),
+      where('status', '==', 'pending')
+    ));
+    return [
+      ...snap.docs.map(member => member.data()),
+      ...invitationsSnap.docs.map(invite => ({ ...invite.data(), uid: invite.id, isInvitation: true }))
+    ];
   },
 
   async addUserToTenant(tenantId: string, email: string, role: UserRole, name?: string, phone?: string) {
-    const userId = `user_${Math.random().toString(36).substr(2, 9)}`;
-    const userRef = doc(db, 'tenants', tenantId, 'users', userId);
-    
+    const normalizedEmail = email.trim().toLowerCase();
     try {
-      await setDoc(userRef, {
-        uid: userId,
+      const existing = await getDocs(query(collection(db, 'invitations'), where('tenantId', '==', tenantId), where('email', '==', normalizedEmail), where('status', '==', 'pending')));
+      if (!existing.empty) throw new Error('A pending invitation already exists for this email.');
+      await addDoc(collection(db, 'invitations'), {
         tenantId,
         role,
-        email,
+        email: normalizedEmail,
         name: name || '',
         phone: phone || '',
-        status: 'active',
-        addedAt: serverTimestamp(),
+        status: 'pending',
+        createdBy: auth.currentUser?.uid,
+        createdAt: serverTimestamp(),
       });
     } catch (error) {
       console.error('Error adding user to tenant:', error);
-      handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
+      handleFirestoreError(error, OperationType.WRITE, `invitations/${tenantId}`);
       throw error;
     }
   },
@@ -159,13 +169,22 @@ export const tenantService = {
   async updateUserInTenant(tenantId: string, userId: string, data: { role: UserRole; name?: string; phone?: string; email?: string }) {
     const userRef = doc(db, 'tenants', tenantId, 'users', userId);
     try {
-      await updateDoc(userRef, {
-        role: data.role,
-        name: data.name || '',
-        phone: data.phone || '',
-        email: data.email || '',
-        updatedAt: serverTimestamp(),
-      });
+      const member = await getDoc(userRef);
+      const targetRef = member.exists() ? userRef : doc(db, 'invitations', userId);
+      if (member.exists()) {
+        const batch = writeBatch(db);
+        batch.update(targetRef, {
+          role: data.role, name: data.name || '', phone: data.phone || '',
+          email: data.email?.trim().toLowerCase() || '', updatedAt: serverTimestamp(),
+        });
+        batch.update(doc(db, 'users', userId), { role: data.role });
+        await batch.commit();
+      } else {
+        await updateDoc(targetRef, {
+          role: data.role, name: data.name || '', phone: data.phone || '',
+          email: data.email?.trim().toLowerCase() || '', updatedAt: serverTimestamp(),
+        });
+      }
     } catch (error) {
       console.error('Error updating user in tenant:', error);
       handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
@@ -176,7 +195,15 @@ export const tenantService = {
   async deleteUserFromTenant(tenantId: string, userId: string) {
     const userRef = doc(db, 'tenants', tenantId, 'users', userId);
     try {
-      await deleteDoc(userRef);
+      const member = await getDoc(userRef);
+      if (member.exists()) {
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'users', userId), { status: 'disabled' });
+        batch.delete(userRef);
+        await batch.commit();
+      } else {
+        await deleteDoc(doc(db, 'invitations', userId));
+      }
     } catch (error) {
       console.error('Error deleting user from tenant:', error);
       handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
