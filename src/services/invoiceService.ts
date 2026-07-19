@@ -102,11 +102,18 @@ export const invoiceService = {
         
         // 2. Get all unique Product Docs needed for this invoice
         const productDocsMap = new Map<string, any>();
-        for (const item of invoiceData.items) {
-          if (item.productId && !productDocsMap.has(item.productId)) {
-            const productRef = doc(db, 'products', item.productId);
-            const productDoc = await transaction.get(productRef);
-            productDocsMap.set(item.productId, productDoc);
+        // Quick Bills are intentionally stock-neutral and can contain custom
+        // counter items. Do not read product documents for them: a custom or
+        // deleted product has no resource.data and a secure Firestore rule must
+        // reject that document read. Normal invoices still load and validate
+        // every product before deducting stock.
+        if (!invoiceData.isQuickBill) {
+          for (const item of invoiceData.items) {
+            if (item.productId && !productDocsMap.has(item.productId)) {
+              const productRef = doc(db, 'products', item.productId);
+              const productDoc = await transaction.get(productRef);
+              productDocsMap.set(item.productId, productDoc);
+            }
           }
         }
 

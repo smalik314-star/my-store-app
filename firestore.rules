@@ -179,12 +179,21 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
-      allow read: if inTenant(resource.data.tenantId);
-      allow create: if hasUser() && request.resource.data.tenantId == userData().tenantId
+      // A transaction must read a counter before its first creation. At that
+      // point resource.data does not exist, so authorize the read from the
+      // authenticated user's tenant and the tenant-bound counter document ID.
+      allow get: if hasUser()
+        && userData().status == 'active'
+        && (counterId == 'invoices_' + userData().tenantId
+          || counterId == userData().tenantId + '_purchase');
+      allow list: if false;
+      allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
-        && ((request.resource.data.keys().hasOnly(['count','year','tenantId'])
-            && request.resource.data.count == 1 && request.resource.data.year is int)
-          || (request.resource.data.keys().hasOnly(['value','tenantId']) && request.resource.data.value == 1));
+        && ((('count' in request.resource.data) && request.resource.data.count is int && request.resource.data.count >= 1
+            && request.resource.data.year is int
+            && counterId == 'invoices_' + request.resource.data.tenantId)
+          || (('value' in request.resource.data) && request.resource.data.value is int && request.resource.data.value >= 1
+            && counterId == request.resource.data.tenantId + '_purchase'));
       allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff'])
         && request.resource.data.tenantId == resource.data.tenantId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count','value','year','tenantId'])
@@ -228,4 +237,3 @@ service cloud.firestore {
     }
   }
 }
-
