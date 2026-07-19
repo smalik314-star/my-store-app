@@ -36,13 +36,7 @@ export const userService = {
         
         // Migration: If user exists but has no tenantId, create one
         if (!existingData.tenantId) {
-          const tenant = await tenantService.createTenant(user.uid, `${existingData.displayName || 'My'}'s Pharmacy`, existingData.email || undefined);
-          await updateDoc(userRef, {
-            tenantId: tenant.id,
-            role: 'owner',
-            lastLogin: serverTimestamp(),
-          });
-          return { ...existingData, tenantId: tenant.id, role: 'owner' };
+          throw new Error('This legacy user needs an administrator-managed tenant migration.');
         }
 
         await updateDoc(userRef, {
@@ -52,6 +46,7 @@ export const userService = {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
+      throw error;
     }
   },
 
@@ -63,6 +58,7 @@ export const userService = {
       return userSnap.exists() ? userSnap.data() : null;
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, path);
+      throw error;
     }
   }
 };

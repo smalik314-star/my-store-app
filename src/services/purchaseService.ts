@@ -135,18 +135,36 @@ export const purchaseService = {
   ): Promise<string> {
     if (!tenantId) throw new Error('Tenant ID required');
     if (items.length === 0) throw new Error('Purchase must contain at least one item');
+    if (new Set(items.map(item => item.productId)).size !== items.length) {
+      throw new Error('Add each product only once per purchase. Merge duplicate quantities/batches before saving.');
+    }
 
     try {
       return await runTransaction(db, async (transaction) => {
-        // 1. Generate Purchase Number atomatically
+        // Firestore requires every transaction read to happen before any write.
         const counterRef = doc(db, 'counters', `${tenantId}_purchase`);
         const counterDoc = await transaction.get(counterRef);
+        const productDocs = new Map<string, any>();
+        for (const item of items) {
+          if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error(`Invalid quantity for ${item.productName}`);
+          if (!Number.isFinite(item.purchasePrice) || item.purchasePrice < 0) throw new Error(`Invalid purchase price for ${item.productName}`);
+          if (!Number.isFinite(item.salePrice) || item.salePrice < 0) throw new Error(`Invalid sale price for ${item.productName}`);
+          if (!item.batchNumber?.trim()) throw new Error(`Batch number is required for ${item.productName}`);
+          if (!productDocs.has(item.productId)) {
+            const snap = await transaction.get(doc(db, PRODUCTS_COLL, item.productId));
+            if (!snap.exists() || snap.data().tenantId !== tenantId) {
+              throw new Error(`Product ${item.productName} not found or unauthorized.`);
+            }
+            productDocs.set(item.productId, snap);
+          }
+        }
+
         let nextNum = 1;
         if (counterDoc.exists()) {
           nextNum = (counterDoc.data().value || 0) + 1;
-          transaction.update(counterRef, { value: nextNum });
+          transaction.update(counterRef, { value: nextNum, tenantId });
         } else {
-          transaction.set(counterRef, { value: 1 });
+          transaction.set(counterRef, { value: 1, tenantId });
         }
         const purchaseNumber = `PUR-${String(nextNum).padStart(4, '0')}`;
 
@@ -176,16 +194,14 @@ export const purchaseService = {
           const finalItem: PurchaseItem = {
             ...item,
             id: itemRef.id,
-            purchaseId
+            purchaseId,
+            tenantId
           };
           transaction.set(itemRef, finalItem);
 
           // B. Update Product Stock and Batches
           const productRef = doc(db, PRODUCTS_COLL, item.productId);
-          const productDoc = await transaction.get(productRef);
-          if (!productDoc.exists()) {
-            throw new Error(`Product ID ${item.productId} does not exist.`);
-          }
+          const productDoc = productDocs.get(item.productId);
 
           const product = productDoc.data() as Product;
           const previousStock = product.stockQuantity || 0;
@@ -280,6 +296,16 @@ export const purchaseService = {
     if (!tenantId) throw new Error('Tenant ID required');
 
     try {
+      const itemsQuery = query(
+        collection(db, PURCHASE_ITEMS_COLL),
+        where('purchaseId', '==', purchaseId),
+        where('tenantId', '==', tenantId)
+      );
+      const itemsSnap = await getDocs(itemsQuery);
+      const items = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseItem));
+      if (new Set(items.map(item => item.productId)).size !== items.length) {
+        throw new Error('This legacy purchase contains duplicate product rows and needs reviewed reconciliation before deletion.');
+      }
       await runTransaction(db, async (transaction) => {
         // 1. Fetch Purchase
         const purchaseRef = doc(db, PURCHASES_COLL, purchaseId);
@@ -288,19 +314,13 @@ export const purchaseService = {
           throw new Error('Purchase not found or unauthorized');
         }
 
-        // 2. Fetch Purchase Items
-        const itemsQuery = query(
-          collection(db, PURCHASE_ITEMS_COLL),
-          where('purchaseId', '==', purchaseId)
-        );
-        const itemsSnap = await getDocs(itemsQuery);
-        const items = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseItem));
-
-        // 3. Pre-validate stock levels to avoid negative inventory upon reversal
+        // Read and validate every product before performing any write.
+        const productDocs = new Map<string, any>();
         for (const item of items) {
           const productRef = doc(db, PRODUCTS_COLL, item.productId);
-          const productDoc = await transaction.get(productRef);
-          if (!productDoc.exists()) {
+          if (!productDocs.has(item.productId)) productDocs.set(item.productId, await transaction.get(productRef));
+          const productDoc = productDocs.get(item.productId);
+          if (!productDoc.exists() || productDoc.data().tenantId !== tenantId) {
             throw new Error(`Product ${item.productName} no longer exists.`);
           }
 
@@ -317,10 +337,10 @@ export const purchaseService = {
           }
         }
 
-        // 4. Perform the reversal
+        // Perform the reversal after all reads.
         for (const item of items) {
           const productRef = doc(db, PRODUCTS_COLL, item.productId);
-          const productDoc = await transaction.get(productRef); // already verified exists
+          const productDoc = productDocs.get(item.productId);
           const product = productDoc.data() as Product;
 
           const previousStock = product.stockQuantity || 0;

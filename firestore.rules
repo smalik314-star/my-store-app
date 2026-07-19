@@ -1,116 +1,151 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasUser() { return signedIn() && exists(userPath()); }
+    function userData() { return get(userPath()).data; }
+    function inTenant(tenantId) {
+      return hasUser() && userData().status == 'active' && userData().tenantId == tenantId;
     }
-    
-    function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    function roleIs(roles) { return hasUser() && userData().role in roles; }
+    function validTenantCreate(tenantId) {
+      return inTenant(tenantId) && request.resource.data.tenantId == tenantId;
+    }
+    function sameTenant() {
+      return request.resource.data.tenantId == resource.data.tenantId;
+    }
+    function validInvoice() {
+      return request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.subtotal is number && request.resource.data.subtotal >= 0
+        && request.resource.data.gstTotal is number && request.resource.data.gstTotal >= 0
+        && request.resource.data.discount is number && request.resource.data.discount >= 0
+        && request.resource.data.grandTotal is number && request.resource.data.grandTotal >= 0
+        && request.resource.data.amountReceived is number && request.resource.data.amountReceived >= 0
+        && request.resource.data.outstandingAmount is number && request.resource.data.outstandingAmount >= 0
+        && request.resource.data.amountReceived <= request.resource.data.grandTotal
+        && request.resource.data.outstandingAmount <= request.resource.data.grandTotal
+        && request.resource.data.paymentStatus in ['paid','due','partial'];
     }
 
-    function isTenantUser(tenantId) {
-      return isAuthenticated() && getUserData().tenantId == tenantId;
-    }
-
-    function getRole(tenantId) {
-      return getUserData().role;
-    }
-
-    // User profiles
     match /users/{userId} {
-      allow get: if isAuthenticated() && request.auth.uid == userId;
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'owner'
+        && request.resource.data.status == 'active'
+        && exists(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId))
+        && get(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId)).data.ownerId == request.auth.uid;
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['displayName', 'photoURL', 'lastLogin']);
+      allow delete: if false;
     }
 
-    // Tenants
     match /tenants/{tenantId} {
-      allow get: if isTenantUser(tenantId);
-      allow create: if isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
-      allow update: if isTenantUser(tenantId) && getRole(tenantId) == 'owner';
-      
+      allow get: if inTenant(tenantId);
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.id == tenantId;
+      allow update: if inTenant(tenantId) && roleIs(['owner','admin'])
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','usage','updatedAt']);
+      allow delete: if false;
+
       match /users/{userId} {
-        allow read: if isTenantUser(tenantId);
-        allow create: if isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'owner';
-        allow write: if isTenantUser(tenantId) && getRole(tenantId) == 'owner';
+        allow read: if inTenant(tenantId);
+        allow create: if signedIn() && request.auth.uid == userId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.tenantId == tenantId
+          && request.resource.data.role == 'owner'
+          && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerId == request.auth.uid;
+        allow update, delete: if inTenant(tenantId) && roleIs(['owner']);
       }
 
       match /logs/{logId} {
-        allow read: if isTenantUser(tenantId) && getRole(tenantId) in ['owner', 'admin'];
-        allow create: if isTenantUser(tenantId);
+        allow read: if inTenant(tenantId) && roleIs(['owner', 'admin']);
+        allow create: if inTenant(tenantId)
+          && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if false;
       }
     }
 
-    // Products
     match /products/{productId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff']) && sameTenant();
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Brands
     match /brands/{brandId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff']) && sameTenant();
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Customers
     match /customers/{customerId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow write: if isAuthenticated() && isTenantUser(request.resource.data.tenantId || resource.data.tenantId) && getRole(request.resource.data.tenantId || resource.data.tenantId) in ['owner', 'admin', 'staff'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff']) && sameTenant();
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Invoices
     match /invoices/{invoiceId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']) && validInvoice();
+      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']) && sameTenant()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','cancelledAt','cancelledBy','updatedAt']);
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Counters
     match /counters/{counterId} {
-      allow read, write: if isAuthenticated();
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if hasUser() && request.resource.data.tenantId == userData().tenantId;
+      allow update: if inTenant(resource.data.tenantId)
+        && request.resource.data.tenantId == resource.data.tenantId;
+      allow delete: if false;
     }
 
-    // Suppliers
     match /suppliers/{supplierId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff']) && sameTenant();
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Purchases
     match /purchases/{purchaseId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']) && sameTenant();
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Purchase Items
     match /purchaseItems/{itemId} {
-      allow read, write: if isAuthenticated();
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update: if false;
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
-    // Stock Movements
     match /stockMovements/{movementId} {
-      allow read: if isAuthenticated() && isTenantUser(resource.data.tenantId);
-      allow create: if isAuthenticated() && isTenantUser(request.resource.data.tenantId) && getRole(request.resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow update: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin', 'staff'];
-      allow delete: if isAuthenticated() && isTenantUser(resource.data.tenantId) && getRole(resource.data.tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
+      allow update, delete: if false;
     }
 
-    // Settings (Scoped by tenantId)
     match /settings/{tenantId} {
-      allow read: if isTenantUser(tenantId);
-      allow write: if isTenantUser(tenantId) && getRole(tenantId) in ['owner', 'admin'];
+      allow read: if inTenant(tenantId);
+      allow create, update: if inTenant(tenantId) && roleIs(['owner','admin']);
+      allow delete: if false;
     }
   }
 }

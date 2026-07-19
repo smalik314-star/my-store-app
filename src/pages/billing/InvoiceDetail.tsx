@@ -629,17 +629,21 @@ export default function InvoiceDetail() {
       console.log('[Email Share] Rendering PDF in background...');
       const pdf = await generatePDFInstance();
       const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Please sign in again before sending email.');
       
       console.log('[Email Share] Sending request to express backend endpoint...');
       const response = await fetch('/api/send-email', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
         },
         body: JSON.stringify({
           to: shareEmail.trim(),
           subject: shareSubject.trim(),
           body: shareBody,
+          invoiceId: invoice.id,
           pdfBase64,
           filename: `Invoice_${invoice.invoiceNumber}.pdf`
         })

@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "testing-pharmaflow",
+    "staging": "testing-pharmaflow"
+  }
+}

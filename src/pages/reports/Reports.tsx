@@ -175,9 +175,10 @@ export default function Reports() {
       totalRevenue += inv.grandTotal;
       totalGst += inv.gstTotal;
       
-      if (inv.paymentStatus !== 'paid') {
-        pendingDues += (inv.paymentStatus === 'partial' ? inv.grandTotal / 2 : inv.grandTotal); // Simple partial assumption if not tracked exactly
-      }
+      const exactDue = inv.paymentStatus === 'paid' ? 0 :
+        Number.isFinite(inv.outstandingAmount) ? Math.max(0, Number(inv.outstandingAmount)) :
+        inv.paymentStatus === 'due' ? inv.grandTotal : 0;
+      pendingDues += exactDue;
 
       // Customer stats
       if (!customerPerformance[inv.customerId]) {
@@ -185,14 +186,11 @@ export default function Reports() {
       }
       customerPerformance[inv.customerId].revenue += inv.grandTotal;
       customerPerformance[inv.customerId].visitCount += 1;
-      if (inv.paymentStatus !== 'paid') {
-        customerPerformance[inv.customerId].dues += (inv.paymentStatus === 'partial' ? inv.grandTotal / 2 : inv.grandTotal);
-      }
+      customerPerformance[inv.customerId].dues += exactDue;
 
       // Profit and Product stats
       inv.items.forEach(item => {
-        const product = productMap.get(item.productId);
-        const purchasePrice = product?.purchasePrice || 0;
+        const purchasePrice = Number.isFinite(item.purchaseCost) ? Number(item.purchaseCost) : 0;
         const profit = (item.price - purchasePrice) * item.quantity;
         totalProfit += profit;
 
@@ -251,8 +249,7 @@ export default function Reports() {
       
       // Compute profit for the day
       inv.items.forEach(item => {
-        const product = products.find(p => p.id === item.productId);
-        const purchasePrice = product?.purchasePrice || 0;
+        const purchasePrice = Number.isFinite(item.purchaseCost) ? Number(item.purchaseCost) : 0;
         dailyData[dateStr].profit += (item.price - purchasePrice) * item.quantity;
       });
     });
@@ -274,8 +271,8 @@ export default function Reports() {
     const rows = filteredInvoices.map(inv => {
       let profit = 0;
       inv.items.forEach(item => {
-        const product = products.find(p => p.id === item.productId);
-        profit += (item.price - (product?.purchasePrice || 0)) * item.quantity;
+        const purchasePrice = Number.isFinite(item.purchaseCost) ? Number(item.purchaseCost) : 0;
+        profit += (item.price - purchasePrice) * item.quantity;
       });
       
       return [
@@ -289,7 +286,12 @@ export default function Reports() {
       ];
     });
 
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const escapeCsv = (value: unknown) => {
+      let text = String(value ?? '');
+      if (/^[=+\-@]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const csvContent = [headers, ...rows].map(row => row.map(escapeCsv).join(',')).join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -299,6 +301,7 @@ export default function Reports() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   if (loading) {

@@ -3,13 +3,19 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { applicationDefault, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 
 // Load environment variables
 dotenv.config();
 
 async function startServer() {
+  if (!getApps().length) initializeApp({ credential: applicationDefault() });
+  const adminDb = getFirestore();
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+  const emailAttempts = new Map<string, { count: number; resetAt: number }>();
 
   // Set higher request body limit to accommodate PDF base64 payloads
   app.use(express.json({ limit: '15mb' }));
@@ -22,14 +28,34 @@ async function startServer() {
 
   // API: Send Email with PDF attachment
   app.post('/api/send-email', async (req: any, res: any) => {
-    const { to, subject, body, pdfBase64, filename } = req.body;
+    const authHeader = String(req.headers.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required.' });
+    let uid = '';
+    try { uid = (await getAuth().verifyIdToken(authHeader.slice(7))).uid; }
+    catch { return res.status(401).json({ error: 'Invalid or expired session.' }); }
 
-    if (!to || !subject || !body) {
+    const rate = emailAttempts.get(uid);
+    const now = Date.now();
+    if (rate && rate.resetAt > now && rate.count >= 10) return res.status(429).json({ error: 'Email limit reached. Try again later.' });
+    emailAttempts.set(uid, rate && rate.resetAt > now ? { ...rate, count: rate.count + 1 } : { count: 1, resetAt: now + 60 * 60 * 1000 });
+
+    const { to, subject, body, pdfBase64, filename, invoiceId } = req.body;
+
+    if (!to || !subject || !body || !invoiceId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to))) {
       return res.status(400).json({ error: 'Missing required email fields (to, subject, body)' });
+    }
+    if (String(subject).length > 200 || String(body).length > 10000 || String(pdfBase64 || '').length > 10_000_000) {
+      return res.status(413).json({ error: 'Email content is too large.' });
     }
 
     try {
-      console.log(`[Email Backend] Attempting to send email to ${to} with subject: "${subject}"`);
+      const [userSnap, invoiceSnap] = await Promise.all([
+        adminDb.doc(`users/${uid}`).get(), adminDb.doc(`invoices/${invoiceId}`).get()
+      ]);
+      if (!userSnap.exists || !invoiceSnap.exists || userSnap.data()?.status !== 'active' ||
+          userSnap.data()?.tenantId !== invoiceSnap.data()?.tenantId) {
+        return res.status(403).json({ error: 'Invoice access denied.' });
+      }
       
       const smtpHost = process.env.SMTP_HOST;
       const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
@@ -38,8 +64,6 @@ async function startServer() {
       const smtpFrom = process.env.SMTP_FROM || 'no-reply@pharmaflow.com';
 
       let transporter;
-      let isLocalFallback = false;
-      
       if (smtpHost && smtpUser && smtpPass) {
         console.log(`[Email Backend] Using SMTP server: ${smtpHost}:${smtpPort}`);
         transporter = nodemailer.createTransport({
@@ -52,9 +76,8 @@ async function startServer() {
           },
         });
       } else {
-        console.log('[Email Backend] No SMTP credentials found. Initializing automated test/Ethereal mailer account...');
+        if (process.env.NODE_ENV === 'production') return res.status(503).json({ error: 'Email service is not configured.' });
         const testAccount = await nodemailer.createTestAccount();
-        console.log(`[Email Backend] Automated Ethereal test account created: ${testAccount.user}`);
         transporter = nodemailer.createTransport({
           host: 'smtp.ethereal.email',
           port: 587,
@@ -64,7 +87,6 @@ async function startServer() {
             pass: testAccount.pass,
           },
         });
-        isLocalFallback = true;
       }
 
       const attachments = [];
@@ -86,8 +108,6 @@ async function startServer() {
       };
 
       const info = await transporter.sendMail(mailOptions);
-      console.log('[Email Backend] Email sent successfully! MessageID:', info.messageId);
-
       const previewUrl = nodemailer.getTestMessageUrl(info);
       if (previewUrl) {
         console.log('[Email Backend] Test Email Preview URL:', previewUrl);
@@ -102,7 +122,7 @@ async function startServer() {
       return res.json({ success: true, message: 'Email sent successfully.' });
     } catch (err: any) {
       console.error('[Email Backend] Failed to send email:', err);
-      return res.status(500).json({ error: 'Failed to send email: ' + (err.message || String(err)) });
+      return res.status(500).json({ error: 'Email could not be sent.' });
     }
   });
 

@@ -110,6 +110,7 @@ export interface Purchase {
 
 export interface PurchaseItem {
   id: string;
+  tenantId: string;
   purchaseId: string;
   productId: string;
   productName: string;
@@ -166,6 +167,15 @@ export interface InvoiceItem {
   price: number;
   gst: number;
   total: number;
+  gstRate?: number;
+  purchaseCost?: number;
+  batchDeductions?: Array<{
+    batchNumber: string;
+    quantity: number;
+    purchaseCost: number;
+    salePrice: number;
+    expiryDate?: any;
+  }>;
 }
 
 export interface Invoice {
