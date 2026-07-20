@@ -242,13 +242,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       ...prev,
       name: med.name,
       brand: med.brand || '',
-      genericName: med.genericName || '',
-      category: med.category || 'Others',
-      manufacturer: med.manufacturer || '',
-      mrp: med.mrp || 0,
-      unit: med.unit || 'Strip',
-      purchasePrice: med.purchasePrice || 0,
-      sellingPrice: med.sellingPrice || 0,
     }));
     setShowProductDropdown(false);
   };
@@ -309,30 +302,18 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
     setProductNameInput(selectedProd.name);
-    setSelectedSuggestionProduct(selectedProd);
-    
-    // Instantly autofill basic metadata so the Brand and other fields are visually filled immediately!
+
+    // Medicine selection should only bind the medicine identity and brand.
+    // Batch, dates, stock, pricing and optional metadata belong to the new
+    // stock entry and must remain user-controlled.
     setBrandNameInput(selectedProd.brand || '');
     setFormData(prev => ({
       ...prev,
       name: selectedProd.name,
       brand: selectedProd.brand || '',
-      genericName: selectedProd.genericName || '',
-      category: selectedProd.category || 'Others',
-      manufacturer: selectedProd.manufacturer || '',
-      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
-      unit: selectedProd.unit || 'Strip',
-      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
-      sku: selectedProd.sku || '',
-      barcode: selectedProd.barcode || '',
-      rackLocation: selectedProd.rackLocation || '',
-      description: selectedProd.description || '',
     }));
-    if (selectedProd.imageUrl) {
-      setImagePreview(selectedProd.imageUrl);
-    }
-
-    setShowAutofillConfirm(true);
+    setSelectedSuggestionProduct(null);
+    setShowAutofillConfirm(false);
   };
 
   const applyAutofillMetadata = (selectedProd: Product) => {
@@ -750,7 +731,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                       <div>
                         <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-primary flex justify-between items-center">
                           <span>From Master Database (2.5L+ Meds)</span>
-                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Form Auto-Fill</span>
+                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Brand Auto-Fill</span>
                         </div>
                         <ul className="divide-y divide-border/30">
                           {masterSuggestions.slice(0, 10).map((med, idx) => {
