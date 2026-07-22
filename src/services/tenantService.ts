@@ -19,7 +19,10 @@ import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 export const tenantService = {
   async createTenant(ownerId: string, storeName: string, email?: string): Promise<Tenant> {
-    const tenantId = `tenant_${Math.random().toString(36).substr(2, 9)}`;
+    // Firebase UID is stable for the same Google account in this project.
+    // A deterministic tenant ID makes first-login onboarding retry-safe:
+    // the same account can never be assigned a second workspace accidentally.
+    const tenantId = `tenant_${ownerId}`;
     const tenantRef = doc(db, 'tenants', tenantId);
     
     const tenantData: Tenant = {
