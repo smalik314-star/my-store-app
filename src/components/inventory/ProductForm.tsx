@@ -235,15 +235,40 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     });
   }, []);
 
-  const handleSelectMasterMedicine = (med: MasterMedicine) => {
-    setProductNameInput(med.name);
-    setBrandNameInput(med.brand || '');
+  const resolveSelectedBrand = (medicineName: string, selectedBrand?: string) => {
+    const directBrand = selectedBrand?.trim();
+    if (directBrand) return directBrand;
+
+    const normalizedName = medicineName.trim().toLowerCase();
+    const inventoryBrand = allProducts.find(
+      item => item.name.trim().toLowerCase() === normalizedName && item.brand?.trim()
+    )?.brand?.trim();
+    if (inventoryBrand) return inventoryBrand;
+
+    const masterBrand = masterSuggestions.find(
+      item => item.name.trim().toLowerCase() === normalizedName && item.brand?.trim()
+    )?.brand?.trim();
+    if (masterBrand) return masterBrand;
+
+    return medicineMasterService.resolveBuiltInBrand(medicineName);
+  };
+
+  const applySelectedMedicine = (medicineName: string, selectedBrand?: string) => {
+    const resolvedBrand = resolveSelectedBrand(medicineName, selectedBrand);
+
+    setProductNameInput(medicineName);
+    setBrandNameInput(resolvedBrand);
     setFormData(prev => ({
       ...prev,
-      name: med.name,
-      brand: med.brand || '',
+      name: medicineName,
+      brand: resolvedBrand,
     }));
+    setProductActiveIndex(-1);
     setShowProductDropdown(false);
+  };
+
+  const handleSelectMasterMedicine = (med: MasterMedicine) => {
+    applySelectedMedicine(med.name, med.brand);
   };
 
   useEffect(() => {
@@ -301,17 +326,9 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   }, [user?.tenantId]);
 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
-    setProductNameInput(selectedProd.name);
-
-    // Medicine selection should only bind the medicine identity and brand.
-    // Batch, dates, stock, pricing and optional metadata belong to the new
-    // stock entry and must remain user-controlled.
-    setBrandNameInput(selectedProd.brand || '');
-    setFormData(prev => ({
-      ...prev,
-      name: selectedProd.name,
-      brand: selectedProd.brand || '',
-    }));
+    // Medicine selection binds only the medicine identity and its resolved brand.
+    // Batch, dates, stock and pricing remain user-controlled for the new entry.
+    applySelectedMedicine(selectedProd.name, selectedProd.brand);
     setSelectedSuggestionProduct(null);
     setShowAutofillConfirm(false);
   };
