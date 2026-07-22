@@ -4,7 +4,9 @@ import {
   User as FirebaseUser,
   signOut,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  browserLocalPersistence,
+  setPersistence
 } from 'firebase/auth';
 import { auth, isConfigValid } from '../firebase/config';
 import { User, AuthContextType, UserRole } from '../types';
@@ -57,7 +59,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      // Keep the Firebase session on this device. Even after an explicit logout,
+      // signing in with the same Google account restores the same Firestore UID
+      // and therefore the same tenant-scoped profile and business data.
+      await setPersistence(auth, browserLocalPersistence);
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
       // Using popup instead of redirect to avoid iframe third-party cookie/redirect URI issues
       await signInWithPopup(auth, provider);
     } catch (error) {
