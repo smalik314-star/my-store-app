@@ -313,7 +313,7 @@ export default function PurchaseEntry() {
   };
 
   // Final Form Save Handler
-  const handleSavePurchase = async () => {
+  const handleSavePurchase = async (saveAndAddAnother = false) => {
     if (!user?.tenantId) return;
     if (!selectedSupplierId) {
       showToast('Please select a Supplier', 'warning');
@@ -397,8 +397,24 @@ export default function PurchaseEntry() {
       };
 
       await purchaseService.addPurchase(user.tenantId, purchaseHeader, validatedItems);
-      showToast('Purchase entry processed and inventory updated successfully!', 'success');
-      navigate('/purchases');
+      showToast(
+        saveAndAddAnother
+          ? 'Purchase saved. Enter the next purchase.'
+          : 'Purchase entry processed and inventory updated successfully!',
+        'success'
+      );
+
+      if (saveAndAddAnother) {
+        setSelectedSupplierId('');
+        setInvoiceNumber('');
+        setInvoiceDate(new Date().toISOString().split('T')[0]);
+        setNotes('');
+        setItems([createEmptyItem()]);
+        setAutofillModal(null);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        navigate('/purchases');
+      }
     } catch (err: any) {
       console.error(err);
       showToast(err?.message || 'Error processing purchase transaction', 'danger');
@@ -725,12 +741,21 @@ export default function PurchaseEntry() {
             Cancel
           </Button>
           <Button
-            onClick={handleSavePurchase}
+            variant="outline"
+            onClick={() => void handleSavePurchase(true)}
+            disabled={isSaving}
+            className="rounded-2xl h-12 px-6 border-primary text-primary font-bold flex items-center gap-2"
+          >
+            <Save className="h-5 w-5" />
+            {isSaving ? 'Saving...' : 'Save & New'}
+          </Button>
+          <Button
+            onClick={() => void handleSavePurchase(false)}
             disabled={isSaving}
             className="rounded-2xl h-12 px-6 font-bold flex items-center gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all"
           >
             <Save className="h-5 w-5" />
-            {isSaving ? "Saving stock in..." : "Save Purchase Entry"}
+            {isSaving ? "Saving stock in..." : "Save & Close"}
           </Button>
         </div>
 
