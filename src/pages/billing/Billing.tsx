@@ -68,6 +68,7 @@ export default function Billing() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(WALK_IN_CUSTOMER);
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [customerActiveIndex, setCustomerActiveIndex] = useState(-1);
   const [recentCustomers, setRecentCustomers] = useState<Customer[]>([]);
   
   // Inline Add Customer
@@ -81,6 +82,7 @@ export default function Billing() {
     { productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 } // start with one blank row
   ]);
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
+  const [productActiveIndex, setProductActiveIndex] = useState(-1);
 
   // Collapsible Extra Details
   const [showMoreDetails, setShowMoreDetails] = useState(false);
@@ -191,6 +193,39 @@ export default function Billing() {
     ).slice(0, 5);
   }, [customers, customerSearch]);
 
+  const selectCustomer = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setCustomerSearch('');
+    setShowCustomerDropdown(false);
+    setCustomerActiveIndex(-1);
+  };
+
+  const handleCustomerSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showCustomerDropdown || filteredCustomers.length === 0) {
+      if (e.key === 'Escape') setShowCustomerDropdown(false);
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCustomerActiveIndex(prev => (prev + 1) % filteredCustomers.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCustomerActiveIndex(prev => (prev <= 0 ? filteredCustomers.length - 1 : prev - 1));
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const index = customerActiveIndex >= 0 ? customerActiveIndex : 0;
+      selectCustomer(filteredCustomers[index]);
+      window.setTimeout(() => {
+        document.querySelector<HTMLInputElement>('[data-billing-medicine="0"]')?.focus();
+      }, 0);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowCustomerDropdown(false);
+      setCustomerActiveIndex(-1);
+    }
+  };
+
   // Inline Customer Saving
   const handleSaveCustomerInline = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,12 +259,16 @@ export default function Billing() {
         updatedAt: Timestamp.now()
       };
 
-      setSelectedCustomer(newCust);
+      selectCustomer(newCust);
+      setCustomers(prev => prev.some(customer => customer.id === newCust.id) ? prev : [newCust, ...prev]);
+      setRecentCustomers(prev => [newCust, ...prev.filter(customer => customer.id !== newCust.id)].slice(0, 4));
       setNewCustName('');
       setNewCustPhone('');
       setShowInlineAddCustomer(false);
-      setCustomerSearch('');
       showToast(`Customer "${newCust.name}" added and selected!`, 'success');
+      window.setTimeout(() => {
+        document.querySelector<HTMLInputElement>('[data-billing-medicine="0"]')?.focus();
+      }, 0);
     } catch (error: any) {
       showToast(error.message || 'Failed to save customer', 'danger');
     } finally {
@@ -296,7 +335,59 @@ export default function Billing() {
     }));
 
     setFocusedRowIndex(null); // Close suggestions
+    setProductActiveIndex(-1);
     showToast(`Loaded ${product.name}`, 'info');
+  };
+
+  const handleProductKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    index: number,
+    suggestions: Product[]
+  ) => {
+    if (suggestions.length > 0 && focusedRowIndex === index) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setProductActiveIndex(prev => (prev + 1) % suggestions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setProductActiveIndex(prev => (prev <= 0 ? suggestions.length - 1 : prev - 1));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const activeIndex = productActiveIndex >= 0 ? productActiveIndex : 0;
+        handleSelectProductSuggestion(index, suggestions[activeIndex]);
+        window.setTimeout(() => {
+          document.querySelector<HTMLInputElement>(`[data-billing-quantity="${index}"]`)?.focus();
+          document.querySelector<HTMLInputElement>(`[data-billing-quantity="${index}"]`)?.select();
+        }, 0);
+        return;
+      }
+    }
+
+    if (e.key === 'Escape') {
+      setFocusedRowIndex(null);
+      setProductActiveIndex(-1);
+    }
+  };
+
+  const focusBillingInput = (field: 'medicine' | 'quantity' | 'rate', index: number) => {
+    window.setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-billing-${field}="${index}"]`);
+      input?.focus();
+      input?.select();
+    }, 0);
+  };
+
+  const handleRateEnter = (index: number) => {
+    if (index < cart.length - 1) {
+      focusBillingInput('medicine', index + 1);
+      return;
+    }
+    handleAddItemRow();
+    focusBillingInput('medicine', index + 1);
   };
 
   // Input changes for direct inline table edits
@@ -511,8 +602,14 @@ _Powered by PharmaFlow_`;
                       onChange={(e) => {
                         setCustomerSearch(e.target.value);
                         setShowCustomerDropdown(true);
+                        setCustomerActiveIndex(-1);
                       }}
                       onFocus={() => setShowCustomerDropdown(true)}
+                      onKeyDown={handleCustomerSearchKeyDown}
+                      role="combobox"
+                      aria-expanded={showCustomerDropdown}
+                      aria-controls="billing-customer-options"
+                      aria-autocomplete="list"
                       className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
                     />
                   </div>
@@ -536,22 +633,26 @@ _Powered by PharmaFlow_`;
                 <AnimatePresence>
                   {showCustomerDropdown && customerSearch.trim() && (
                     <motion.div
+                      id="billing-customer-options"
+                      role="listbox"
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 5 }}
                       className="absolute left-0 right-0 top-full mt-2 z-50 bg-surface border border-border rounded-2xl shadow-xl overflow-hidden p-2 space-y-1"
                     >
                       {filteredCustomers.length > 0 ? (
-                        filteredCustomers.map(cust => (
+                        filteredCustomers.map((cust, index) => (
                           <button
                             key={cust.id}
                             type="button"
-                            onMouseDown={() => {
-                              setSelectedCustomer(cust);
-                              setCustomerSearch('');
-                              setShowCustomerDropdown(false);
-                            }}
-                            className="w-full p-3 rounded-xl hover:bg-background text-left flex items-center justify-between transition-colors"
+                            role="option"
+                            aria-selected={customerActiveIndex === index}
+                            onMouseEnter={() => setCustomerActiveIndex(index)}
+                            onClick={() => selectCustomer(cust)}
+                            className={cn(
+                              "w-full p-3 rounded-xl hover:bg-background text-left flex items-center justify-between transition-colors",
+                              customerActiveIndex === index && "bg-primary/10"
+                            )}
                           >
                             <div>
                               <p className="text-xs font-black text-text">{cust.name}</p>
@@ -716,11 +817,23 @@ _Powered by PharmaFlow_`;
                           {/* Item Autocomplete Name Cell */}
                           <td className="px-4 py-3.5 relative">
                             <input
+                              data-billing-medicine={index}
                               type="text"
                               placeholder="Search medicine / barcode / SKU..."
                               value={item.name}
-                              onChange={(e) => handleRowInputChange(index, 'name', e.target.value)}
-                              onFocus={() => setFocusedRowIndex(index)}
+                              onChange={(e) => {
+                                handleRowInputChange(index, 'name', e.target.value);
+                                setFocusedRowIndex(index);
+                                setProductActiveIndex(-1);
+                              }}
+                              onFocus={() => {
+                                setFocusedRowIndex(index);
+                                setProductActiveIndex(-1);
+                              }}
+                              onKeyDown={(e) => handleProductKeyDown(e, index, suggestions)}
+                              role="combobox"
+                              aria-expanded={focusedRowIndex === index && suggestions.length > 0}
+                              aria-autocomplete="list"
                               className="w-full bg-transparent border-none text-xs font-black text-text focus:outline-none focus:ring-0 placeholder:text-text/20"
                             />
                             
@@ -733,12 +846,18 @@ _Powered by PharmaFlow_`;
                                   exit={{ opacity: 0, y: 5 }}
                                   className="absolute left-4 right-4 top-full mt-1.5 z-40 bg-surface border border-border rounded-2xl shadow-2xl p-1 space-y-0.5 max-h-60 overflow-y-auto"
                                 >
-                                  {suggestions.map(prod => (
+                                  {suggestions.map((prod, suggestionIndex) => (
                                     <button
                                       key={prod.id}
                                       type="button"
-                                      onMouseDown={() => handleSelectProductSuggestion(index, prod)}
-                                      className="w-full p-2.5 hover:bg-background rounded-xl text-left flex items-center justify-between transition-colors"
+                                      role="option"
+                                      aria-selected={productActiveIndex === suggestionIndex}
+                                      onMouseEnter={() => setProductActiveIndex(suggestionIndex)}
+                                      onClick={() => handleSelectProductSuggestion(index, prod)}
+                                      className={cn(
+                                        "w-full p-2.5 hover:bg-background rounded-xl text-left flex items-center justify-between transition-colors",
+                                        productActiveIndex === suggestionIndex && "bg-primary/10"
+                                      )}
                                     >
                                       <div>
                                         <p className="text-xs font-black text-text">{prod.name}</p>
@@ -775,10 +894,17 @@ _Powered by PharmaFlow_`;
                                 -
                               </button>
                               <input
+                                data-billing-quantity={index}
                                 type="number"
                                 min={1}
                                 value={item.quantity}
                                 onChange={(e) => handleRowInputChange(index, 'quantity', e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    focusBillingInput('rate', index);
+                                  }
+                                }}
                                 className="w-8 bg-transparent text-center text-xs font-black focus:outline-none focus:ring-0 border-none p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
                               <button
@@ -794,11 +920,18 @@ _Powered by PharmaFlow_`;
                           {/* Rate Cell */}
                           <td className="px-4 py-3.5 text-right font-bold text-xs">
                             <input
+                              data-billing-rate={index}
                               type="number"
                               min={0}
                               value={item.price || ''}
                               placeholder="0"
                               onChange={(e) => handleRowInputChange(index, 'price', e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleRateEnter(index);
+                                }
+                              }}
                               className="w-20 bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none"
                             />
                           </td>
