@@ -39,6 +39,7 @@ export default function Inventory() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [deletingProduct, setDeletingProduct] = useState<Product | undefined>();
   const [formLoading, setFormLoading] = useState(false);
+  const [productFormSession, setProductFormSession] = useState(0);
   const { showToast } = useToast();
 
   // Handle direct edit/view links
@@ -156,7 +157,7 @@ export default function Inventory() {
     }
   };
 
-  const handleSaveProduct = async (data: any) => {
+  const handleSaveProduct = async (data: any, saveAndAddAnother = false) => {
     if (!user?.tenantId) return;
     setFormLoading(true);
     try {
@@ -165,10 +166,17 @@ export default function Inventory() {
         showToast('Product updated successfully', 'success');
       } else {
         await productService.addProduct(user.tenantId, data);
-        showToast('Product added successfully', 'success');
+        showToast(saveAndAddAnother ? 'Product saved. Add the next product.' : 'Product added successfully', 'success');
       }
-      setShowForm(false);
+
       setEditingProduct(undefined);
+      if (saveAndAddAnother && !editingProduct) {
+        // Remount ProductForm so every field is clean and focus starts at product name.
+        setProductFormSession(session => session + 1);
+        setShowForm(true);
+      } else {
+        setShowForm(false);
+      }
     } finally {
       setFormLoading(false);
     }
@@ -416,7 +424,8 @@ export default function Inventory() {
       {/* Modals & Sidebars */}
       <AnimatePresence mode="wait">
         {showForm && (
-          <ProductForm 
+          <ProductForm
+            key={productFormSession}
             product={editingProduct}
             onSave={handleSaveProduct}
             onClose={() => { setShowForm(false); setEditingProduct(undefined); }}
