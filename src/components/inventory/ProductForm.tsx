@@ -22,7 +22,7 @@ import { MedicineAutocomplete } from '../common/MedicineAutocomplete';
 
 interface ProductFormProps {
   product?: Product;
-  onSave: (data: any) => Promise<void>;
+  onSave: (data: any, saveAndAddAnother?: boolean) => Promise<void>;
   onClose: () => void;
   loading?: boolean;
 }
@@ -539,7 +539,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent, saveAndAddAnother = false) => {
     e.preventDefault();
     setError(null);
 
@@ -695,8 +695,8 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         await brandService.addBrandIfNotExists(user.tenantId, formData.brand.trim());
       }
 
-      await onSave(dataToSave);
-      onClose();
+      await onSave(dataToSave, saveAndAddAnother);
+      if (!saveAndAddAnother) onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to save product');
       setIsUploading(false);
@@ -1330,7 +1330,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         </form>
 
         {/* Footer */}
-        <div className="p-6 border-t border-border bg-background/50 flex items-center justify-end gap-3 shrink-0">
+        <div className="p-6 border-t border-border bg-background/50 flex flex-wrap items-center justify-end gap-3 shrink-0">
           <Button 
             type="button"
             variant="outline" 
@@ -1340,14 +1340,26 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
           >
             Cancel
           </Button>
+          {!product && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(event) => handleSubmit(event, true)}
+              isLoading={saveLoading || isUploading}
+              className="px-6 h-11 font-black text-xs uppercase tracking-widest rounded-xl border-primary text-primary"
+              leftIcon={!(saveLoading || isUploading) && <CheckCircle2 className="h-4 w-4" />}
+            >
+              Save & New
+            </Button>
+          )}
           <Button
             type="button"
-            onClick={handleSubmit}
+            onClick={(event) => handleSubmit(event, false)}
             isLoading={saveLoading || isUploading}
             className="px-6 h-11 font-black text-xs uppercase tracking-widest shadow-lg shadow-primary/20 rounded-xl"
             leftIcon={!(saveLoading || isUploading) && <CheckCircle2 className="h-4 w-4" />}
           >
-            {product ? 'Save Changes' : 'Save Product'}
+            {product ? 'Save Changes' : 'Save & Close'}
           </Button>
         </div>
 
