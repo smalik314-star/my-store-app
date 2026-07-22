@@ -27,8 +27,7 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
     totalPaid: editingCustomer?.totalPaid || 0,
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveCustomer = async (saveAndAddAnother = false) => {
     setLoading(true);
     setError(null);
 
@@ -49,18 +48,40 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
 
     try {
       if (!user?.tenantId) throw new Error('Tenant session not found');
-      
+
       if (editingCustomer) {
         await customerService.updateCustomer(user.tenantId, editingCustomer.id, formData);
+        onClose();
       } else {
         await customerService.addCustomer(user.tenantId, formData);
+        if (saveAndAddAnother) {
+          setFormData({
+            name: '',
+            phone: '',
+            email: '',
+            address: '',
+            gstNumber: '',
+            outstandingBalance: 0,
+            totalPurchases: 0,
+            totalPaid: 0,
+          });
+          requestAnimationFrame(() => {
+            document.querySelector<HTMLInputElement>('input[name="name"]')?.focus();
+          });
+        } else {
+          onClose();
+        }
       }
-      onClose();
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void saveCustomer(false);
   };
 
   return (
@@ -191,6 +212,18 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
               >
                 Cancel
               </Button>
+              {!editingCustomer && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void saveCustomer(true)}
+                  isLoading={loading}
+                  leftIcon={<Save className="h-5 w-5" />}
+                  className="flex-1 font-black uppercase text-[10px] tracking-widest h-14 rounded-2xl border-primary text-primary"
+                >
+                  Save & New
+                </Button>
+              )}
               <Button 
                 type="submit" 
                 variant="primary" 
@@ -198,7 +231,7 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
                 leftIcon={<Save className="h-5 w-5" />}
                 className="flex-1 font-black uppercase text-[10px] tracking-widest h-14 rounded-2xl shadow-xl shadow-primary/20"
               >
-                {editingCustomer ? 'Update Profile' : 'Register Customer'}
+                {editingCustomer ? 'Update Profile' : 'Save & Close'}
               </Button>
             </div>
           </form>
