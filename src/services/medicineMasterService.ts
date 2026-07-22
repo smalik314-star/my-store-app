@@ -265,6 +265,19 @@ class MedicineMasterService {
   }
 
   /**
+   * Resolve a trustworthy brand fallback from the bundled medicine master.
+   * This is intentionally an exact name match so a brand is never guessed.
+   */
+  resolveBuiltInBrand(medicineName: string): string {
+    const normalizedName = medicineName.trim().toLowerCase();
+    if (!normalizedName) return '';
+
+    return builtInMedicines.find(
+      medicine => medicine.name.trim().toLowerCase() === normalizedName
+    )?.brand?.trim() || '';
+  }
+
+  /**
    * Loads high-quality sample data if the IndexedDB is empty
    */
   async loadDefaultSamples(): Promise<void> {
