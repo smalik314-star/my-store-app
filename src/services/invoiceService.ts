@@ -164,7 +164,14 @@ export const invoiceService = {
               throw new Error(`Product ${required.name} not found or unauthorized.`);
             }
             const product = productDoc.data() as Product;
-            const batchStock = (product.batches || []).reduce((sum, batch) => sum + Math.max(0, Number(batch.quantity) || 0), 0);
+            const productBatches = product.batches || [];
+            const canReconcileLegacyBatch = productBatches.length === 0
+              && product.stockQuantity > 0
+              && Boolean(product.batchNumber?.trim())
+              && Boolean(product.expiryDate);
+            const batchStock = canReconcileLegacyBatch
+              ? product.stockQuantity
+              : productBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.quantity) || 0), 0);
             if (product.stockQuantity < required.quantity || batchStock < required.quantity) {
               throw new Error(`Insufficient reconciled batch stock for ${required.name}. Available: ${Math.min(product.stockQuantity, batchStock)}`);
             }
@@ -206,6 +213,23 @@ export const invoiceService = {
             const newStock = Math.max(0, previousStock - item.quantity);
 
             let batchesList = product.batches ? [...product.batches] : [];
+            if (batchesList.length === 0 && previousStock > 0) {
+              if (!product.batchNumber?.trim() || !product.expiryDate) {
+                throw new Error(`Missing batch details for ${item.name}. Edit the product before billing.`);
+              }
+              // One-time migration for products created before batch-ledger
+              // tracking. The existing product summary is the authoritative
+              // opening balance and is persisted with this invoice transaction.
+              batchesList = [{
+                batchNumber: product.batchNumber.trim(),
+                mfgDate: product.manufacturingDate || product.createdAt,
+                expiryDate: product.expiryDate,
+                purchasePrice: Number(product.purchasePrice) || 0,
+                salePrice: Number(product.sellingPrice) || Number(item.price) || 0,
+                quantity: previousStock,
+                createdAt: product.createdAt || serverTimestamp(),
+              }];
+            }
             
             // Sort by expiry date ascending for FEFO
             batchesList.sort((a, b) => {
