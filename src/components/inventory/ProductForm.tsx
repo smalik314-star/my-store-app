@@ -6,7 +6,7 @@ import {
   Barcode, Factory, Tag, ChevronDown, ChevronUp, Upload, Trash2,
   CheckCircle2, FileText
 } from 'lucide-react';
-import { Product } from '../../types';
+import { Product, ProductBatch } from '../../types';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
 import { Timestamp, collection, query, where, getDocs } from 'firebase/firestore';
@@ -242,6 +242,13 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       ...prev,
       name: med.name,
       brand: med.brand || '',
+      genericName: med.genericName || '',
+      category: med.category || 'Others',
+      manufacturer: med.manufacturer || '',
+      mrp: med.mrp || 0,
+      unit: med.unit || 'Strip',
+      purchasePrice: med.purchasePrice || 0,
+      sellingPrice: med.sellingPrice || 0,
     }));
     setShowProductDropdown(false);
   };
@@ -302,18 +309,30 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
     setProductNameInput(selectedProd.name);
-
-    // Medicine selection should only bind the medicine identity and brand.
-    // Batch, dates, stock, pricing and optional metadata belong to the new
-    // stock entry and must remain user-controlled.
+    setSelectedSuggestionProduct(selectedProd);
+    
+    // Instantly autofill basic metadata so the Brand and other fields are visually filled immediately!
     setBrandNameInput(selectedProd.brand || '');
     setFormData(prev => ({
       ...prev,
       name: selectedProd.name,
       brand: selectedProd.brand || '',
+      genericName: selectedProd.genericName || '',
+      category: selectedProd.category || 'Others',
+      manufacturer: selectedProd.manufacturer || '',
+      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
+      unit: selectedProd.unit || 'Strip',
+      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
+      sku: selectedProd.sku || '',
+      barcode: selectedProd.barcode || '',
+      rackLocation: selectedProd.rackLocation || '',
+      description: selectedProd.description || '',
     }));
-    setSelectedSuggestionProduct(null);
-    setShowAutofillConfirm(false);
+    if (selectedProd.imageUrl) {
+      setImagePreview(selectedProd.imageUrl);
+    }
+
+    setShowAutofillConfirm(true);
   };
 
   const applyAutofillMetadata = (selectedProd: Product) => {
@@ -573,19 +592,90 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       if (imageFile) {
         setIsUploading(true);
         const storageId = product?.id || `temp_${Date.now()}`;
-        imageUrl = await uploadProductImage(imageFile, user.tenantId, storageId, (progress) => setUploadProgress(progress));
+        imageUrl = await uploadProductImage(imageFile, storageId, (progress) => setUploadProgress(progress));
         setIsUploading(false);
+      }
+
+      const manufacturingDate = Timestamp.fromDate(new Date(formData.manufacturingDate));
+      const expiryDate = Timestamp.fromDate(new Date(formData.expiryDate));
+      const stockQuantity = Number(formData.stockQuantity);
+      const batchNumber = formData.batchNumber.trim();
+      const existingBatches = product?.batches || [];
+      let batches: ProductBatch[];
+
+      if (existingBatches.length === 0) {
+        // Products created before batch tracking have a total stock value but no
+        // batch ledger. Saving the product once safely creates its opening batch.
+        batches = [{
+          batchNumber,
+          mfgDate: manufacturingDate,
+          expiryDate,
+          purchasePrice: Number(formData.purchasePrice),
+          salePrice: Number(formData.sellingPrice),
+          quantity: stockQuantity,
+          createdAt: Timestamp.now(),
+        }];
+      } else {
+        // Preserve all existing batches. If the user changes total stock, apply
+        // only the difference to the batch represented by the product summary.
+        batches = existingBatches.map(batch => ({ ...batch }));
+        const existingTotal = batches.reduce(
+          (sum, batch) => sum + Math.max(0, Number(batch.quantity) || 0),
+          0
+        );
+        const stockDifference = stockQuantity - existingTotal;
+        const originalBatchNumber = product?.batchNumber?.trim().toUpperCase();
+        let activeBatchIndex = batches.findIndex(
+          batch => batch.batchNumber?.trim().toUpperCase() === originalBatchNumber
+        );
+
+        if (activeBatchIndex < 0) {
+          activeBatchIndex = batches.findIndex(
+            batch => batch.batchNumber?.trim().toUpperCase() === batchNumber.toUpperCase()
+          );
+        }
+
+        if (activeBatchIndex < 0) {
+          if (stockDifference < 0) {
+            throw new Error('Existing batch stock is higher than total stock. Adjust it through Purchase/Stock entries.');
+          }
+          batches.push({
+            batchNumber,
+            mfgDate: manufacturingDate,
+            expiryDate,
+            purchasePrice: Number(formData.purchasePrice),
+            salePrice: Number(formData.sellingPrice),
+            quantity: stockDifference,
+            createdAt: Timestamp.now(),
+          });
+        } else {
+          const activeBatch = batches[activeBatchIndex];
+          const reconciledQuantity = (Number(activeBatch.quantity) || 0) + stockDifference;
+          if (reconciledQuantity < 0) {
+            throw new Error('Total stock cannot be lower than stock held in the other batches. Adjust stock through Purchase/Stock entries.');
+          }
+          batches[activeBatchIndex] = {
+            ...activeBatch,
+            batchNumber,
+            mfgDate: manufacturingDate,
+            expiryDate,
+            purchasePrice: Number(formData.purchasePrice),
+            salePrice: Number(formData.sellingPrice),
+            quantity: reconciledQuantity,
+          };
+        }
       }
 
       const dataToSave = {
         name: formData.name.trim(),
         brand: formData.brand.trim(),
-        batchNumber: formData.batchNumber.trim(),
-        manufacturingDate: Timestamp.fromDate(new Date(formData.manufacturingDate)),
-        expiryDate: Timestamp.fromDate(new Date(formData.expiryDate)),
+        batchNumber,
+        manufacturingDate,
+        expiryDate,
         purchasePrice: Number(formData.purchasePrice),
         sellingPrice: Number(formData.sellingPrice),
-        stockQuantity: Number(formData.stockQuantity),
+        stockQuantity,
+        batches,
         
         // Optional Fields: sanitized default values to prevent undefined
         genericName: formData.genericName.trim() || '',
@@ -731,7 +821,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                       <div>
                         <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-primary flex justify-between items-center">
                           <span>From Master Database (2.5L+ Meds)</span>
-                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Brand Auto-Fill</span>
+                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Form Auto-Fill</span>
                         </div>
                         <ul className="divide-y divide-border/30">
                           {masterSuggestions.slice(0, 10).map((med, idx) => {
