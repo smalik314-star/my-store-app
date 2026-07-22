@@ -784,6 +784,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. Paracetamol 500mg"
                     autoComplete="off"
+                    autoFocus
                     required
                   />
                 </div>
