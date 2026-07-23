@@ -1,8 +1,6 @@
 import { 
   collection, 
-  addDoc, 
   updateDoc, 
-  deleteDoc, 
   doc, 
   getDocs, 
   query, 
@@ -14,8 +12,7 @@ import {
   startAfter,
   QueryConstraint,
   getDoc,
-  setDoc,
-  increment
+  runTransaction
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Product, Tenant, StockMovement } from '../types';
@@ -42,22 +39,7 @@ export const productService = {
     const sanitized = sanitizeProduct(productData);
 
     try {
-      // Check Limits
       const tenantRef = doc(db, 'tenants', tenantId);
-      const tenantDoc = await getDoc(tenantRef);
-      if (tenantDoc.exists()) {
-        const tenant = tenantDoc.data() as Tenant;
-        const usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
-        const limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
-        
-        if (usage.productsCount >= limits.maxProducts) {
-          throw new Error('Product limit reached. Please upgrade your plan.');
-        }
-
-        if (!tenant.usage || !tenant.limits) {
-          await setDoc(tenantRef, { usage, limits }, { merge: true });
-        }
-      }
 
       // Check SKU uniqueness for this tenant if provided
       if (sanitized.sku && sanitized.sku.trim() !== '') {
@@ -84,20 +66,55 @@ export const productService = {
       if (sanitized.stockQuantity < 0) throw new Error('Stock quantity cannot be negative');
       if (sanitized.purchasePrice < 0) throw new Error('Purchase price cannot be negative');
 
-      const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-        ...sanitized,
-        tenantId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      const productRef = doc(collection(db, COLLECTION_NAME));
+      const movementRef = doc(collection(db, 'stockMovements'));
+      const actorId = auth.currentUser?.uid;
+      if (!actorId) throw new Error('You must be signed in to add a product.');
+
+      await runTransaction(db, async transaction => {
+        const tenantDoc = await transaction.get(tenantRef);
+        if (!tenantDoc.exists()) throw new Error('Store profile not found.');
+        const tenant = tenantDoc.data() as Tenant;
+        const usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+        const limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+        if (usage.productsCount >= limits.maxProducts) {
+          throw new Error('Product limit reached. Please upgrade your plan.');
+        }
+
+        transaction.set(productRef, {
+          ...sanitized,
+          id: productRef.id,
+          tenantId,
+          recordStatus: sanitized.recordStatus || 'active',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        transaction.update(tenantRef, {
+          usage: { ...usage, productsCount: usage.productsCount + 1 },
+          limits,
+          updatedAt: serverTimestamp()
+        });
+
+        const openingQuantity = Number(sanitized.stockQuantity) || 0;
+        if (openingQuantity > 0) {
+          transaction.set(movementRef, {
+            id: movementRef.id,
+            tenantId,
+            type: 'OPENING_STOCK',
+            productId: productRef.id,
+            productName: sanitized.name,
+            batchNumber: sanitized.batchNumber,
+            quantity: openingQuantity,
+            previousStock: 0,
+            newStock: openingQuantity,
+            userId: actorId,
+            createdAt: serverTimestamp(),
+          });
+        }
       });
 
-      // Update usage
-      await updateDoc(tenantRef, {
-        'usage.productsCount': increment(1),
-        updatedAt: serverTimestamp()
-      });
-
-      return docRef;
+      return productRef;
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, COLLECTION_NAME);
     }
@@ -114,8 +131,15 @@ export const productService = {
       if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or product not found');
       }
+      const currentProduct = currentDoc.data() as Product;
 
       if (sanitized.stockQuantity !== undefined && sanitized.stockQuantity < 0) throw new Error('Stock quantity cannot be negative');
+      if (
+        sanitized.stockQuantity !== undefined
+        && Number(sanitized.stockQuantity) !== Number(currentProduct.stockQuantity || 0)
+      ) {
+        throw new Error('Stock quantity cannot be edited from Product Master. Use Purchase or Stock Adjustment so the change remains auditable.');
+      }
       
       // SKU uniqueness check if changed and not empty
       if (sanitized.sku && sanitized.sku.trim() !== '') {
@@ -157,14 +181,18 @@ export const productService = {
       if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or product not found');
       }
+      const product = currentDoc.data() as Product;
+      if ((Number(product.stockQuantity) || 0) > 0) {
+        throw new Error('Product has stock. Reduce it through an audited stock adjustment before archiving.');
+      }
+      const actorId = auth.currentUser?.uid;
+      if (!actorId) throw new Error('You must be signed in to archive a product.');
 
-      await deleteDoc(productRef);
-
-      // Update usage
-      const tenantRef = doc(db, 'tenants', tenantId);
-      await updateDoc(tenantRef, {
-        'usage.productsCount': increment(-1),
-        updatedAt: serverTimestamp()
+      await updateDoc(productRef, {
+        recordStatus: 'inactive',
+        archivedAt: serverTimestamp(),
+        archivedBy: actorId,
+        updatedAt: serverTimestamp(),
       });
 
       return true;
@@ -216,6 +244,7 @@ export const productService = {
           id: doc.id,
           ...doc.data()
         })) as Product[];
+        products = products.filter(product => product.recordStatus !== 'inactive');
 
         // Client-side filtering: Category
         if (filters.category && filters.category !== 'All') {
