@@ -49,6 +49,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
 
   // Loading/saving state
   const [loading, setLoading] = useState(false);
+  const saveInProgressRef = useRef(false);
   const [products, setProducts] = useState<Product[]>([]);
   
   // Custom metadata
@@ -189,6 +190,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
 
   const handleSaveBill = async (actionType: 'save_only' | 'whatsapp' | 'print') => {
     if (!user?.tenantId) return;
+    if (saveInProgressRef.current) return;
 
     const validItems = cart.filter(item => item.name.trim() !== '');
     if (validItems.length === 0) {
@@ -196,6 +198,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
       return;
     }
 
+    saveInProgressRef.current = true;
     setLoading(true);
     try {
       const prefix = settings?.invoicePrefix || 'INV';
@@ -263,6 +266,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
       console.error('Quick Bill Save Error:', err);
       showToast(err.message || 'Failed to save Quick Bill', 'danger');
     } finally {
+      saveInProgressRef.current = false;
       setLoading(false);
     }
   };
