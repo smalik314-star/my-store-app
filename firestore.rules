@@ -102,12 +102,36 @@ service cloud.firestore {
     match /invoices/{invoiceId} {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']) && validInvoice();
-      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']) && sameTenant()
-        && resource.data.status != 'cancelled'
-        && request.resource.data.status == 'cancelled'
-        && request.resource.data.cancelledBy == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status','cancelledAt','cancelledBy','cancellationReason','updatedAt']);
+      allow update: if inTenant(resource.data.tenantId) && sameTenant() && resource.data.status != 'cancelled'
+        && (
+          (roleIs(['owner','admin'])
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.cancelledBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status','cancelledAt','cancelledBy','cancellationReason','updatedAt']))
+          ||
+          (roleIs(['owner','admin','staff'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['amountReceived','outstandingAmount','paymentStatus','updatedAt'])
+            && request.resource.data.amountReceived is number
+            && request.resource.data.outstandingAmount is number
+            && request.resource.data.amountReceived >= resource.data.amountReceived
+            && request.resource.data.outstandingAmount >= 0
+            && request.resource.data.amountReceived + request.resource.data.outstandingAmount == resource.data.grandTotal
+            && request.resource.data.paymentStatus in ['paid','partial']))
+          ||
+          (roleIs(['owner','admin','staff'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['returnedAmount','returnCount','outstandingAmount','paymentStatus','updatedAt'])
+            && request.resource.data.returnedAmount is number
+            && request.resource.data.returnedAmount >= 0
+            && request.resource.data.returnedAmount <= resource.data.grandTotal
+            && request.resource.data.returnCount is int
+            && request.resource.data.returnCount > 0
+            && request.resource.data.outstandingAmount is number
+            && request.resource.data.outstandingAmount >= 0
+            && request.resource.data.outstandingAmount <= resource.data.outstandingAmount)
+        );
       allow delete: if false;
     }
 
@@ -157,6 +181,43 @@ service cloud.firestore {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
       allow update, delete: if false;
+    }
+
+    match /receipts/{receiptId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0;
+      allow update, delete: if false;
+    }
+
+    match /ledgerEntries/{entryId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /saleReturns/{returnId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'posted'
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount > 0;
+      allow update, delete: if false;
+    }
+
+    match /saleReturnSummaries/{invoiceId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create, update: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.invoiceId == invoiceId;
+      allow delete: if false;
     }
 
     match /settings/{tenantId} {
