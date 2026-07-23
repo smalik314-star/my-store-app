@@ -36,16 +36,23 @@ export default function Dashboard() {
     totalCustomers: 0,
     totalInvoices: 0,
     todaySales: 0,
+    todayGrossProfit: 0,
+    todayInvoiceCount: 0,
+    todayPurchases: 0,
     monthlyRevenue: 0,
+    totalReceivable: 0,
+    totalPayable: 0,
+    stockValue: 0,
     lowStockItems: 0,
     outOfStockItems: 0,
     criticalStockItems: 0,
     expiryAlerts: 0,
   });
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
-  const [alerts, setAlerts] = useState<{ lowStock: Product[], expiring: Product[] }>({
+  const [alerts, setAlerts] = useState<{ lowStock: Product[], expiring: Product[], allProducts: Product[] }>({
     lowStock: [],
-    expiring: []
+    expiring: [],
+    allProducts: []
   });
 
   useEffect(() => {
@@ -143,56 +150,56 @@ export default function Dashboard() {
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <KpiCard 
-          label="Products" 
-          value={stats.totalProducts} 
-          icon={Package} 
-          loading={loading}
-          colorClass="bg-primary/10 text-primary"
-          isHoverable
-          onClick={() => navigate('/inventory')}
-        />
-        <KpiCard 
-          label="Customers" 
-          value={stats.totalCustomers} 
-          icon={Users} 
-          loading={loading}
-          colorClass="bg-secondary/10 text-secondary"
-          isHoverable
-          onClick={() => navigate('/customers')}
-        />
-        <KpiCard 
-          label="Invoices" 
-          value={stats.totalInvoices} 
-          icon={ReceiptText} 
-          loading={loading}
-          colorClass="bg-accent/10 text-accent"
-          isHoverable
-          onClick={() => navigate('/reports')}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <KpiCard 
           label="Today's Sales" 
-          value={formatCurrencyCompact(stats.todaySales)} 
+          value={formatCurrency(stats.todaySales)} 
           icon={ShoppingBag} 
           loading={loading}
-          trend="+5.4%"
-          isUp={true}
           colorClass="bg-success/10 text-success"
           isHoverable
           onClick={() => navigate('/reports')}
         />
         <KpiCard 
-          label="Monthly Rev" 
-          value={formatCurrency(stats.monthlyRevenue)} 
-          icon={IndianRupee} 
+          label="Today's Gross Profit" 
+          value={formatCurrency(stats.todayGrossProfit)} 
+          icon={TrendingUp} 
           loading={loading}
-          trend="+12.2%"
-          isUp={true}
-          colorClass="bg-info/10 text-info"
+          colorClass="bg-secondary/10 text-secondary"
           isHoverable
           onClick={() => navigate('/reports')}
         />
+        <KpiCard 
+          label="Today's Invoices" 
+          value={stats.todayInvoiceCount} 
+          icon={ReceiptText} 
+          loading={loading}
+          colorClass="bg-accent/10 text-accent"
+          isHoverable
+          onClick={() => navigate('/invoices')}
+        />
+        <KpiCard 
+          label="Today's Purchases" 
+          value={formatCurrencyCompact(stats.todayPurchases)} 
+          icon={Package} 
+          loading={loading}
+          colorClass="bg-info/10 text-info"
+          isHoverable
+          onClick={() => navigate('/purchases')}
+        />
+        <KpiCard 
+          label="Stock Value" 
+          value={formatCurrency(stats.stockValue)} 
+          icon={IndianRupee} 
+          loading={loading}
+          colorClass="bg-info/10 text-info"
+          isHoverable
+          onClick={() => navigate('/inventory')}
+        />
+        <KpiCard label="Receivable" value={formatCurrency(stats.totalReceivable)} icon={Users} loading={loading} colorClass="bg-danger/10 text-danger" isHoverable onClick={() => navigate('/receipts')} />
+        <KpiCard label="Payable" value={formatCurrency(stats.totalPayable)} icon={IndianRupee} loading={loading} colorClass="bg-warning/10 text-warning" isHoverable onClick={() => navigate('/supplier-payments')} />
+        <KpiCard label="Products" value={stats.totalProducts} icon={Package} loading={loading} colorClass="bg-primary/10 text-primary" isHoverable onClick={() => navigate('/inventory')} />
+        <KpiCard label="Customers" value={stats.totalCustomers} icon={Users} loading={loading} colorClass="bg-secondary/10 text-secondary" isHoverable onClick={() => navigate('/customers')} />
         <KpiCard 
           label="Low Stock" 
           value={stats.lowStockItems} 
@@ -211,7 +218,7 @@ export default function Dashboard() {
           {(settings?.showDashboardCharts ?? true) && (
             <DashboardCharts 
               invoices={recentInvoices} 
-              products={alerts.lowStock} // Using lowStock as a proxy for product data for now
+              products={alerts.allProducts}
               loading={loading} 
             />
           )}
@@ -339,4 +346,3 @@ export default function Dashboard() {
     </PageTransition>
   );
 }
-
