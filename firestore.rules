@@ -82,7 +82,7 @@ service cloud.firestore {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
       allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff']) && sameTenant();
-      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
+      allow delete: if false;
     }
 
     match /brands/{brandId} {
@@ -143,6 +143,14 @@ service cloud.firestore {
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
       allow update: if false;
       allow delete: if false;
+    }
+
+    match /purchaseKeys/{keyId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
     }
 
     match /stockMovements/{movementId} {
