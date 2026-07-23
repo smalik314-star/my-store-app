@@ -24,7 +24,12 @@ import {
   QrCode,
   Smartphone,
   RefreshCw,
-  FileText
+  FileText,
+  Barcode,
+  PauseCircle,
+  Play,
+  Keyboard,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
@@ -50,6 +55,15 @@ const WALK_IN_CUSTOMER: Customer = {
   totalPaid: 0,
   createdAt: null,
   updatedAt: null
+};
+
+const EMPTY_BILL_ROW: InvoiceItem = {
+  productId: '',
+  name: '',
+  quantity: 1,
+  price: 0,
+  gst: 0,
+  total: 0
 };
 
 export default function Billing() {
@@ -79,7 +93,7 @@ export default function Billing() {
 
   // Cart/Table Items
   const [cart, setCart] = useState<InvoiceItem[]>([
-    { productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 } // start with one blank row
+    { ...EMPTY_BILL_ROW }
   ]);
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
   const [productActiveIndex, setProductActiveIndex] = useState(-1);
@@ -99,9 +113,16 @@ export default function Billing() {
   // Success Confirmation modal
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [savedInvoice, setSavedInvoice] = useState<any>(null);
+  const [barcodeSearch, setBarcodeSearch] = useState('');
+  const [hasHeldBill, setHasHeldBill] = useState(false);
 
   // Focus references
   const customerInputRef = useRef<HTMLInputElement>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setHasHeldBill(Boolean(sessionStorage.getItem('pharmaflow-held-bill')));
+  }, []);
 
   // Load products, customers, and recent bills subscriptions
   useEffect(() => {
@@ -280,7 +301,7 @@ export default function Billing() {
   const handleAddItemRow = () => {
     setCart(prev => [
       ...prev,
-      { productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 }
+      { ...EMPTY_BILL_ROW }
     ]);
   };
 
@@ -290,7 +311,7 @@ export default function Billing() {
       const copy = [...prev];
       copy.splice(index, 1);
       if (copy.length === 0) {
-        return [{ productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 }];
+        return [{ ...EMPTY_BILL_ROW }];
       }
       return copy;
     });
@@ -337,6 +358,129 @@ export default function Billing() {
     setFocusedRowIndex(null); // Close suggestions
     setProductActiveIndex(-1);
     showToast(`Loaded ${product.name}`, 'info');
+  };
+
+  const addScannedProduct = (product: Product) => {
+    if (product.stockQuantity <= 0) {
+      showToast(`${product.name} is out of stock!`, 'danger');
+      return;
+    }
+
+    setCart(prev => {
+      const existingIndex = prev.findIndex(item => item.productId === product.id);
+      if (existingIndex >= 0) {
+        const existing = prev[existingIndex];
+        if (existing.quantity >= product.stockQuantity) {
+          showToast(`Only ${product.stockQuantity} units available for ${product.name}.`, 'danger');
+          return prev;
+        }
+        return prev.map((item, index) => index === existingIndex
+          ? {
+              ...item,
+              quantity: item.quantity + 1,
+              total: (item.quantity + 1) * (item.price + item.gst)
+            }
+          : item
+        );
+      }
+
+      const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
+      const gstAmount = (product.sellingPrice * effectiveGstRate) / 100;
+      const scannedItem: InvoiceItem = {
+        productId: product.id,
+        name: product.name,
+        sku: product.sku || '',
+        batchNumber: product.batchNumber || '',
+        expiryDate: product.expiryDate || null,
+        manufacturingDate: product.manufacturingDate || null,
+        quantity: 1,
+        price: product.sellingPrice,
+        gst: gstAmount,
+        total: product.sellingPrice + gstAmount
+      };
+      const blankIndex = prev.findIndex(item => !item.productId && !item.name);
+      if (blankIndex >= 0) {
+        return prev.map((item, index) => index === blankIndex ? scannedItem : item);
+      }
+      return [...prev, scannedItem];
+    });
+    showToast(`${product.name} scanned`, 'success');
+  };
+
+  const handleBarcodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const code = barcodeSearch.trim().toLowerCase();
+    if (!code) return;
+    const product = products.find(item =>
+      item.barcode?.trim().toLowerCase() === code ||
+      item.sku?.trim().toLowerCase() === code
+    );
+    if (!product) {
+      showToast(`No product found for barcode/SKU: ${barcodeSearch}`, 'danger');
+      barcodeInputRef.current?.select();
+      return;
+    }
+    addScannedProduct(product);
+    setBarcodeSearch('');
+    barcodeInputRef.current?.focus();
+  };
+
+  const resetBill = () => {
+    setCart([{ ...EMPTY_BILL_ROW }]);
+    setSelectedCustomer(WALK_IN_CUSTOMER);
+    setCustomerSearch('');
+    setDiscount(0);
+    setPaymentStatus('paid');
+    setPaymentMethod('cash');
+    setAmountReceived('');
+    setCustomInvoiceDate(new Date().toISOString().split('T')[0]);
+    setFocusedRowIndex(null);
+    window.setTimeout(() => customerInputRef.current?.focus(), 0);
+  };
+
+  const holdCurrentBill = () => {
+    const validItems = cart.filter(item => item.productId);
+    if (validItems.length === 0) {
+      showToast('Add at least one inventory item before holding this bill.', 'danger');
+      return;
+    }
+    sessionStorage.setItem('pharmaflow-held-bill', JSON.stringify({
+      cart,
+      selectedCustomer,
+      discount,
+      paymentStatus,
+      paymentMethod,
+      amountReceived,
+      customInvoiceDate
+    }));
+    setHasHeldBill(true);
+    resetBill();
+    showToast('Bill held safely. Use Recall Bill to continue it.', 'success');
+  };
+
+  const recallHeldBill = () => {
+    const rawBill = sessionStorage.getItem('pharmaflow-held-bill');
+    if (!rawBill) {
+      showToast('No held bill is available.', 'info');
+      return;
+    }
+    try {
+      const heldBill = JSON.parse(rawBill);
+      setCart(Array.isArray(heldBill.cart) && heldBill.cart.length ? heldBill.cart : [{ ...EMPTY_BILL_ROW }]);
+      setSelectedCustomer(heldBill.selectedCustomer || WALK_IN_CUSTOMER);
+      setDiscount(Number(heldBill.discount) || 0);
+      setPaymentStatus(heldBill.paymentStatus || 'paid');
+      setPaymentMethod(heldBill.paymentMethod || 'cash');
+      setAmountReceived(heldBill.amountReceived || '');
+      setCustomInvoiceDate(heldBill.customInvoiceDate || new Date().toISOString().split('T')[0]);
+      sessionStorage.removeItem('pharmaflow-held-bill');
+      setHasHeldBill(false);
+      showToast('Held bill restored.', 'success');
+    } catch {
+      sessionStorage.removeItem('pharmaflow-held-bill');
+      setHasHeldBill(false);
+      showToast('Held bill data was invalid and has been cleared.', 'danger');
+    }
   };
 
   const handleProductKeyDown = (
@@ -477,11 +621,7 @@ export default function Billing() {
       showToast('Bill successfully generated & saved to Khata records!', 'success');
       
       // Reset POS form
-      setCart([{ productId: '', name: '', quantity: 1, price: 0, gst: 0, total: 0 }]);
-      setSelectedCustomer(WALK_IN_CUSTOMER);
-      setDiscount(0);
-      setPaymentStatus('paid');
-      setPaymentMethod('cash');
+      resetBill();
     } catch (error: any) {
       console.error('Save failed:', error);
       showToast(error.message || 'Failed to process transaction', 'danger');
@@ -489,6 +629,28 @@ export default function Billing() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const handleBillingShortcuts = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        barcodeInputRef.current?.focus();
+        barcodeInputRef.current?.select();
+      } else if (event.altKey && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        resetBill();
+        showToast('New bill ready.', 'info');
+      } else if (event.altKey && event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        navigate('/invoices');
+      } else if (event.key === 'F2') {
+        event.preventDefault();
+        handleSaveInvoice();
+      }
+    };
+    window.addEventListener('keydown', handleBillingShortcuts);
+    return () => window.removeEventListener('keydown', handleBillingShortcuts);
+  }, [cart, selectedCustomer, discount, paymentStatus, paymentMethod, amountReceived, customInvoiceDate, totals.grandTotal]);
 
   // Build high-converting Indian regional billing summary and open WhatsApp
   const handleWhatsAppShare = () => {
@@ -542,16 +704,19 @@ _Powered by PharmaFlow_`;
     <PageTransition>
       <div className="p-4 md:p-8 max-w-[1400px] mx-auto space-y-6 pb-20">
         
-        {/* Header Summary Panel */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-surface p-6 rounded-3xl border border-border shadow-sm">
+        {/* ERP sale header */}
+        <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 p-5">
           <div>
             <div className="flex items-center gap-3">
-              <span className="text-2xl">⚡</span>
-              <h1 className="text-3xl font-black text-text tracking-tight">Express Khata POS</h1>
+              <div className="h-11 w-11 rounded-xl bg-primary text-white flex items-center justify-center">
+                <Receipt className="h-5 w-5" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-black text-text tracking-tight">Sale Bill</h1>
+                <p className="text-[10px] font-black text-primary uppercase tracking-[0.18em]">Pharma Counter Billing</p>
+              </div>
             </div>
-            <p className="text-xs font-bold text-text/40 tracking-wider uppercase mt-1">
-              {settings?.storeName || 'Active Station'} • Fast Billing Panel
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -567,6 +732,30 @@ _Powered by PharmaFlow_`;
               Realtime Inventory Sync
             </div>
           </div>
+          </div>
+
+          <div className="border-t border-border bg-background/40 px-4 py-2.5 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={resetBill} className="h-8 px-3 rounded-lg border border-border bg-surface text-[10px] font-black text-text/60 hover:text-primary hover:border-primary/30 flex items-center gap-1.5 transition-colors [&_kbd]:text-[8px] [&_kbd]:text-text/30">
+              <RotateCcw className="h-3.5 w-3.5" /> New Bill <kbd>Alt+N</kbd>
+            </button>
+            <button type="button" onClick={holdCurrentBill} className="h-8 px-3 rounded-lg border border-border bg-surface text-[10px] font-black text-text/60 hover:text-primary hover:border-primary/30 flex items-center gap-1.5 transition-colors [&_kbd]:text-[8px] [&_kbd]:text-text/30">
+              <PauseCircle className="h-3.5 w-3.5" /> Hold Bill
+            </button>
+            <button
+              type="button"
+              onClick={recallHeldBill}
+              disabled={!hasHeldBill}
+              className="h-8 px-3 rounded-lg border border-border bg-surface text-[10px] font-black text-text/60 hover:text-primary hover:border-primary/30 flex items-center gap-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Play className="h-3.5 w-3.5" /> Recall Bill
+            </button>
+            <button type="button" onClick={() => navigate('/invoices')} className="h-8 px-3 rounded-lg border border-border bg-surface text-[10px] font-black text-text/60 hover:text-primary hover:border-primary/30 flex items-center gap-1.5 transition-colors [&_kbd]:text-[8px] [&_kbd]:text-text/30">
+              <FileText className="h-3.5 w-3.5" /> Bill List <kbd>Alt+M</kbd>
+            </button>
+            <span className="ml-auto hidden lg:flex items-center gap-1.5 text-[10px] font-bold text-text/40">
+              <Keyboard className="h-3.5 w-3.5" /> Enter/Tab moves forward • F2 saves
+            </span>
+          </div>
         </div>
 
         {/* Core Billing Console GRID */}
@@ -574,6 +763,29 @@ _Powered by PharmaFlow_`;
           
           {/* Main POS column: Customers and Item Table */}
           <div className="lg:col-span-8 space-y-6">
+
+            {/* Fast barcode scanning */}
+            <form onSubmit={handleBarcodeSubmit} className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex items-center gap-2 min-w-fit">
+                <div className="h-9 w-9 rounded-lg bg-primary text-white flex items-center justify-center">
+                  <Barcode className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-[11px] font-black text-text uppercase">Fast Scan</p>
+                  <p className="text-[9px] font-bold text-text/40">Barcode or SKU <kbd>Ctrl+B</kbd></p>
+                </div>
+              </div>
+              <input
+                ref={barcodeInputRef}
+                value={barcodeSearch}
+                onChange={(event) => setBarcodeSearch(event.target.value)}
+                placeholder="Scan barcode and press Enter..."
+                className="h-10 flex-1 rounded-xl border border-border bg-surface px-4 text-sm font-black outline-none focus:border-primary focus:ring-4 focus:ring-primary/10"
+              />
+              <Button type="submit" variant="primary" className="h-10 rounded-xl px-5 text-xs font-black">
+                Add Item
+              </Button>
+            </form>
             
             {/* 1. CUSTOMER SELECT & FAST RE-SELECTION */}
             <Card className="p-6 border-border bg-surface relative overflow-visible shadow-sm">
