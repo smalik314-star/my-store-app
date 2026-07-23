@@ -232,7 +232,7 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
             leftIcon={<Trash2 className="h-4 w-4" />}
             onClick={() => onDelete(product)}
           >
-            Delete
+            Archive
           </Button>
         </div>
       </motion.div>
