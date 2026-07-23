@@ -118,7 +118,7 @@ service cloud.firestore {
             && request.resource.data.amountReceived >= resource.data.amountReceived
             && request.resource.data.outstandingAmount >= 0
             && request.resource.data.amountReceived + request.resource.data.outstandingAmount == resource.data.grandTotal
-            && request.resource.data.paymentStatus in ['paid','partial']))
+            && request.resource.data.paymentStatus in ['paid','partial'])
           ||
           (roleIs(['owner','admin','staff'])
             && request.resource.data.diff(resource.data).affectedKeys()
@@ -170,7 +170,7 @@ service cloud.firestore {
             && request.resource.data.payableAmount >= 0
             && request.resource.data.paidAmount + request.resource.data.payableAmount
               == resource.data.totalAmount - (resource.data.returnAmount is number ? resource.data.returnAmount : 0)
-            && request.resource.data.paymentStatus in ['paid','partial']))
+            && request.resource.data.paymentStatus in ['paid','partial'])
           ||
           (roleIs(['owner','admin','staff'])
             && request.resource.data.diff(resource.data).affectedKeys()
