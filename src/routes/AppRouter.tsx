@@ -22,6 +22,8 @@ const Subscription = lazy(() => import('../pages/subscription/Subscription'));
 const UserManagement = lazy(() => import('../pages/users/UserManagement'));
 const Receipts = lazy(() => import('../pages/accounting/Receipts'));
 const SaleReturns = lazy(() => import('../pages/returns/SaleReturns'));
+const PurchaseReturns = lazy(() => import('../pages/returns/PurchaseReturns'));
+const SupplierPayments = lazy(() => import('../pages/accounting/SupplierPayments'));
 const Login = lazy(() => import('../pages/auth/Login'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 
@@ -70,6 +72,8 @@ export function AppRouter() {
               <Route path="/users" element={<UserManagement />} />
               <Route path="/receipts" element={<Receipts />} />
               <Route path="/sale-returns" element={<SaleReturns />} />
+              <Route path="/purchase-returns" element={<PurchaseReturns />} />
+              <Route path="/supplier-payments" element={<SupplierPayments />} />
             </Route>
           </Route>
 
