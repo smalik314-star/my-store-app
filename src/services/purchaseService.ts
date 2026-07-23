@@ -176,6 +176,7 @@ export const purchaseService = {
           id: purchaseId,
           tenantId,
           purchaseNumber,
+          status: purchaseData.status || 'posted',
           createdAt: serverTimestamp() as any
         };
         const cleanPurchase: any = {};
@@ -291,9 +292,15 @@ export const purchaseService = {
     }
   },
 
-  // --- ATOMIC DELETE PURCHASE WITH SAFE REVERSALS ---
-  async deletePurchase(tenantId: string, purchaseId: string): Promise<void> {
+  // --- ATOMIC PURCHASE CANCELLATION WITH SAFE REVERSALS ---
+  async cancelPurchase(
+    tenantId: string,
+    purchaseId: string,
+    cancellationReason: string = 'Cancelled by user'
+  ): Promise<void> {
     if (!tenantId) throw new Error('Tenant ID required');
+    const actorId = auth.currentUser?.uid;
+    if (!actorId) throw new Error('You must be signed in to cancel a purchase.');
 
     try {
       const itemsQuery = query(
@@ -304,7 +311,7 @@ export const purchaseService = {
       const itemsSnap = await getDocs(itemsQuery);
       const items = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseItem));
       if (new Set(items.map(item => item.productId)).size !== items.length) {
-        throw new Error('This legacy purchase contains duplicate product rows and needs reviewed reconciliation before deletion.');
+        throw new Error('This legacy purchase contains duplicate product rows and needs reviewed reconciliation before cancellation.');
       }
       await runTransaction(db, async (transaction) => {
         // 1. Fetch Purchase
@@ -312,6 +319,10 @@ export const purchaseService = {
         const purchaseDoc = await transaction.get(purchaseRef);
         if (!purchaseDoc.exists() || purchaseDoc.data().tenantId !== tenantId) {
           throw new Error('Purchase not found or unauthorized');
+        }
+        const purchase = purchaseDoc.data() as Purchase;
+        if (purchase.status === 'cancelled') {
+          throw new Error('This purchase is already cancelled.');
         }
 
         // Read and validate every product before performing any write.
@@ -332,7 +343,7 @@ export const purchaseService = {
 
           if (!batch || batch.quantity < item.quantity) {
             throw new Error(
-              `Cannot delete purchase: ${item.quantity} units were added to batch "${item.batchNumber}" of product "${item.productName}", but only ${batch ? batch.quantity : 0} units are currently in stock. Reversing this purchase would cause negative inventory.`
+              `Cannot cancel purchase: ${item.quantity} units were added to batch "${item.batchNumber}" of product "${item.productName}", but only ${batch ? batch.quantity : 0} units are currently in stock. Reversing this purchase would cause negative inventory.`
             );
           }
         }
@@ -392,7 +403,7 @@ export const purchaseService = {
           const movement: StockMovement = {
             id: movementRef.id,
             tenantId,
-            type: "PURCHASE_DELETE_REVERSE",
+            type: "PURCHASE_CANCEL_REVERSE",
             productId: item.productId,
             productName: item.productName,
             batchNumber: item.batchNumber,
@@ -404,16 +415,28 @@ export const purchaseService = {
           };
           transaction.set(movementRef, movement);
 
-          // Delete PurchaseItem doc
-          const itemDocRef = doc(db, PURCHASE_ITEMS_COLL, item.id);
-          transaction.delete(itemDocRef);
         }
 
-        // Delete Purchase doc
-        transaction.delete(purchaseRef);
+        transaction.update(purchaseRef, {
+          status: 'cancelled',
+          cancelledAt: serverTimestamp(),
+          cancelledBy: actorId,
+          cancellationReason: cancellationReason.trim() || 'Cancelled by user',
+        });
+
+        const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
+        transaction.set(logRef, {
+          action: 'CANCEL_PURCHASE',
+          purchaseId,
+          purchaseNumber: purchase.purchaseNumber,
+          reason: cancellationReason.trim() || 'Cancelled by user',
+          userId: actorId,
+          tenantId,
+          createdAt: serverTimestamp(),
+        });
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${PURCHASES_COLL}/${purchaseId}`);
+      handleFirestoreError(error, OperationType.UPDATE, `${PURCHASES_COLL}/${purchaseId}`);
       throw error;
     }
   }
