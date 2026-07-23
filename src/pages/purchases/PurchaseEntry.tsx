@@ -9,7 +9,7 @@ import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { PageTransition } from '../../components/common/PageTransition';
-import { formatCurrency } from '../../utils/currency';
+import { addMoney, calculateLineTax, formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
 import { Timestamp } from 'firebase/firestore';
 import { 
@@ -70,6 +70,20 @@ interface FormItem {
   searchQuery: string;
 }
 
+const calculatePurchaseItem = (item: FormItem) => {
+  if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+    return { gross: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, tax: 0, total: 0 };
+  }
+  const gross = roundMoney(item.quantity * item.purchasePrice);
+  const discountAmount = roundMoney(gross * item.discount / 100);
+  return calculateLineTax({
+    quantity: item.quantity,
+    rate: item.purchasePrice,
+    discount: discountAmount,
+    gstRate: item.gstPercentage,
+  });
+};
+
 export default function PurchaseEntry() {
   const { user } = useAuth();
   const { showToast } = useToast();
@@ -80,6 +94,7 @@ export default function PurchaseEntry() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const saveInProgressRef = useRef(false);
 
   // Form Header State
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -106,29 +121,26 @@ export default function PurchaseEntry() {
 
   useEffect(() => {
     if (!user?.tenantId) return;
-    loadMasterData();
-  }, [user]);
-
-  const loadMasterData = async () => {
-    if (!user?.tenantId) return;
+    let active = true;
     setLoading(true);
-    try {
-      const supps = await purchaseService.getSuppliers(user.tenantId);
-      setSuppliers(supps);
-
-      // Subscribe to all products for super fast offline searching
-      const unsubscribe = productService.subscribeToProducts(user.tenantId, (loadedProducts) => {
-        setProducts(loadedProducts);
-        setLoading(false);
+    void purchaseService.getSuppliers(user.tenantId)
+      .then(supps => {
+        if (active) setSuppliers(supps);
+      })
+      .catch(error => {
+        console.error('Error loading suppliers:', error);
+        if (active) showToast('Unable to load suppliers. Please retry.', 'danger');
       });
-
-      return () => unsubscribe();
-    } catch (error) {
-      console.error('Error loading master data:', error);
-      showToast('Error initializing form data', 'danger');
+    const unsubscribe = productService.subscribeToProducts(user.tenantId, loadedProducts => {
+      if (!active) return;
+      setProducts(loadedProducts);
       setLoading(false);
-    }
-  };
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [user]);
 
   function createEmptyItem(): FormItem {
     const currentMonthStr = String(new Date().getMonth() + 1).padStart(2, '0');
@@ -143,7 +155,7 @@ export default function PurchaseEntry() {
       category: '',
       manufacturer: '',
       unit: 'Units',
-      gstPercentage: 18,
+      gstPercentage: 0,
       minimumStock: 10,
       
       batchNumber: '',
@@ -207,8 +219,8 @@ export default function PurchaseEntry() {
     updated[idx].category = product.category || '';
     updated[idx].manufacturer = product.manufacturer || '';
     updated[idx].unit = product.unit || 'Units';
-    updated[idx].gstPercentage = product.gstPercentage || 18;
-    updated[idx].minimumStock = product.minimumStock || 10;
+    updated[idx].gstPercentage = product.gstPercentage ?? 0;
+    updated[idx].minimumStock = product.minimumStock ?? 10;
     
     updated[idx].searchQuery = product.name;
     updated[idx].showSuggestions = false;
@@ -263,13 +275,18 @@ export default function PurchaseEntry() {
     setItems(updated);
   };
 
-  // Grand total calculation: Sum of (quantity * purchasePrice) after discount
-  const grandTotal = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const itemSub = (item.quantity || 0) * (item.purchasePrice || 0);
-      const discountVal = itemSub * ((item.discount || 0) / 100);
-      return sum + (itemSub - discountVal);
-    }, 0);
+  const purchaseTotals = useMemo(() => {
+    const lines = items.map(calculatePurchaseItem);
+    return {
+      gross: addMoney(...lines.map(line => line.gross)),
+      discount: addMoney(...lines.map(line => line.discount)),
+      taxable: addMoney(...lines.map(line => line.taxable)),
+      cgst: addMoney(...lines.map(line => line.cgst)),
+      sgst: addMoney(...lines.map(line => line.sgst)),
+      igst: addMoney(...lines.map(line => line.igst)),
+      gst: addMoney(...lines.map(line => line.tax)),
+      total: addMoney(...lines.map(line => line.total)),
+    };
   }, [items]);
 
   // Inline Supplier Addition
@@ -315,6 +332,7 @@ export default function PurchaseEntry() {
   // Final Form Save Handler
   const handleSavePurchase = async (saveAndAddAnother = false) => {
     if (!user?.tenantId) return;
+    if (saveInProgressRef.current) return;
     if (!selectedSupplierId) {
       showToast('Please select a Supplier', 'warning');
       return;
@@ -354,17 +372,29 @@ export default function PurchaseEntry() {
         showToast(`Sale Price cannot be less than Purchase Price for row #${rowNum}`, 'warning');
         return;
       }
+      if (item.mrp < item.salePrice) {
+        showToast(`MRP cannot be less than Sale Price for row #${rowNum}`, 'warning');
+        return;
+      }
+      if (![0, 5, 12, 18, 28].includes(item.gstPercentage)) {
+        showToast(`Select a supported GST rate for row #${rowNum}`, 'warning');
+        return;
+      }
+      if (item.discount < 0 || item.discount > 100) {
+        showToast(`Discount must be between 0% and 100% for row #${rowNum}`, 'warning');
+        return;
+      }
 
       // Convert month/years to timestamps
       const mfgDateObj = new Date(parseInt(item.mfgYear), parseInt(item.mfgMonth) - 1, 1);
-      const expDateObj = new Date(parseInt(item.expYear), parseInt(item.expMonth) - 1, 1);
+      const expDateObj = new Date(parseInt(item.expYear), parseInt(item.expMonth), 0, 23, 59, 59, 999);
 
       if (expDateObj.getTime() <= mfgDateObj.getTime()) {
         showToast(`Expiry Date must be after MFG Date for row #${rowNum}`, 'warning');
         return;
       }
 
-      const itemTotal = (item.quantity * item.purchasePrice) * (1 - (item.discount || 0) / 100);
+      const amounts = calculatePurchaseItem(item);
 
       validatedItems.push({
         productId: item.productId,
@@ -378,10 +408,18 @@ export default function PurchaseEntry() {
         gstPercentage: item.gstPercentage,
         discount: item.discount,
         quantity: item.quantity,
-        total: itemTotal
+        grossAmount: amounts.gross,
+        discountAmount: amounts.discount,
+        taxableAmount: amounts.taxable,
+        gstAmount: amounts.tax,
+        cgst: amounts.cgst,
+        sgst: amounts.sgst,
+        igst: amounts.igst,
+        total: amounts.total
       });
     }
 
+    saveInProgressRef.current = true;
     setIsSaving(true);
     try {
       const selectedSupp = suppliers.find(s => s.id === selectedSupplierId);
@@ -390,20 +428,21 @@ export default function PurchaseEntry() {
         supplierId: selectedSupplierId,
         supplierName: selectedSupp ? selectedSupp.name : 'Unknown Supplier',
         invoiceNumber: invoiceNumber.trim(),
-        invoiceDate: Timestamp.fromDate(new Date(invoiceDate)),
-        totalAmount: grandTotal,
+        invoiceDate: Timestamp.fromDate(new Date(`${invoiceDate}T12:00:00`)),
+        grossAmount: purchaseTotals.gross,
+        discountAmount: purchaseTotals.discount,
+        taxableAmount: purchaseTotals.taxable,
+        gstAmount: purchaseTotals.gst,
+        cgst: purchaseTotals.cgst,
+        sgst: purchaseTotals.sgst,
+        igst: purchaseTotals.igst,
+        totalAmount: purchaseTotals.total,
         itemsCount: validatedItems.length,
         notes: notes.trim() || undefined
       };
 
       await purchaseService.addPurchase(user.tenantId, purchaseHeader, validatedItems);
-      showToast(
-        saveAndAddAnother
-          ? 'Purchase saved. Enter the next purchase.'
-          : 'Purchase entry processed and inventory updated successfully!',
-        'success'
-      );
-
+      showToast('Purchase entry processed and inventory updated successfully!', 'success');
       if (saveAndAddAnother) {
         setSelectedSupplierId('');
         setInvoiceNumber('');
@@ -419,6 +458,7 @@ export default function PurchaseEntry() {
       console.error(err);
       showToast(err?.message || 'Error processing purchase transaction', 'danger');
     } finally {
+      saveInProgressRef.current = false;
       setIsSaving(false);
     }
   };
@@ -532,13 +572,13 @@ export default function PurchaseEntry() {
               <Plus className="h-5 w-5 text-primary" />
               Purchase Items Row Entries
             </h3>
-            <span className="text-xs font-bold text-text/40 font-mono">Grand Total: {formatCurrency(grandTotal)}</span>
+            <span className="text-xs font-bold text-text/40 font-mono">Grand Total: {formatCurrency(purchaseTotals.total)}</span>
           </div>
 
           <div className="space-y-6">
             {items.map((item, idx) => {
               const suggestions = getProductSuggestions(item.searchQuery);
-              const itemTotal = (item.quantity || 0) * (item.purchasePrice || 0) * (1 - (item.discount || 0) / 100);
+              const itemAmounts = calculatePurchaseItem(item);
 
               return (
                 <div 
@@ -698,7 +738,7 @@ export default function PurchaseEntry() {
                   <div className="md:col-span-1 flex flex-col items-end justify-end mb-1">
                     <span className="block text-[10px] font-bold text-text/40 uppercase mb-1">Subtotal</span>
                     <div className="flex items-center gap-1.5 justify-end w-full">
-                      <span className="text-xs font-black text-text block truncate">{formatCurrency(itemTotal)}</span>
+                      <span className="text-xs font-black text-text block truncate">{formatCurrency(itemAmounts.total)}</span>
                       <button
                         type="button"
                         onClick={() => handleRemoveRow(idx)}
@@ -706,6 +746,35 @@ export default function PurchaseEntry() {
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-6 gap-3 pt-3 border-t border-border/70">
+                    <div>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand</label>
+                      <input value={item.brand || '—'} readOnly className="w-full h-9 px-3 border border-border rounded-lg bg-text/[0.02] text-xs font-semibold" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">MRP *</label>
+                      <input type="number" min="0" step="0.01" value={item.mrp || ''} onChange={(e) => handleItemFieldChange(idx, 'mrp', Math.max(0, Number(e.target.value) || 0))} className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Discount %</label>
+                      <input type="number" min="0" max="100" step="0.01" value={item.discount || ''} onChange={(e) => handleItemFieldChange(idx, 'discount', Math.min(100, Math.max(0, Number(e.target.value) || 0)))} className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">GST %</label>
+                      <select value={item.gstPercentage} onChange={(e) => handleItemFieldChange(idx, 'gstPercentage', Number(e.target.value))} className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold">
+                        {[0, 5, 12, 18, 28].map(rate => <option key={rate} value={rate}>{rate}%</option>)}
+                      </select>
+                    </div>
+                    <div className="rounded-lg bg-text/[0.02] px-3 py-2">
+                      <p className="text-[10px] font-bold text-text/50 uppercase">Taxable</p>
+                      <p className="text-xs font-black">{formatCurrency(itemAmounts.taxable)}</p>
+                    </div>
+                    <div className="rounded-lg bg-primary/5 px-3 py-2">
+                      <p className="text-[10px] font-bold text-text/50 uppercase">GST / Line Total</p>
+                      <p className="text-xs font-black">{formatCurrency(itemAmounts.tax)} / {formatCurrency(itemAmounts.total)}</p>
                     </div>
                   </div>
                 </div>
@@ -725,8 +794,10 @@ export default function PurchaseEntry() {
             </Button>
 
             <div className="text-right space-y-1 mt-4 md:mt-0">
+              <p className="text-xs font-semibold text-text/50">Gross {formatCurrency(purchaseTotals.gross)} · Discount {formatCurrency(purchaseTotals.discount)}</p>
+              <p className="text-xs font-semibold text-text/50">Taxable {formatCurrency(purchaseTotals.taxable)} · GST {formatCurrency(purchaseTotals.gst)}</p>
               <span className="text-sm font-semibold text-text/50">Grand Total:</span>
-              <span className="text-2xl font-black text-text block">{formatCurrency(grandTotal)}</span>
+              <span className="text-2xl font-black text-text block">{formatCurrency(purchaseTotals.total)}</span>
             </div>
           </div>
         </Card>
@@ -740,12 +811,7 @@ export default function PurchaseEntry() {
           >
             Cancel
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => void handleSavePurchase(true)}
-            disabled={isSaving}
-            className="rounded-2xl h-12 px-6 border-primary text-primary font-bold flex items-center gap-2"
-          >
+          <Button variant="outline" onClick={() => void handleSavePurchase(true)} disabled={isSaving} className="rounded-2xl h-12 px-6 border-primary text-primary font-bold flex items-center gap-2">
             <Save className="h-5 w-5" />
             {isSaving ? 'Saving...' : 'Save & New'}
           </Button>
