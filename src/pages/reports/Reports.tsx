@@ -154,6 +154,7 @@ export default function Reports() {
     }
 
     return invoices.filter(inv => {
+      if (inv.status === 'cancelled') return false;
       const date = toJsDate(inv.createdAt);
       if (!date) return false;
       return isWithinInterval(date, { start, end });
