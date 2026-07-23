@@ -11,6 +11,7 @@ import {
 import { auth, db } from '../firebase/config';
 import type { Invoice, ReceiptRecord } from '../types';
 import { addMoney, roundMoney, subtractMoney } from '../utils/currency';
+import { applyPaymentToOutstanding } from '../utils/transactions';
 
 interface RecordReceiptInput {
   requestId: string;
@@ -54,9 +55,11 @@ export const receiptService = {
           ? Number(invoice.outstandingAmount)
           : subtractMoney(invoice.grandTotal, currentReceived)
       );
-      if (currentOutstanding <= 0) throw new Error('This invoice is already fully paid.');
-      if (amount > currentOutstanding) {
-        throw new Error(`Receipt cannot exceed the invoice outstanding amount of ${currentOutstanding}.`);
+      let newOutstanding: number;
+      try {
+        newOutstanding = applyPaymentToOutstanding(currentOutstanding, amount);
+      } catch (error) {
+        throw new Error(`Receipt failed: ${(error as Error).message} Current outstanding: ${currentOutstanding}.`);
       }
 
       const customerRef = doc(db, 'customers', invoice.customerId);
@@ -66,7 +69,6 @@ export const receiptService = {
       }
 
       const newReceived = addMoney(currentReceived, amount);
-      const newOutstanding = subtractMoney(currentOutstanding, amount);
       const receiptNumber = `RCT-${new Date().getFullYear()}-${receiptRef.id.slice(-8).toUpperCase()}`;
       const receipt: Omit<ReceiptRecord, 'id'> = {
         tenantId,
