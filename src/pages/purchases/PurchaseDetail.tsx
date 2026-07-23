@@ -46,7 +46,7 @@ export default function PurchaseDetail() {
         return;
       }
       setPurchase(data);
-      const purchaseItems = await purchaseService.getPurchaseItems(id);
+      const purchaseItems = await purchaseService.getPurchaseItems(user.tenantId, id);
       setItems(purchaseItems);
     } catch (error) {
       console.error('Error loading purchase details:', error);
@@ -113,8 +113,10 @@ export default function PurchaseDetail() {
               <p className="text-text/60 mt-1 font-medium">Purchase Number: <span className="font-mono font-bold text-primary print:text-black">{purchase.purchaseNumber}</span></p>
             </div>
             <div className="text-right">
-              <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-4 py-1.5 text-sm font-black text-emerald-500 print:border print:border-black print:text-black">
-                RECEIVED
+              <span className={`inline-flex items-center rounded-full px-4 py-1.5 text-sm font-black print:border print:border-black print:text-black ${
+                purchase.status === 'cancelled' ? 'bg-red-500/10 text-red-600' : 'bg-emerald-500/10 text-emerald-500'
+              }`}>
+                {purchase.status === 'cancelled' ? 'CANCELLED' : 'POSTED'}
               </span>
               <p className="text-xs text-text/40 font-mono mt-1 font-bold">Logged: {formatDate(purchase.createdAt)}</p>
             </div>
@@ -221,6 +223,14 @@ export default function PurchaseDetail() {
                 )}
               </div>
               <div className="text-right space-y-1">
+                {purchase.grossAmount != null && (
+                  <>
+                    <p className="text-xs font-semibold text-text/50">Gross: {formatCurrency(purchase.grossAmount)}</p>
+                    <p className="text-xs font-semibold text-text/50">Discount: {formatCurrency(purchase.discountAmount)}</p>
+                    <p className="text-xs font-semibold text-text/50">Taxable: {formatCurrency(purchase.taxableAmount)}</p>
+                    <p className="text-xs font-semibold text-text/50">GST: {formatCurrency(purchase.gstAmount)}</p>
+                  </>
+                )}
                 <p className="text-sm font-bold text-text/50">Grand Total Amount</p>
                 <p className="text-3xl font-black text-text print:text-black">{formatCurrency(purchase.totalAmount)}</p>
               </div>
