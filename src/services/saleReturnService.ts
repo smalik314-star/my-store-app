@@ -17,6 +17,7 @@ import type {
   SaleReturnRecord,
 } from '../types';
 import { addMoney, roundMoney, subtractMoney } from '../utils/currency';
+import { settleReturnAgainstOutstanding, validateReturnQuantity } from '../utils/transactions';
 
 interface RequestedReturnLine {
   lineIndex: number;
@@ -95,9 +96,10 @@ export const saleReturnService = {
           throw new Error(`Return quantity for ${original.name} must be a whole number above zero.`);
         }
         const previouslyReturned = Number(returnedByLine[String(requested.lineIndex)]) || 0;
-        const returnable = Number(original.quantity) - previouslyReturned;
-        if (quantity > returnable) {
-          throw new Error(`${original.name}: only ${returnable} unit(s) remain returnable.`);
+        try {
+          validateReturnQuantity(Number(original.quantity), previouslyReturned, quantity);
+        } catch (error) {
+          throw new Error(`${original.name}: ${(error as Error).message}`);
         }
         if (!original.batchDeductions?.length) {
           throw new Error(`${original.name} has no batch provenance. Use a reviewed stock adjustment instead.`);
@@ -175,8 +177,9 @@ export const saleReturnService = {
 
       const totalAmount = addMoney(...lines.map(line => line.amount));
       const invoiceOutstanding = roundMoney(Number(invoice.outstandingAmount) || 0);
-      const outstandingAdjusted = Math.min(invoiceOutstanding, totalAmount);
-      const customerCredit = subtractMoney(totalAmount, outstandingAdjusted);
+      const settlement = settleReturnAgainstOutstanding(totalAmount, invoiceOutstanding);
+      const outstandingAdjusted = settlement.outstandingAdjusted;
+      const customerCredit = settlement.creditCreated;
       const currentReturnedAmount = roundMoney(Number(invoice.returnedAmount) || 0);
       if (addMoney(currentReturnedAmount, totalAmount) > invoice.grandTotal) {
         throw new Error('Return value cannot exceed the original invoice total.');
@@ -210,8 +213,8 @@ export const saleReturnService = {
       transaction.update(invoiceRef, {
         returnedAmount: addMoney(currentReturnedAmount, totalAmount),
         returnCount: (Number(invoice.returnCount) || 0) + 1,
-        outstandingAmount: subtractMoney(invoiceOutstanding, outstandingAdjusted),
-        paymentStatus: subtractMoney(invoiceOutstanding, outstandingAdjusted) === 0
+        outstandingAmount: settlement.newOutstanding,
+        paymentStatus: settlement.newOutstanding === 0
           ? (Number(invoice.amountReceived) > 0 ? 'paid' : invoice.paymentStatus)
           : 'partial',
         updatedAt: serverTimestamp(),
