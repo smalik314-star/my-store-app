@@ -90,17 +90,48 @@ export const invoiceService = {
     }
   },
 
-  async saveInvoice(tenantId: string, invoiceData: Omit<Invoice, 'id' | 'createdAt' | 'updatedAt' | 'tenantId'>) {
+  async saveInvoice(
+    tenantId: string,
+    invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt' | 'updatedAt' | 'tenantId'> & {
+      invoiceNumber?: string;
+    },
+    prefix: string = 'INV'
+  ) {
     if (!tenantId) throw new Error('Tenant ID required');
+    const actorId = auth.currentUser?.uid;
+    if (!actorId) throw new Error('You must be signed in to create an invoice.');
+    const requestId = invoiceData.requestId || crypto.randomUUID();
+    const invoiceRef = doc(db, COLLECTION_NAME, `${tenantId}_${requestId}`);
+    const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
+    const year = new Date().getFullYear();
 
-    logFirestoreOperation(OperationType.WRITE, COLLECTION_NAME, 'pending', { invoiceData });
+    logFirestoreOperation(OperationType.WRITE, COLLECTION_NAME, 'pending', { requestId });
     try {
-      const createdInvoiceId = await runTransaction(db, async (transaction) => {
+      const savedInvoice = await runTransaction(db, async (transaction) => {
         // --- READS SECTION ---
-        
-        // 1. Get Tenant Doc
+        // Idempotency: the same client request always resolves to the same
+        // invoice document and can never deduct stock twice.
+        const existingInvoice = await transaction.get(invoiceRef);
+        if (existingInvoice.exists()) {
+          if (existingInvoice.data().tenantId !== tenantId) {
+            throw new Error('Invoice request is not authorized.');
+          }
+          return {
+            id: invoiceRef.id,
+            invoiceNumber: String(existingInvoice.data().invoiceNumber),
+            reused: true,
+          };
+        }
+
+        // 1. Get Tenant and invoice counter.
         const tenantRef = doc(db, 'tenants', tenantId);
         const tenantDoc = await transaction.get(tenantRef);
+        const counterDoc = await transaction.get(counterRef);
+        let nextNumber = 1;
+        if (counterDoc.exists() && counterDoc.data().year === year) {
+          nextNumber = (Number(counterDoc.data().count) || 0) + 1;
+        }
+        const generatedInvoiceNumber = `${prefix}-${year}-${nextNumber.toString().padStart(6, '0')}`;
         
         // 2. Get all unique Product Docs needed for this invoice
         const productDocsMap = new Map<string, any>();
@@ -188,11 +219,13 @@ export const invoiceService = {
         }
 
         // 2. Create Invoice
-        const invoiceRef = doc(collection(db, COLLECTION_NAME));
         const storedItems: any[] = [];
         const invoice = {
           ...invoiceData,
+          invoiceNumber: generatedInvoiceNumber,
+          requestId,
           tenantId,
+          createdBy: actorId,
           status: invoiceData.status || 'posted',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -235,7 +268,15 @@ export const invoiceService = {
             }));
 
             const productGstRate = Number(product.gstPercentage) || 0;
-            const authoritativePrice = Number(product.sellingPrice) || 0;
+            const requestedPrice = Number(item.price);
+            if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
+              throw new Error(`Invalid sale rate for ${item.name}.`);
+            }
+            const mrp = Number(product.mrp) || 0;
+            if (mrp > 0 && requestedPrice > mrp) {
+              throw new Error(`Sale rate for ${item.name} cannot exceed MRP ${mrp}.`);
+            }
+            const authoritativePrice = requestedPrice;
             const lineTax = calculateLineTax({
               quantity: item.quantity,
               rate: authoritativePrice,
@@ -283,6 +324,7 @@ export const invoiceService = {
               previousStock,
               newStock,
               invoiceId: invoiceRef.id,
+              userId: actorId,
               createdAt: serverTimestamp()
             }));
           }
@@ -328,6 +370,7 @@ export const invoiceService = {
           discount: safeDiscount, grandTotal: authoritativeTotal, amountReceived,
           outstandingAmount: subtractMoney(authoritativeTotal, amountReceived) });
         transaction.set(invoiceRef, sanitizeForFirestore(invoice));
+        transaction.set(counterRef, { count: nextNumber, year, tenantId });
 
         // 4. Update Customer Stats
         if (customerDoc && customerRef && customerDoc.exists() && customerDoc.data().tenantId === tenantId) {
@@ -363,14 +406,14 @@ export const invoiceService = {
         transaction.set(logRef, sanitizeForFirestore({
           action: 'CREATE_INVOICE',
           targetId: invoiceRef.id,
-          userId: auth.currentUser?.uid || null,
+          userId: actorId,
           timestamp: serverTimestamp(),
         }));
 
-        return invoiceRef.id;
+        return { id: invoiceRef.id, invoiceNumber: generatedInvoiceNumber, reused: false };
       });
-      logFirestoreOperation(OperationType.WRITE, `${COLLECTION_NAME}/${createdInvoiceId}`, 'success', { createdInvoiceId });
-      return createdInvoiceId;
+      logFirestoreOperation(OperationType.WRITE, `${COLLECTION_NAME}/${savedInvoice.id}`, 'success', savedInvoice);
+      return savedInvoice;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, COLLECTION_NAME);
     }
