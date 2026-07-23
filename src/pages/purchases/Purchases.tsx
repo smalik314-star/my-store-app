@@ -19,7 +19,7 @@ import {
   Plus, 
   Calendar, 
   Receipt, 
-  Trash2, 
+  Ban, 
   Eye, 
   User, 
   TrendingUp, 
@@ -34,8 +34,8 @@ export default function Purchases() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState<Purchase | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState<Purchase | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   useEffect(() => {
     if (!user?.tenantId) return;
@@ -68,9 +68,10 @@ export default function Purchases() {
   }, [purchases, searchTerm]);
 
   const stats = useMemo(() => {
-    const totalCount = purchases.length;
-    const totalValue = purchases.reduce((sum, p) => sum + (p.totalAmount || 0), 0);
-    const uniqueSuppliers = new Set(purchases.map(p => p.supplierId)).size;
+    const postedPurchases = purchases.filter(purchase => purchase.status !== 'cancelled');
+    const totalCount = postedPurchases.length;
+    const totalValue = postedPurchases.reduce((sum, p) => sum + (p.totalAmount || 0), 0);
+    const uniqueSuppliers = new Set(postedPurchases.map(p => p.supplierId)).size;
     return {
       totalCount,
       totalValue,
@@ -78,20 +79,20 @@ export default function Purchases() {
     };
   }, [purchases]);
 
-  const handleDelete = async () => {
-    if (!deleteConfirm || !user?.tenantId) return;
-    setIsDeleting(true);
+  const handleCancel = async () => {
+    if (!cancelConfirm || !user?.tenantId) return;
+    setIsCancelling(true);
     try {
-      await purchaseService.deletePurchase(user.tenantId, deleteConfirm.id);
-      showToast('Purchase deleted and stock levels reversed successfully', 'success');
-      setDeleteConfirm(null);
+      await purchaseService.cancelPurchase(user.tenantId, cancelConfirm.id);
+      showToast('Purchase cancelled and stock levels reversed successfully', 'success');
+      setCancelConfirm(null);
       loadPurchases();
     } catch (error: any) {
       console.error(error);
-      const msg = error?.message || 'Failed to delete purchase entry';
+      const msg = error?.message || 'Failed to cancel purchase entry';
       showToast(msg, 'danger');
     } finally {
-      setIsDeleting(false);
+      setIsCancelling(false);
     }
   };
 
@@ -211,7 +212,10 @@ export default function Purchases() {
                   {filteredPurchases.map((purchase) => (
                     <tr key={purchase.id} className="hover:bg-text/[0.01] transition-all">
                       <td className="px-6 py-5">
-                        <span className="font-mono font-bold text-primary">{purchase.purchaseNumber}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-primary">{purchase.purchaseNumber}</span>
+                          {purchase.status === 'cancelled' && <Badge variant="danger">Cancelled</Badge>}
+                        </div>
                       </td>
                       <td className="px-6 py-5">
                         <div className="font-semibold text-text">{purchase.supplierName}</div>
@@ -239,15 +243,17 @@ export default function Purchases() {
                             <Eye className="h-4 w-4" />
                             View
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDeleteConfirm(purchase)}
-                            className="text-danger hover:bg-danger/5 rounded-xl h-9 px-3 gap-1.5 flex items-center font-semibold"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Delete
-                          </Button>
+                          {purchase.status !== 'cancelled' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setCancelConfirm(purchase)}
+                              className="text-danger hover:bg-danger/5 rounded-xl h-9 px-3 gap-1.5 flex items-center font-semibold"
+                            >
+                              <Ban className="h-4 w-4" />
+                              Cancel
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -258,18 +264,18 @@ export default function Purchases() {
           </Card>
         )}
 
-        {/* Delete Confirmation Modal */}
-        {deleteConfirm && (
+        {/* Cancellation Confirmation Modal */}
+        {cancelConfirm && (
           <ConfirmModal
-            isOpen={!!deleteConfirm}
-            title={`Delete Purchase ${deleteConfirm.purchaseNumber}`}
-            message={`Are you sure you want to delete this purchase entry? This action is IRREVERSIBLE. It will automatically deduct purchased stock quantities from inventory, reverse batches, and log reversal movements. If parts of this batch have already been sold and deletion would make stock negative, the deletion will be safely rejected.`}
-            confirmText={isDeleting ? "Deleting & Reversing..." : "Confirm Deletion & Reversal"}
+            isOpen={!!cancelConfirm}
+            title={`Cancel Purchase ${cancelConfirm.purchaseNumber}`}
+            message="Cancel this purchase? Stock will be reversed exactly once. The purchase and its item lines will remain in audit history. Cancellation is rejected if it would make any batch negative."
+            confirmText={isCancelling ? "Cancelling & Reversing..." : "Confirm Cancellation"}
             cancelText="Cancel"
-            onConfirm={handleDelete}
-            onClose={() => setDeleteConfirm(null)}
+            onConfirm={handleCancel}
+            onClose={() => setCancelConfirm(null)}
             variant="danger"
-            isLoading={isDeleting}
+            isLoading={isCancelling}
           />
         )}
       </div>
