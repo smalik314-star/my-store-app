@@ -8,7 +8,7 @@ import {
   where
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { Product, Customer, Invoice } from '../types';
+import { Product, Invoice, Purchase, Supplier } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 export interface DashboardStats {
@@ -16,7 +16,13 @@ export interface DashboardStats {
   totalCustomers: number;
   totalInvoices: number;
   todaySales: number;
+  todayGrossProfit: number;
+  todayInvoiceCount: number;
+  todayPurchases: number;
   monthlyRevenue: number;
+  totalReceivable: number;
+  totalPayable: number;
+  stockValue: number;
   lowStockItems: number;
   outOfStockItems: number;
   criticalStockItems: number;
@@ -34,7 +40,13 @@ export const dashboardService = {
       totalCustomers: 0,
       totalInvoices: 0,
       todaySales: 0,
+      todayGrossProfit: 0,
+      todayInvoiceCount: 0,
+      todayPurchases: 0,
       monthlyRevenue: 0,
+      totalReceivable: 0,
+      totalPayable: 0,
+      stockValue: 0,
       lowStockItems: 0,
       outOfStockItems: 0,
       criticalStockItems: 0,
@@ -48,6 +60,15 @@ export const dashboardService = {
         try {
           const products = snapshot.docs.map(doc => doc.data() as Product);
           stats.totalProducts = products.length;
+          stats.stockValue = products.reduce((total, product) => {
+            const batchValue = (product.batches || []).reduce(
+              (sum, batch) => sum + Math.max(0, Number(batch.quantity) || 0) * Math.max(0, Number(batch.purchasePrice) || 0),
+              0
+            );
+            return total + (product.batches?.length
+              ? batchValue
+              : Math.max(0, Number(product.stockQuantity) || 0) * Math.max(0, Number(product.purchasePrice) || 0));
+          }, 0);
           stats.lowStockItems = products.filter(p => p.stockQuantity <= p.minimumStock && p.stockQuantity > 0).length;
           stats.outOfStockItems = products.filter(p => p.stockQuantity === 0).length;
           stats.criticalStockItems = products.filter(p => p.stockQuantity > 0 && p.stockQuantity <= 2).length;
@@ -82,6 +103,10 @@ export const dashboardService = {
       query(collection(db, 'customers'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         stats.totalCustomers = snapshot.size;
+        stats.totalReceivable = snapshot.docs.reduce(
+          (total, row) => total + Math.max(0, Number(row.data().outstandingBalance) || 0),
+          0
+        );
         callback({ ...stats });
       },
       (error) => {
@@ -103,14 +128,24 @@ export const dashboardService = {
           stats.todaySales = invoices
             .filter(inv => {
               const date = typeof inv.createdAt?.toDate === 'function' ? inv.createdAt.toDate() : new Date(inv.createdAt);
-              return date >= todayStart && inv.paymentStatus === 'paid';
+              return date >= todayStart;
             })
             .reduce((sum, inv) => sum + inv.grandTotal, 0);
+          const todayInvoices = invoices.filter(inv => {
+            const date = typeof inv.createdAt?.toDate === 'function' ? inv.createdAt.toDate() : new Date(inv.createdAt);
+            return date >= todayStart;
+          });
+          stats.todayInvoiceCount = todayInvoices.length;
+          stats.todayGrossProfit = todayInvoices.reduce((invoiceTotal, invoice) => (
+            invoiceTotal + invoice.items.reduce((lineTotal, item) => (
+              lineTotal + ((Number(item.price) || 0) - (Number(item.purchaseCost) || 0)) * (Number(item.quantity) || 0)
+            ), 0)
+          ), 0);
 
           stats.monthlyRevenue = invoices
             .filter(inv => {
               const date = typeof inv.createdAt?.toDate === 'function' ? inv.createdAt.toDate() : new Date(inv.createdAt);
-              return date >= monthStart && inv.paymentStatus === 'paid';
+              return date >= monthStart;
             })
             .reduce((sum, inv) => sum + inv.grandTotal, 0);
 
@@ -126,10 +161,41 @@ export const dashboardService = {
       }
     );
 
+    const unsubPurchases = onSnapshot(
+      query(collection(db, 'purchases'), where('tenantId', '==', tenantId)),
+      snapshot => {
+        stats.todayPurchases = snapshot.docs
+          .map(row => row.data() as Purchase)
+          .filter(purchase => {
+            if (purchase.status === 'cancelled') return false;
+            const date = typeof purchase.createdAt?.toDate === 'function'
+              ? purchase.createdAt.toDate()
+              : new Date(purchase.createdAt);
+            return date >= todayStart;
+          })
+          .reduce((sum, purchase) => sum + (Number(purchase.totalAmount) || 0), 0);
+        callback({ ...stats });
+      },
+      error => onError?.(error)
+    );
+
+    const unsubSuppliers = onSnapshot(
+      query(collection(db, 'suppliers'), where('tenantId', '==', tenantId)),
+      snapshot => {
+        stats.totalPayable = snapshot.docs
+          .map(row => row.data() as Supplier)
+          .reduce((total, supplier) => total + Math.max(0, Number(supplier.payableBalance) || 0), 0);
+        callback({ ...stats });
+      },
+      error => onError?.(error)
+    );
+
     return () => {
       unsubProducts();
       unsubCustomers();
       unsubInvoices();
+      unsubPurchases();
+      unsubSuppliers();
     };
   },
 
@@ -163,7 +229,7 @@ export const dashboardService = {
     });
   },
 
-  subscribeToAlerts(tenantId: string, callback: (alerts: { lowStock: Product[], expiring: Product[] }) => void, onError?: (error: any) => void) {
+  subscribeToAlerts(tenantId: string, callback: (alerts: { lowStock: Product[], expiring: Product[], allProducts: Product[] }) => void, onError?: (error: any) => void) {
     const now = new Date();
     const twoMonthsFromNow = new Date();
     twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
@@ -188,7 +254,7 @@ export const dashboardService = {
             }
           });
 
-          callback({ lowStock, expiring });
+          callback({ lowStock, expiring, allProducts: products });
         } catch (err) {
           console.error('Alerts Processing Error:', err);
           if (onError) onError(err);
