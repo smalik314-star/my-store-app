@@ -60,6 +60,7 @@ const menuSections: Array<{ title: string; items: MenuItem[] }> = [
     title: 'Purchases',
     items: [
       { icon: Truck, label: 'Purchase Bills', path: '/purchases', allowedRoles: ['owner', 'admin', 'staff'] },
+      { icon: RotateCcw, label: 'Purchase Returns', path: '/purchase-returns', allowedRoles: ['owner', 'admin', 'staff'] },
     ]
   },
   {
@@ -80,6 +81,7 @@ const menuSections: Array<{ title: string; items: MenuItem[] }> = [
     title: 'Accounting',
     items: [
       { icon: Banknote, label: 'Customer Receipts', path: '/receipts', allowedRoles: ['owner', 'admin', 'staff'] },
+      { icon: Banknote, label: 'Supplier Payments', path: '/supplier-payments', allowedRoles: ['owner', 'admin', 'staff'] },
     ]
   },
   {
