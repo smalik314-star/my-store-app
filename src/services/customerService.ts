@@ -81,16 +81,18 @@ export const customerService = {
     const sanitized = sanitizeCustomer(customerData);
 
     try {
-      // Check for duplicate phone for this tenant
-      const q = query(
-        collection(db, COLLECTION_NAME), 
-        where('tenantId', '==', tenantId),
-        where('phone', '==', sanitized.phone)
-      );
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        throw new Error('A customer with this phone number already exists.');
+      // Blank phone numbers are allowed for retail customers. Only a supplied
+      // phone number is a stable duplicate key.
+      if (sanitized.phone) {
+        const q = query(
+          collection(db, COLLECTION_NAME),
+          where('tenantId', '==', tenantId),
+          where('phone', '==', sanitized.phone)
+        );
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          throw new Error('A customer with this phone number already exists.');
+        }
       }
 
       const docRef = await addDoc(collection(db, COLLECTION_NAME), {
