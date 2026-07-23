@@ -159,13 +159,13 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dateStr = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
       grouped[dateStr] = { date: dateStr, incoming: 0, outgoing: 0 };
     }
 
     movements.forEach(m => {
       const mDate = m.createdAt?.toDate ? m.createdAt.toDate() : new Date(m.createdAt);
-      const dateStr = mDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dateStr = mDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
       
       // If within our 7-day range, aggregate volume
       if (grouped[dateStr] !== undefined) {
@@ -549,7 +549,7 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
                         "h-10 w-10 rounded-xl flex flex-col items-center justify-center text-center border font-black",
                         isExpired ? "bg-danger/10 border-danger/30 text-danger" : "bg-warning/10 border-warning/30 text-warning"
                       )}>
-                        <span className="text-[8px] uppercase font-black leading-none">{expiryDate.toLocaleDateString('en-US', { month: 'short' })}</span>
+                        <span className="text-[8px] uppercase font-black leading-none">{expiryDate.toLocaleDateString('en-IN', { month: 'short' })}</span>
                         <span className="text-sm font-black leading-none mt-0.5">{expiryDate.getDate()}</span>
                       </div>
 
