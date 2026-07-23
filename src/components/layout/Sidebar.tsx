@@ -8,6 +8,7 @@ import {
   TriangleAlert,
   Users, 
   ReceiptText, 
+  RotateCcw,
   BarChart3, 
   Settings, 
   Plus,
@@ -17,6 +18,7 @@ import {
   CreditCard,
   Truck,
   UserCog
+  ,Banknote
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -51,6 +53,7 @@ const menuSections: Array<{ title: string; items: MenuItem[] }> = [
     items: [
       { icon: Plus, label: 'New Sale / Billing', path: '/billing', allowedRoles: ['owner', 'admin', 'staff'] },
       { icon: ReceiptText, label: 'Sales Invoices', path: '/invoices' },
+      { icon: RotateCcw, label: 'Sale Returns', path: '/sale-returns', allowedRoles: ['owner', 'admin', 'staff'] },
     ]
   },
   {
@@ -71,6 +74,12 @@ const menuSections: Array<{ title: string; items: MenuItem[] }> = [
     title: 'Parties',
     items: [
       { icon: Users, label: 'Customers', path: '/customers' },
+    ]
+  },
+  {
+    title: 'Accounting',
+    items: [
+      { icon: Banknote, label: 'Customer Receipts', path: '/receipts', allowedRoles: ['owner', 'admin', 'staff'] },
     ]
   },
   {
