@@ -151,7 +151,7 @@ export interface PurchaseItem {
 export interface StockMovement {
   id: string;
   tenantId: string;
-  type: "OPENING_STOCK" | "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
+  type: "OPENING_STOCK" | "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_RETURN_DAMAGED" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
   productId: string;
   productName: string;
   batchNumber: string;
@@ -177,6 +177,7 @@ export interface Customer {
   outstandingBalance: number;
   totalPurchases: number;
   totalPaid: number;
+  creditBalance?: number;
   createdAt: any;
   updatedAt: any;
 }
@@ -226,8 +227,58 @@ export interface Invoice {
   cancelledAt?: any;
   cancelledBy?: string;
   cancellationReason?: string;
+  returnedAmount?: number;
+  returnCount?: number;
   createdAt: any;
   updatedAt: any;
+}
+
+export interface ReceiptRecord {
+  id: string;
+  tenantId: string;
+  receiptNumber: string;
+  requestId: string;
+  customerId: string;
+  customerName: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  paymentMethod: 'cash' | 'upi' | 'card' | 'credit';
+  notes?: string;
+  createdBy: string;
+  createdAt: any;
+}
+
+export interface SaleReturnLine {
+  lineIndex: number;
+  productId: string;
+  productName: string;
+  quantity: number;
+  disposition: 'resellable' | 'damaged';
+  reason: string;
+  amount: number;
+  batchRestorations: Array<{
+    batchNumber: string;
+    quantity: number;
+  }>;
+}
+
+export interface SaleReturnRecord {
+  id: string;
+  tenantId: string;
+  requestId: string;
+  returnNumber: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  lines: SaleReturnLine[];
+  totalAmount: number;
+  outstandingAdjusted: number;
+  customerCredit: number;
+  status: 'posted';
+  createdBy: string;
+  createdAt: any;
 }
 
 export interface StoreSettings {
