@@ -18,6 +18,7 @@ import { db, auth } from '../firebase/config';
 import { Purchase, PurchaseItem, Supplier, StockMovement, Product, ProductBatch } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { toJsDate } from '../utils/date';
+import { roundMoney } from '../utils/currency';
 
 const SUPPLIERS_COLL = 'suppliers';
 const PURCHASES_COLL = 'purchases';
@@ -53,7 +54,12 @@ export const purchaseService = {
       const docRef = await addDoc(collection(db, SUPPLIERS_COLL), {
         ...cleanData,
         tenantId,
+        totalPurchases: Number(cleanData.totalPurchases) || 0,
+        totalPaid: Number(cleanData.totalPaid) || 0,
+        payableBalance: Number(cleanData.payableBalance) || 0,
+        creditBalance: Number(cleanData.creditBalance) || 0,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
       return docRef.id;
     } catch (error) {
@@ -182,6 +188,19 @@ export const purchaseService = {
             productDocs.set(item.productId, snap);
           }
         }
+        const supplierRef = doc(db, SUPPLIERS_COLL, purchaseData.supplierId);
+        const supplierDoc = await transaction.get(supplierRef);
+        if (!supplierDoc.exists() || supplierDoc.data().tenantId !== tenantId) {
+          throw new Error('Selected supplier was not found or does not belong to this store.');
+        }
+
+        const totalAmount = roundMoney(Number(purchaseData.totalAmount) || 0);
+        const paidAmount = roundMoney(Number(purchaseData.paidAmount) || 0);
+        if (totalAmount <= 0) throw new Error('Purchase total must be greater than zero.');
+        if (paidAmount < 0 || paidAmount > totalAmount) {
+          throw new Error('Paid amount must be between zero and the purchase total.');
+        }
+        const payableAmount = roundMoney(totalAmount - paidAmount);
 
         let nextNum = 1;
         if (counterDoc.exists()) {
@@ -197,6 +216,13 @@ export const purchaseService = {
         const purchaseId = purchaseRef.id;
         const finalPurchase: Purchase = {
           ...purchaseData,
+          totalAmount,
+          paidAmount,
+          payableAmount,
+          paymentStatus: payableAmount === 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'due',
+          returnAmount: 0,
+          returnCount: 0,
+          supplierLedgerTracked: true,
           id: purchaseId,
           tenantId,
           purchaseNumber,
@@ -217,6 +243,29 @@ export const purchaseService = {
           supplierId: purchaseData.supplierId,
           invoiceNumberNormalized: normalizedInvoice(purchaseData.invoiceNumber),
           purchaseId,
+          createdBy: actorId,
+          createdAt: serverTimestamp(),
+        });
+        transaction.update(supplierRef, {
+          totalPurchases: increment(totalAmount),
+          totalPaid: increment(paidAmount),
+          payableBalance: increment(payableAmount),
+          updatedAt: serverTimestamp(),
+        });
+
+        const supplierLedgerRef = doc(collection(db, 'ledgerEntries'));
+        transaction.set(supplierLedgerRef, {
+          tenantId,
+          partyType: 'supplier',
+          partyId: purchaseData.supplierId,
+          partyName: purchaseData.supplierName,
+          voucherType: 'purchase',
+          voucherId: purchaseId,
+          voucherNumber: purchaseNumber,
+          referenceId: purchaseId,
+          referenceNumber: purchaseData.invoiceNumber,
+          debit: 0,
+          credit: totalAmount,
           createdBy: actorId,
           createdAt: serverTimestamp(),
         });
@@ -343,6 +392,12 @@ export const purchaseService = {
         if (purchase.status === 'cancelled') {
           throw new Error('This purchase is already cancelled.');
         }
+        if (roundMoney(Number(purchase.paidAmount) || 0) > 0) {
+          throw new Error('This purchase has supplier payments. Reverse those payments before cancelling the purchase.');
+        }
+        if (roundMoney(Number(purchase.returnAmount) || 0) > 0) {
+          throw new Error('This purchase already has returns and cannot be cancelled directly.');
+        }
 
         const itemsByProduct = new Map<string, PurchaseItem[]>();
         for (const item of items) {
@@ -355,6 +410,13 @@ export const purchaseService = {
         const productDocs = new Map<string, any>();
         for (const productId of itemsByProduct.keys()) {
           productDocs.set(productId, await transaction.get(doc(db, PRODUCTS_COLL, productId)));
+        }
+        const supplierRef = doc(db, SUPPLIERS_COLL, purchase.supplierId);
+        const supplierDoc = purchase.supplierLedgerTracked
+          ? await transaction.get(supplierRef)
+          : null;
+        if (purchase.supplierLedgerTracked && (!supplierDoc?.exists() || supplierDoc.data().tenantId !== tenantId)) {
+          throw new Error('Supplier record required for this purchase could not be found.');
         }
         for (const [productId, productItems] of itemsByProduct) {
           const productDoc = productDocs.get(productId);
@@ -444,6 +506,17 @@ export const purchaseService = {
           cancelledBy: actorId,
           cancellationReason: cancellationReason.trim() || 'Cancelled by user',
         });
+        if (purchase.supplierLedgerTracked) {
+          transaction.update(supplierRef, {
+            totalPurchases: increment(-roundMoney(purchase.totalAmount)),
+            payableBalance: increment(-roundMoney(
+              Number.isFinite(Number(purchase.payableAmount))
+                ? Number(purchase.payableAmount)
+                : purchase.totalAmount
+            )),
+            updatedAt: serverTimestamp(),
+          });
+        }
 
         const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
         transaction.set(logRef, {
