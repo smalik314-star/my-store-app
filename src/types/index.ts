@@ -207,6 +207,7 @@ export interface Invoice {
   id: string;
   tenantId: string;
   invoiceNumber: string;
+  requestId?: string;
   customerId: string;
   customerName: string;
   items: InvoiceItem[];
@@ -219,6 +220,8 @@ export interface Invoice {
   amountReceived?: number;
   outstandingAmount?: number;
   isQuickBill?: boolean;
+  invoiceDate?: any;
+  createdBy?: string;
   status?: 'posted' | 'cancelled';
   cancelledAt?: any;
   cancelledBy?: string;
