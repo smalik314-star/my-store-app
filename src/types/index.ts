@@ -105,6 +105,10 @@ export interface Purchase {
   totalAmount: number;
   itemsCount: number;
   notes?: string;
+  status?: 'posted' | 'cancelled';
+  cancelledAt?: any;
+  cancelledBy?: string;
+  cancellationReason?: string;
   createdAt: any;
 }
 
@@ -129,7 +133,7 @@ export interface PurchaseItem {
 export interface StockMovement {
   id: string;
   tenantId: string;
-  type: "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "MANUAL_ADJUST";
+  type: "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
   productId: string;
   productName: string;
   batchNumber: string;
@@ -181,7 +185,6 @@ export interface InvoiceItem {
 export interface Invoice {
   id: string;
   tenantId: string;
-  createdBy?: string;
   invoiceNumber: string;
   customerId: string;
   customerName: string;
@@ -195,6 +198,10 @@ export interface Invoice {
   amountReceived?: number;
   outstandingAmount?: number;
   isQuickBill?: boolean;
+  status?: 'posted' | 'cancelled';
+  cancelledAt?: any;
+  cancelledBy?: string;
+  cancellationReason?: string;
   createdAt: any;
   updatedAt: any;
 }
