@@ -78,6 +78,9 @@ export interface Product {
   rackLocation?: string;
   description?: string;
   imageUrl?: string;
+  recordStatus?: 'active' | 'inactive';
+  archivedAt?: any;
+  archivedBy?: string;
   batches?: ProductBatch[];
   createdAt: any;
   updatedAt?: any;
@@ -102,6 +105,13 @@ export interface Purchase {
   supplierName: string;
   invoiceNumber: string;
   invoiceDate: any; // Timestamp
+  grossAmount?: number;
+  discountAmount?: number;
+  taxableAmount?: number;
+  gstAmount?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
   totalAmount: number;
   itemsCount: number;
   notes?: string;
@@ -109,6 +119,7 @@ export interface Purchase {
   cancelledAt?: any;
   cancelledBy?: string;
   cancellationReason?: string;
+  createdBy?: string;
   createdAt: any;
 }
 
@@ -127,13 +138,20 @@ export interface PurchaseItem {
   mrp?: number;
   gstPercentage?: number;
   discount?: number;
+  grossAmount?: number;
+  discountAmount?: number;
+  taxableAmount?: number;
+  gstAmount?: number;
+  cgst?: number;
+  sgst?: number;
+  igst?: number;
   total: number;
 }
 
 export interface StockMovement {
   id: string;
   tenantId: string;
-  type: "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
+  type: "OPENING_STOCK" | "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
   productId: string;
   productName: string;
   batchNumber: string;
@@ -142,6 +160,9 @@ export interface StockMovement {
   newStock: number;
   purchaseId?: string;
   invoiceId?: string;
+  userId?: string;
+  reason?: string;
+  notes?: string;
   createdAt: any;
 }
 
