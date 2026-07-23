@@ -2,7 +2,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import appletConfig from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -12,7 +11,7 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId,
   appId: import.meta.env.VITE_FIREBASE_APP_ID || appletConfig.appId,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || appletConfig.firestoreDatabaseId || 'ai-studio-pharmaflow-17500397-f099-4531-a8a4-a5ad18ba27d1',
+  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || appletConfig.firestoreDatabaseId || '(default)',
 };
 
 // Check if config is valid before initializing
@@ -26,16 +25,9 @@ let storage: any;
 if (isConfigValid) {
   try {
     app = initializeApp(firebaseConfig);
-    const appCheckSiteKey = import.meta.env.VITE_FIREBASE_APP_CHECK_SITE_KEY;
-    if (appCheckSiteKey && typeof window !== 'undefined') {
-      initializeAppCheck(app, {
-        provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
-        isTokenAutoRefreshEnabled: true,
-      });
-    }
     auth = getAuth(app);
     const dbId = firebaseConfig.firestoreDatabaseId;
-    if (import.meta.env.DEV) console.info('Firebase initialized successfully.');
+    console.log('Firebase initialized successfully. Firestore Database ID:', dbId);
     db = getFirestore(app, dbId);
     storage = getStorage(app);
   } catch (error) {
