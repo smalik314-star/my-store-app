@@ -188,9 +188,9 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
                 <h4 className="text-xs font-black uppercase text-text/40 tracking-widest ml-1">Inventory & Storage</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <InfoRow icon={Info} label="Batch Number" value={product.batchNumber} colorClass="text-warning" />
-                  <InfoRow icon={Calendar} label="Expiry Date" value={toJsDate(product.expiryDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} colorClass="text-danger" />
+                  <InfoRow icon={Calendar} label="Expiry Date" value={toJsDate(product.expiryDate).toLocaleDateString('en-IN', { month: 'long', day: 'numeric', year: 'numeric' })} colorClass="text-danger" />
                   {product.manufacturingDate && (
-                    <InfoRow icon={Calendar} label="MFG Date" value={toJsDate(product.manufacturingDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} colorClass="text-success" />
+                    <InfoRow icon={Calendar} label="MFG Date" value={toJsDate(product.manufacturingDate).toLocaleDateString('en-IN', { month: 'long', day: 'numeric', year: 'numeric' })} colorClass="text-success" />
                   )}
                   <InfoRow icon={MapPin} label="Location" value={product.rackLocation || 'Not Assigned'} colorClass="text-success" />
                   <InfoRow icon={AlertTriangle} label="Min. Stock" value={`${product.minimumStock} Units`} colorClass="text-danger" />
