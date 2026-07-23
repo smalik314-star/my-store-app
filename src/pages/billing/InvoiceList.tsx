@@ -16,7 +16,7 @@ import {
   ExternalLink,
   Download,
   FileText,
-  Trash2,
+  Ban,
   AlertCircle,
   TrendingUp,
   Clock,
@@ -68,8 +68,8 @@ export default function InvoiceList() {
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   
-  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [invoiceToCancel, setInvoiceToCancel] = useState<Invoice | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   
   const { showToast } = useToast();
   
@@ -128,11 +128,12 @@ export default function InvoiceList() {
   }, [user]);
 
   const stats = useMemo(() => {
-    const total = allInvoicesForStats.length;
-    const revenue = allInvoicesForStats.reduce((acc, inv) => acc + inv.grandTotal, 0);
-    const paidCount = allInvoicesForStats.filter(inv => inv.paymentStatus === 'paid').length;
-    const dueCount = allInvoicesForStats.filter(inv => inv.paymentStatus === 'due').length;
-    const dueAmount = allInvoicesForStats
+    const postedInvoices = allInvoicesForStats.filter(inv => inv.status !== 'cancelled');
+    const total = postedInvoices.length;
+    const revenue = postedInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
+    const paidCount = postedInvoices.filter(inv => inv.paymentStatus === 'paid').length;
+    const dueCount = postedInvoices.filter(inv => inv.paymentStatus === 'due').length;
+    const dueAmount = postedInvoices
       .filter(inv => inv.paymentStatus === 'due')
       .reduce((acc, inv) => acc + inv.grandTotal, 0);
 
@@ -185,17 +186,17 @@ export default function InvoiceList() {
 
   const totalPages = Math.ceil(filteredInvoices.length / PAGE_SIZE);
 
-  const handleDelete = async () => {
-    if (!invoiceToDelete || !user?.tenantId) return;
-    setIsDeleting(true);
+  const handleCancel = async () => {
+    if (!invoiceToCancel || !user?.tenantId) return;
+    setIsCancelling(true);
     try {
-      await invoiceService.deleteInvoice(user.tenantId, invoiceToDelete.id);
-      showToast(`Invoice ${invoiceToDelete.invoiceNumber} deleted and stock reverted.`, 'success');
-      setInvoiceToDelete(null);
+      await invoiceService.cancelInvoice(user.tenantId, invoiceToCancel.id);
+      showToast(`Invoice ${invoiceToCancel.invoiceNumber} cancelled and stock reversed.`, 'success');
+      setInvoiceToCancel(null);
     } catch (error: any) {
-      showToast(error.message || 'Failed to delete invoice', 'danger');
+      showToast(error.message || 'Failed to cancel invoice', 'danger');
     } finally {
-      setIsDeleting(false);
+      setIsCancelling(false);
     }
   };
 
@@ -486,10 +487,10 @@ export default function InvoiceList() {
                     </td>
                     <td className="px-6 py-5">
                       <Badge 
-                        variant={invoice.paymentStatus === 'paid' ? 'success' : 'danger'}
+                        variant={invoice.status === 'cancelled' ? 'danger' : invoice.paymentStatus === 'paid' ? 'success' : 'danger'}
                         className="font-black text-[9px] min-w-[70px] justify-center"
                       >
-                        {invoice.paymentStatus.toUpperCase()}
+                        {invoice.status === 'cancelled' ? 'CANCELLED' : invoice.paymentStatus.toUpperCase()}
                       </Badge>
                     </td>
                     <td className="px-6 py-5 text-right">
@@ -503,15 +504,18 @@ export default function InvoiceList() {
                         >
                           <ExternalLink className="h-4 w-4" />
                         </button>
-                        <button 
-                          className="h-10 w-10 rounded-xl hover:bg-danger/10 text-text/20 hover:text-danger transition-all inline-flex items-center justify-center"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setInvoiceToDelete(invoice);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {invoice.status !== 'cancelled' && (
+                          <button 
+                            className="h-10 w-10 rounded-xl hover:bg-danger/10 text-text/20 hover:text-danger transition-all inline-flex items-center justify-center"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setInvoiceToCancel(invoice);
+                            }}
+                            aria-label={`Cancel invoice ${invoice.invoiceNumber}`}
+                          >
+                            <Ban className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </motion.tr>
@@ -539,8 +543,8 @@ export default function InvoiceList() {
                     <span className="text-[10px] font-bold text-text/30 uppercase">{invoice.items.length} items</span>
                   </div>
                 </div>
-                <Badge variant={invoice.paymentStatus === 'paid' ? 'success' : 'danger'}>
-                  {invoice.paymentStatus.toUpperCase()}
+                <Badge variant={invoice.status === 'cancelled' ? 'danger' : invoice.paymentStatus === 'paid' ? 'success' : 'danger'}>
+                  {invoice.status === 'cancelled' ? 'CANCELLED' : invoice.paymentStatus.toUpperCase()}
                 </Badge>
               </div>
 
@@ -560,15 +564,16 @@ export default function InvoiceList() {
                   {toJsDate(invoice.createdAt).toLocaleDateString()} at {toJsDate(invoice.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
                 <div className="flex items-center gap-2">
-                  <button 
+                  {invoice.status !== 'cancelled' && <button 
                     className="h-8 w-8 rounded-lg bg-background border border-border flex items-center justify-center text-danger"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setInvoiceToDelete(invoice);
+                      setInvoiceToCancel(invoice);
                     }}
+                    aria-label={`Cancel invoice ${invoice.invoiceNumber}`}
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                    <Ban className="h-4 w-4" />
+                  </button>}
                   <button className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-white">
                     <ChevronRight className="h-4 w-4" />
                   </button>
@@ -644,13 +649,13 @@ export default function InvoiceList() {
       </Card>
 
       <ConfirmModal 
-        isOpen={!!invoiceToDelete}
-        onClose={() => setInvoiceToDelete(null)}
-        onConfirm={handleDelete}
-        isLoading={isDeleting}
-        title="Delete Invoice"
-        message={`Are you sure you want to delete invoice ${invoiceToDelete?.invoiceNumber}? This will revert stock quantities and update customer records. This action cannot be undone.`}
-        confirmText="Confirm Delete"
+        isOpen={!!invoiceToCancel}
+        onClose={() => setInvoiceToCancel(null)}
+        onConfirm={handleCancel}
+        isLoading={isCancelling}
+        title="Cancel Invoice"
+        message={`Cancel invoice ${invoiceToCancel?.invoiceNumber}? Stock and customer balances will be reversed once. The invoice will remain in audit history.`}
+        confirmText="Cancel & Reverse"
         variant="danger"
       />
     </div>
