@@ -43,5 +43,5 @@ export function toJsDate(value: any): Date {
  */
 export function formatDate(value: any, options?: Intl.DateTimeFormatOptions): string {
   const date = toJsDate(value);
-  return date.toLocaleDateString('en-US', options || { month: 'short', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString('en-IN', options || { month: 'short', day: 'numeric', year: 'numeric' });
 }
