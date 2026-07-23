@@ -24,6 +24,19 @@ const PURCHASES_COLL = 'purchases';
 const PURCHASE_ITEMS_COLL = 'purchaseItems';
 const MOVEMENTS_COLL = 'stockMovements';
 const PRODUCTS_COLL = 'products';
+const PURCHASE_KEYS_COLL = 'purchaseKeys';
+
+const normalizedBatch = (value: string) => value.trim().toUpperCase();
+const normalizedInvoice = (value: string) => value.trim().toUpperCase().replace(/\s+/g, ' ');
+
+const stableHash = (value: string): string => {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
 
 export const purchaseService = {
   // --- SUPPLIER MANAGEMENT ---
@@ -110,11 +123,13 @@ export const purchaseService = {
     }
   },
 
-  async getPurchaseItems(purchaseId: string): Promise<PurchaseItem[]> {
+  async getPurchaseItems(tenantId: string, purchaseId: string): Promise<PurchaseItem[]> {
+    if (!tenantId) return [];
     try {
       const q = query(
         collection(db, PURCHASE_ITEMS_COLL),
-        where('purchaseId', '==', purchaseId)
+        where('purchaseId', '==', purchaseId),
+        where('tenantId', '==', tenantId)
       );
       const snap = await getDocs(q);
       return snap.docs.map(doc => ({
@@ -135,15 +150,24 @@ export const purchaseService = {
   ): Promise<string> {
     if (!tenantId) throw new Error('Tenant ID required');
     if (items.length === 0) throw new Error('Purchase must contain at least one item');
-    if (new Set(items.map(item => item.productId)).size !== items.length) {
-      throw new Error('Add each product only once per purchase. Merge duplicate quantities/batches before saving.');
+    const actorId = auth.currentUser?.uid;
+    if (!actorId) throw new Error('You must be signed in to create a purchase.');
+    const duplicateKeys = items.map(item => `${item.productId}::${normalizedBatch(item.batchNumber)}`);
+    if (new Set(duplicateKeys).size !== duplicateKeys.length) {
+      throw new Error('The same product and batch appears more than once. Merge its quantity before saving.');
     }
 
     try {
       return await runTransaction(db, async (transaction) => {
         // Firestore requires every transaction read to happen before any write.
         const counterRef = doc(db, 'counters', `${tenantId}_purchase`);
+        const invoiceKey = `${tenantId}|${purchaseData.supplierId}|${normalizedInvoice(purchaseData.invoiceNumber)}`;
+        const purchaseKeyRef = doc(db, PURCHASE_KEYS_COLL, `${tenantId}_${stableHash(invoiceKey)}`);
         const counterDoc = await transaction.get(counterRef);
+        const purchaseKeyDoc = await transaction.get(purchaseKeyRef);
+        if (purchaseKeyDoc.exists()) {
+          throw new Error('This supplier invoice number has already been posted for the selected supplier.');
+        }
         const productDocs = new Map<string, any>();
         for (const item of items) {
           if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error(`Invalid quantity for ${item.productName}`);
@@ -177,6 +201,7 @@ export const purchaseService = {
           tenantId,
           purchaseNumber,
           status: purchaseData.status || 'posted',
+          createdBy: actorId,
           createdAt: serverTimestamp() as any
         };
         const cleanPurchase: any = {};
@@ -187,100 +212,97 @@ export const purchaseService = {
           }
         });
         transaction.set(purchaseRef, cleanPurchase);
+        transaction.set(purchaseKeyRef, {
+          tenantId,
+          supplierId: purchaseData.supplierId,
+          invoiceNumberNormalized: normalizedInvoice(purchaseData.invoiceNumber),
+          purchaseId,
+          createdBy: actorId,
+          createdAt: serverTimestamp(),
+        });
 
-        // 3. Process each purchase item
+        // 3. Process all rows for each product in memory, then update that product once.
+        const itemsByProduct = new Map<string, typeof items>();
         for (const item of items) {
-          // A. Create PurchaseItem row
-          const itemRef = doc(collection(db, PURCHASE_ITEMS_COLL));
-          const finalItem: PurchaseItem = {
-            ...item,
-            id: itemRef.id,
-            purchaseId,
-            tenantId
-          };
-          transaction.set(itemRef, finalItem);
+          const group = itemsByProduct.get(item.productId) || [];
+          group.push(item);
+          itemsByProduct.set(item.productId, group);
+        }
 
-          // B. Update Product Stock and Batches
-          const productRef = doc(db, PRODUCTS_COLL, item.productId);
-          const productDoc = productDocs.get(item.productId);
+        for (const [productId, productItems] of itemsByProduct) {
+          const productRef = doc(db, PRODUCTS_COLL, productId);
+          const product = productDocs.get(productId).data() as Product;
+          let runningStock = product.stockQuantity || 0;
+          const batchesList: ProductBatch[] = product.batches ? product.batches.map(batch => ({ ...batch })) : [];
 
-          const product = productDoc.data() as Product;
-          const previousStock = product.stockQuantity || 0;
-          const newStock = previousStock + item.quantity;
+          for (const item of productItems) {
+            const itemRef = doc(collection(db, PURCHASE_ITEMS_COLL));
+            transaction.set(itemRef, {
+              ...item,
+              id: itemRef.id,
+              purchaseId,
+              tenantId
+            } satisfies PurchaseItem);
 
-          // Process batches array
-          let batchesList = product.batches ? [...product.batches] : [];
-          const existingBatchIdx = batchesList.findIndex(
-            b => b.batchNumber.trim().toUpperCase() === item.batchNumber.trim().toUpperCase()
-          );
+            const previousStock = runningStock;
+            runningStock += item.quantity;
+            const existingBatchIdx = batchesList.findIndex(
+              batch => normalizedBatch(batch.batchNumber) === normalizedBatch(item.batchNumber)
+            );
+            if (existingBatchIdx >= 0) {
+              batchesList[existingBatchIdx] = {
+                ...batchesList[existingBatchIdx],
+                quantity: batchesList[existingBatchIdx].quantity + item.quantity,
+                purchasePrice: item.purchasePrice,
+                salePrice: item.salePrice,
+                mfgDate: item.mfgDate,
+                expiryDate: item.expiryDate,
+              };
+            } else {
+              batchesList.push({
+                batchNumber: normalizedBatch(item.batchNumber),
+                mfgDate: item.mfgDate,
+                expiryDate: item.expiryDate,
+                purchasePrice: item.purchasePrice,
+                salePrice: item.salePrice,
+                quantity: item.quantity,
+                createdAt: Timestamp.now()
+              });
+            }
 
-          if (existingBatchIdx >= 0) {
-            // Update quantity and pricing to the latest purchase details
-            batchesList[existingBatchIdx] = {
-              ...batchesList[existingBatchIdx],
-              quantity: batchesList[existingBatchIdx].quantity + item.quantity,
-              purchasePrice: item.purchasePrice,
-              salePrice: item.salePrice,
-              mfgDate: item.mfgDate,
-              expiryDate: item.expiryDate,
-            };
-          } else {
-            // Create a new batch entry
-            batchesList.push({
-              batchNumber: item.batchNumber,
-              mfgDate: item.mfgDate,
-              expiryDate: item.expiryDate,
-              purchasePrice: item.purchasePrice,
-              salePrice: item.salePrice,
+            const movementRef = doc(collection(db, MOVEMENTS_COLL));
+            transaction.set(movementRef, {
+              id: movementRef.id,
+              tenantId,
+              type: 'PURCHASE_IN',
+              productId,
+              productName: item.productName,
+              batchNumber: normalizedBatch(item.batchNumber),
               quantity: item.quantity,
-              createdAt: Timestamp.now()
-            });
+              previousStock,
+              newStock: runningStock,
+              purchaseId,
+              userId: actorId,
+              createdAt: serverTimestamp() as any
+            } satisfies StockMovement);
           }
 
-          // Sort batches by expiry date ascending (FEFO order)
-          batchesList.sort((a, b) => {
-            const dateA = toJsDate(a.expiryDate).getTime();
-            const dateB = toJsDate(b.expiryDate).getTime();
-            return dateA - dateB;
-          });
-
-          // Identify nearest active batch or fallback to nearest overall batch
-          const activeBatches = batchesList.filter(b => b.quantity > 0);
-          const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
-
-          // Update Product document fields
+          batchesList.sort((a, b) => toJsDate(a.expiryDate).getTime() - toJsDate(b.expiryDate).getTime());
+          const currentBatch = batchesList.find(batch => batch.quantity > 0) || batchesList[0];
+          const latestItem = productItems[productItems.length - 1];
           const updatedProductFields: Partial<Product> = {
-            stockQuantity: newStock,
-            purchasePrice: item.purchasePrice, // Latest Purchase Price
-            sellingPrice: item.salePrice, // Latest Sale Price
+            stockQuantity: runningStock,
+            purchasePrice: latestItem.purchasePrice,
+            sellingPrice: latestItem.salePrice,
             batches: batchesList,
             updatedAt: serverTimestamp()
           };
-
           if (currentBatch) {
             updatedProductFields.batchNumber = currentBatch.batchNumber;
             updatedProductFields.expiryDate = currentBatch.expiryDate;
             updatedProductFields.manufacturingDate = currentBatch.mfgDate;
           }
-
           transaction.update(productRef, updatedProductFields);
-
-          // C. Create Stock Movement entry
-          const movementRef = doc(collection(db, MOVEMENTS_COLL));
-          const movement: StockMovement = {
-            id: movementRef.id,
-            tenantId,
-            type: "PURCHASE_IN",
-            productId: item.productId,
-            productName: item.productName,
-            batchNumber: item.batchNumber,
-            quantity: item.quantity,
-            previousStock,
-            newStock,
-            purchaseId,
-            createdAt: serverTimestamp() as any
-          };
-          transaction.set(movementRef, movement);
         }
 
         // Return purchaseId
@@ -310,9 +332,6 @@ export const purchaseService = {
       );
       const itemsSnap = await getDocs(itemsQuery);
       const items = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PurchaseItem));
-      if (new Set(items.map(item => item.productId)).size !== items.length) {
-        throw new Error('This legacy purchase contains duplicate product rows and needs reviewed reconciliation before cancellation.');
-      }
       await runTransaction(db, async (transaction) => {
         // 1. Fetch Purchase
         const purchaseRef = doc(db, PURCHASES_COLL, purchaseId);
@@ -325,49 +344,69 @@ export const purchaseService = {
           throw new Error('This purchase is already cancelled.');
         }
 
+        const itemsByProduct = new Map<string, PurchaseItem[]>();
+        for (const item of items) {
+          const group = itemsByProduct.get(item.productId) || [];
+          group.push(item);
+          itemsByProduct.set(item.productId, group);
+        }
+
         // Read and validate every product before performing any write.
         const productDocs = new Map<string, any>();
-        for (const item of items) {
-          const productRef = doc(db, PRODUCTS_COLL, item.productId);
-          if (!productDocs.has(item.productId)) productDocs.set(item.productId, await transaction.get(productRef));
-          const productDoc = productDocs.get(item.productId);
+        for (const productId of itemsByProduct.keys()) {
+          productDocs.set(productId, await transaction.get(doc(db, PRODUCTS_COLL, productId)));
+        }
+        for (const [productId, productItems] of itemsByProduct) {
+          const productDoc = productDocs.get(productId);
           if (!productDoc.exists() || productDoc.data().tenantId !== tenantId) {
-            throw new Error(`Product ${item.productName} no longer exists.`);
+            throw new Error(`Product ${productItems[0].productName} no longer exists.`);
           }
 
           const product = productDoc.data() as Product;
-          const batches = product.batches ? [...product.batches] : [];
-          const batch = batches.find(
-            b => b.batchNumber.trim().toUpperCase() === item.batchNumber.trim().toUpperCase()
-          );
-
-          if (!batch || batch.quantity < item.quantity) {
-            throw new Error(
-              `Cannot cancel purchase: ${item.quantity} units were added to batch "${item.batchNumber}" of product "${item.productName}", but only ${batch ? batch.quantity : 0} units are currently in stock. Reversing this purchase would cause negative inventory.`
-            );
+          const batches = product.batches ? product.batches.map(batch => ({ ...batch })) : [];
+          for (const item of productItems) {
+            const batch = batches.find(b => normalizedBatch(b.batchNumber) === normalizedBatch(item.batchNumber));
+            if (!batch || batch.quantity < item.quantity) {
+              throw new Error(
+                `Cannot cancel purchase: ${item.quantity} units were added to batch "${item.batchNumber}" of product "${item.productName}", but only ${batch ? batch.quantity : 0} units are currently in stock. Reversing this purchase would cause negative inventory.`
+              );
+            }
+            batch.quantity -= item.quantity;
           }
         }
 
         // Perform the reversal after all reads.
-        for (const item of items) {
-          const productRef = doc(db, PRODUCTS_COLL, item.productId);
-          const productDoc = productDocs.get(item.productId);
+        for (const [productId, productItems] of itemsByProduct) {
+          const productRef = doc(db, PRODUCTS_COLL, productId);
+          const productDoc = productDocs.get(productId);
           const product = productDoc.data() as Product;
+          let runningStock = product.stockQuantity || 0;
+          const batchesList = product.batches ? product.batches.map(batch => ({ ...batch })) : [];
 
-          const previousStock = product.stockQuantity || 0;
-          const newStock = previousStock - item.quantity;
+          for (const item of productItems) {
+            const previousStock = runningStock;
+            runningStock -= item.quantity;
+            const batch = batchesList.find(
+              candidate => normalizedBatch(candidate.batchNumber) === normalizedBatch(item.batchNumber)
+            );
+            if (batch) batch.quantity -= item.quantity;
 
-          // Update batches
-          let batchesList = product.batches ? [...product.batches] : [];
-          const batchIdx = batchesList.findIndex(
-            b => b.batchNumber.trim().toUpperCase() === item.batchNumber.trim().toUpperCase()
-          );
-
-          if (batchIdx >= 0) {
-            batchesList[batchIdx] = {
-              ...batchesList[batchIdx],
-              quantity: Math.max(0, batchesList[batchIdx].quantity - item.quantity)
-            };
+            const movementRef = doc(collection(db, MOVEMENTS_COLL));
+            transaction.set(movementRef, {
+              id: movementRef.id,
+              tenantId,
+              type: 'PURCHASE_CANCEL_REVERSE',
+              productId,
+              productName: item.productName,
+              batchNumber: normalizedBatch(item.batchNumber),
+              quantity: -item.quantity,
+              previousStock,
+              newStock: runningStock,
+              purchaseId,
+              userId: actorId,
+              reason: cancellationReason.trim() || 'Cancelled by user',
+              createdAt: serverTimestamp() as any
+            } satisfies StockMovement);
           }
 
           // Sort batches by expiry date
@@ -382,7 +421,7 @@ export const purchaseService = {
           const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
 
           const updatedProductFields: Partial<Product> = {
-            stockQuantity: newStock,
+            stockQuantity: runningStock,
             batches: batchesList,
             updatedAt: serverTimestamp()
           };
@@ -397,24 +436,6 @@ export const purchaseService = {
           }
 
           transaction.update(productRef, updatedProductFields);
-
-          // Create stock movement reversal
-          const movementRef = doc(collection(db, MOVEMENTS_COLL));
-          const movement: StockMovement = {
-            id: movementRef.id,
-            tenantId,
-            type: "PURCHASE_CANCEL_REVERSE",
-            productId: item.productId,
-            productName: item.productName,
-            batchNumber: item.batchNumber,
-            quantity: -item.quantity,
-            previousStock,
-            newStock,
-            purchaseId,
-            createdAt: serverTimestamp() as any
-          };
-          transaction.set(movementRef, movement);
-
         }
 
         transaction.update(purchaseRef, {
