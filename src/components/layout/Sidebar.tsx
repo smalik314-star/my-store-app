@@ -5,7 +5,7 @@ import {
   LayoutDashboard, 
   Package, 
   Clock,
-  ShoppingCart,
+  TriangleAlert,
   Users, 
   ReceiptText, 
   BarChart3, 
@@ -13,20 +13,17 @@ import {
   Plus,
   LogOut,
   ChevronLeft,
-  ChevronRight,
-  Stethoscope,
   X,
-  Zap,
   CreditCard,
   Truck,
   UserCog
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
-import { useToast } from '../../context/ToastContext';
 import { Button } from '../common/Button';
 import { transitions } from '../../utils/animations';
 import { Logo } from '../common/Logo';
+import { UserRole } from '../../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -35,44 +32,65 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-const menuSections = [
+interface MenuItem {
+  icon: typeof LayoutDashboard;
+  label: string;
+  path: string;
+  allowedRoles?: UserRole[];
+}
+
+const menuSections: Array<{ title: string; items: MenuItem[] }> = [
   {
-    title: 'Core',
+    title: 'Overview',
     items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', active: true },
-    ]
-  },
-  {
-    title: 'Inventory',
-    items: [
-      { icon: Package, label: 'Inventory', path: '/inventory', active: true },
-      { icon: Truck, label: 'Stock In / Purchases', path: '/purchases', active: true },
-      { icon: Clock, label: 'Expiry Alerts', path: '/expiry-alerts', active: true },
-      { icon: ShoppingCart, label: 'Low Stock', path: '/low-stock', active: true },
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
     ]
   },
   {
     title: 'Sales',
     items: [
-      { icon: Plus, label: 'New Bill', path: '/billing', active: true },
-      { icon: ReceiptText, label: 'Invoices', path: '/invoices', active: true },
-      { icon: Users, label: 'Customers', path: '/customers', active: true },
+      { icon: Plus, label: 'New Sale / Billing', path: '/billing', allowedRoles: ['owner', 'admin', 'staff'] },
+      { icon: ReceiptText, label: 'Sales Invoices', path: '/invoices' },
     ]
   },
   {
-    title: 'System',
+    title: 'Purchases',
     items: [
-      { icon: BarChart3, label: 'Reports', path: '/reports', active: true },
-      { icon: UserCog, label: 'Users', path: '/users', active: true },
-      { icon: CreditCard, label: 'Subscription', path: '/subscription', active: true },
-      { icon: Settings, label: 'Settings', path: '/settings', active: true },
+      { icon: Truck, label: 'Purchase Bills', path: '/purchases', allowedRoles: ['owner', 'admin', 'staff'] },
+    ]
+  },
+  {
+    title: 'Inventory',
+    items: [
+      { icon: Package, label: 'Products & Stock', path: '/inventory' },
+      { icon: Clock, label: 'Expiry Management', path: '/expiry-alerts' },
+      { icon: TriangleAlert, label: 'Low Stock', path: '/low-stock' },
+    ]
+  },
+  {
+    title: 'Parties',
+    items: [
+      { icon: Users, label: 'Customers', path: '/customers' },
+    ]
+  },
+  {
+    title: 'Reports',
+    items: [
+      { icon: BarChart3, label: 'Business Reports', path: '/reports' },
+    ]
+  },
+  {
+    title: 'Administration',
+    items: [
+      { icon: UserCog, label: 'Users & Roles', path: '/users', allowedRoles: ['owner', 'admin'] },
+      { icon: CreditCard, label: 'Subscription', path: '/subscription', allowedRoles: ['owner'] },
+      { icon: Settings, label: 'Settings', path: '/settings', allowedRoles: ['owner', 'admin'] },
     ]
   }
 ];
 
 export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarProps) {
-  const { logout } = useAuth();
-  const { showToast } = useToast();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const shouldReduceMotion = useReducedMotion();
@@ -82,12 +100,14 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
     navigate('/login');
   };
 
-  const handleNavClick = (path: string, isActive: boolean) => {
-    if (!isActive) {
-      showToast('This module is coming in a future update', 'info');
-      return;
-    }
+  const handleNavClick = () => {
     if (isMobile && onCloseMobile) onCloseMobile();
+  };
+
+  const isCurrentPath = (path: string) => {
+    if (path === '/dashboard') return location.pathname === path;
+    if (path === '/invoices') return location.pathname === path || location.pathname.startsWith('/invoice/');
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
   const sidebarVariants = {
@@ -160,7 +180,12 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
 
         {/* Navigation Menu */}
         <nav role="navigation" aria-label="Main Navigation" className="flex-1 py-4 overflow-y-auto min-w-[260px] custom-scrollbar space-y-4">
-          {menuSections.map((section, sectionIdx) => (
+          {menuSections.map((section, sectionIdx) => {
+            const visibleItems = section.items.filter(
+              item => !item.allowedRoles || (user?.role && item.allowedRoles.includes(user.role))
+            );
+            if (visibleItems.length === 0) return null;
+            return (
             <div key={section.title} className="space-y-1">
               {isOpen ? (
                 <div className="px-6 py-1.5 text-[10px] font-black uppercase tracking-[2px] text-white/30">
@@ -172,23 +197,20 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                 )
               )}
               <div className="space-y-0.5">
-                {section.items.map((item) => (
+                {visibleItems.map((item) => (
                   <NavLink
                     key={item.label}
-                    to={item.active ? item.path : '#'}
-                    onClick={(e) => {
-                      if (!item.active) e.preventDefault();
-                      handleNavClick(item.path, item.active);
-                    }}
+                    to={item.path}
+                    onClick={handleNavClick}
                     aria-label={item.label}
-                    className={({ isActive }) => cn(
+                    className={() => cn(
                       "flex items-center gap-3 px-6 py-3 text-sm font-medium transition-all group relative focus-visible:outline-none focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-secondary/50 focus-visible:ring-inset",
-                      isActive && item.active
+                      isCurrentPath(item.path)
                         ? "text-white" 
                         : "text-white/70 hover:bg-white/5 hover:text-white"
                     )}
                   >
-                    {location.pathname === item.path && item.active && (
+                    {isCurrentPath(item.path) && (
                       <motion.div
                         layoutId="active-nav"
                         className="absolute inset-y-1 left-2 right-2 bg-white/10 rounded-xl -z-10"
@@ -198,7 +220,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                     
                     <item.icon className={cn(
                       "h-5 w-5 shrink-0 transition-transform group-hover:scale-110",
-                      location.pathname === item.path && item.active ? "text-secondary" : "text-white/40 group-hover:text-white"
+                      isCurrentPath(item.path) ? "text-secondary" : "text-white/40 group-hover:text-white"
                     )} />
                     <AnimatePresence>
                       {isOpen && (
@@ -210,9 +232,6 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                           className="whitespace-nowrap flex items-center justify-between flex-1"
                         >
                           {item.label}
-                          {!item.active && (
-                            <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded opacity-60 uppercase font-black">Soon</span>
-                          )}
                         </motion.span>
                       )}
                     </AnimatePresence>
@@ -225,7 +244,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                 ))}
               </div>
             </div>
-          ))}
+          )})}
         </nav>
 
         {/* Sidebar Footer */}
