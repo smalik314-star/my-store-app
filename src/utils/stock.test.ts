@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProductBatch } from '../types';
-import { allocateFefo, getValidBatchQuantity, isBatchExpired } from './stock';
+import { allocateFefo, getFefoAvailableBatch, getValidBatchQuantity, isBatchExpired } from './stock';
 
 const batch = (
   batchNumber: string,
@@ -43,6 +43,14 @@ describe('batch stock safety', () => {
       expect.objectContaining({ batchNumber: 'NEAR', quantity: 3, purchaseCost: 8 }),
       expect.objectContaining({ batchNumber: 'LATER', quantity: 2, purchaseCost: 12 }),
     ]);
+  });
+
+  it('selects the nearest-expiry saleable batch for billing suggestions', () => {
+    expect(getFefoAvailableBatch([
+      batch('EXPIRED', '2026-07-22', 20),
+      batch('LATER', '2026-10-01', 5),
+      batch('NEAR', '2026-08-01', 2),
+    ], today)?.batchNumber).toBe('NEAR');
   });
 
   it('never allocates from expired stock', () => {
