@@ -76,6 +76,7 @@ Transaction and ledger collections added/refined:
 - `firebase.json` referenced Storage rules but the working source archive did not contain the rules file.
 - Print view performed no explicit application-side tenant verification.
 - Date presentation mixed US and Indian locales.
+- Production builds could fall back to the old Google AI Studio Firebase project instead of `testing-pharmaflow`.
 
 ## 5. Sections refined
 
@@ -116,6 +117,7 @@ Transaction and ledger collections added/refined:
 - Product-to-brand autofill without overwriting a manually edited brand.
 - Tenant-scoped logo and product-image paths.
 - Print-view tenant check.
+- Firebase fallback configuration aligned with the staging Firebase project and `(default)` database.
 
 ## 7. Main files changed
 
