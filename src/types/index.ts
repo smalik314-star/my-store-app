@@ -94,7 +94,12 @@ export interface Supplier {
   gstNumber?: string;
   address?: string;
   email?: string;
+  totalPurchases?: number;
+  totalPaid?: number;
+  payableBalance?: number;
+  creditBalance?: number;
   createdAt: any;
+  updatedAt?: any;
 }
 
 export interface Purchase {
@@ -116,6 +121,12 @@ export interface Purchase {
   itemsCount: number;
   notes?: string;
   status?: 'posted' | 'cancelled';
+  paidAmount?: number;
+  payableAmount?: number;
+  paymentStatus?: 'paid' | 'due' | 'partial';
+  returnAmount?: number;
+  returnCount?: number;
+  supplierLedgerTracked?: boolean;
   cancelledAt?: any;
   cancelledBy?: string;
   cancellationReason?: string;
@@ -151,7 +162,7 @@ export interface PurchaseItem {
 export interface StockMovement {
   id: string;
   tenantId: string;
-  type: "OPENING_STOCK" | "PURCHASE_IN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_RETURN_DAMAGED" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
+  type: "OPENING_STOCK" | "PURCHASE_IN" | "PURCHASE_RETURN" | "PURCHASE_DELETE_REVERSE" | "PURCHASE_CANCEL_REVERSE" | "SALE_OUT" | "SALE_RETURN" | "SALE_RETURN_DAMAGED" | "SALE_CANCEL_REVERSE" | "MANUAL_ADJUST";
   productId: string;
   productName: string;
   batchNumber: string;
@@ -276,6 +287,50 @@ export interface SaleReturnRecord {
   totalAmount: number;
   outstandingAdjusted: number;
   customerCredit: number;
+  status: 'posted';
+  createdBy: string;
+  createdAt: any;
+}
+
+export interface SupplierPaymentRecord {
+  id: string;
+  tenantId: string;
+  paymentNumber: string;
+  requestId: string;
+  supplierId: string;
+  supplierName: string;
+  purchaseId: string;
+  purchaseNumber: string;
+  amount: number;
+  paymentMethod: 'cash' | 'upi' | 'card' | 'bank';
+  notes?: string;
+  createdBy: string;
+  createdAt: any;
+}
+
+export interface PurchaseReturnLine {
+  purchaseItemId: string;
+  productId: string;
+  productName: string;
+  batchNumber: string;
+  quantity: number;
+  reason: 'expired' | 'near_expiry' | 'damaged' | 'wrong_item' | 'excess_stock' | 'rate_difference' | 'other';
+  amount: number;
+}
+
+export interface PurchaseReturnRecord {
+  id: string;
+  tenantId: string;
+  requestId: string;
+  returnNumber: string;
+  purchaseId: string;
+  purchaseNumber: string;
+  supplierId: string;
+  supplierName: string;
+  lines: PurchaseReturnLine[];
+  totalAmount: number;
+  payableAdjusted: number;
+  supplierCredit: number;
   status: 'posted';
   createdBy: string;
   createdAt: any;
