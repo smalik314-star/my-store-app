@@ -41,6 +41,19 @@ export const getValidBatchQuantity = (
   return total + Math.max(0, Number(batch.quantity) || 0);
 }, 0);
 
+export const getFefoAvailableBatch = (
+  batches: ProductBatch[] = [],
+  now: Date = new Date()
+): ProductBatch | null => {
+  return batches
+    .filter(batch => (Number(batch.quantity) || 0) > 0 && !isBatchExpired(batch.expiryDate, now))
+    .sort((left, right) => {
+      const leftDate = parseInventoryDate(left.expiryDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const rightDate = parseInventoryDate(right.expiryDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return leftDate - rightDate;
+    })[0] ?? null;
+};
+
 export const allocateFefo = (
   sourceBatches: ProductBatch[],
   requestedQuantity: number,
