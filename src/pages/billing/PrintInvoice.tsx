@@ -6,27 +6,39 @@ import { Invoice, Customer } from '../../types';
 import { InvoiceTemplate } from '../../components/billing/InvoiceTemplate';
 import { Button } from '../../components/common/Button';
 import { ArrowLeft, Printer, AlertCircle } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function PrintInvoice() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!id) return;
+      if (!id || authLoading) return;
+      if (!user?.tenantId) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
       
       try {
         const invoiceDoc = await getDoc(doc(db, 'invoices', id));
         if (invoiceDoc.exists()) {
           const invData = { ...invoiceDoc.data(), id: invoiceDoc.id } as Invoice;
+          if (invData.tenantId !== user.tenantId) {
+            setAccessDenied(true);
+            return;
+          }
           setInvoice(invData);
           
           if (invData.customerId && invData.customerId !== 'walk-in') {
             const customerDoc = await getDoc(doc(db, 'customers', invData.customerId));
-            if (customerDoc.exists()) {
+            if (customerDoc.exists() && customerDoc.data().tenantId === user.tenantId) {
               setCustomer({ ...customerDoc.data(), id: customerDoc.id } as Customer);
             }
           }
@@ -39,7 +51,7 @@ export default function PrintInvoice() {
     };
 
     fetchData();
-  }, [id]);
+  }, [id, authLoading, user?.tenantId]);
 
   useEffect(() => {
     if (!loading && invoice) {
@@ -51,7 +63,7 @@ export default function PrintInvoice() {
     }
   }, [loading, invoice]);
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -62,14 +74,17 @@ export default function PrintInvoice() {
     );
   }
 
-  if (!invoice) {
+  if (!invoice || accessDenied) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center p-8">
         <div className="text-center space-y-6 max-w-sm">
           <div className="h-20 w-20 rounded-3xl bg-danger/10 text-danger flex items-center justify-center mx-auto">
             <AlertCircle className="h-10 w-10" />
           </div>
-          <h2 className="text-2xl font-black text-text">Invoice Not Found</h2>
+          <h2 className="text-2xl font-black text-text">{accessDenied ? 'Access Denied' : 'Invoice Not Found'}</h2>
+          <p className="text-sm font-semibold text-text/50">
+            {accessDenied ? 'This invoice does not belong to your active store.' : 'The invoice may have been removed or is unavailable.'}
+          </p>
           <Button variant="primary" onClick={() => navigate('/invoices')} className="w-full">
             Back to Records
           </Button>
