@@ -74,6 +74,7 @@ export default function Billing() {
 
   // Primary POS States
   const [loading, setLoading] = useState(false);
+  const saveInProgressRef = useRef(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
@@ -565,6 +566,7 @@ export default function Billing() {
   // Save the invoice to backend database
   const handleSaveInvoice = async () => {
     if (!user?.tenantId) return;
+    if (saveInProgressRef.current) return;
 
     // Validate requirements
     if (selectedCustomer.id === 'walk-in' && paymentStatus !== 'paid') {
@@ -578,6 +580,7 @@ export default function Billing() {
       return;
     }
 
+    saveInProgressRef.current = true;
     setLoading(true);
     try {
       const prefix = settings?.invoicePrefix || 'INV';
@@ -626,6 +629,7 @@ export default function Billing() {
       console.error('Save failed:', error);
       showToast(error.message || 'Failed to process transaction', 'danger');
     } finally {
+      saveInProgressRef.current = false;
       setLoading(false);
     }
   };
