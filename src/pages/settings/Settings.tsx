@@ -42,8 +42,8 @@ import { medicineMasterService, MasterMedicine } from '../../services/medicineMa
 import { useAuth } from '../../context/AuthContext';
 
 export default function Settings() {
-  const { user } = useAuth();
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
+  const { user } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
   const { showToast } = useToast();
   
@@ -125,13 +125,13 @@ export default function Settings() {
   };
 
   const uploadLogoFile = async (file: File) => {
+    if (!user?.tenantId) {
+      showToast('Your store profile is still loading. Please try again.', 'danger');
+      return;
+    }
     setUploadingLogo(true);
     try {
-      if (!user?.tenantId) throw new Error('Tenant not found.');
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
-        throw new Error('Only JPG, PNG or WebP images up to 5 MB are allowed.');
-      }
-      const storageRef = ref(storage, `tenants/${user.tenantId}/logos/store_logo_${Date.now()}`);
+      const storageRef = ref(storage, `tenants/${user.tenantId}/logos/store-logo-${Date.now()}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       setFormData(prev => ({ ...prev, logoURL: url }));
@@ -300,21 +300,6 @@ export default function Settings() {
     }
   };
 
-  const handleLoadDemoMeds = async () => {
-    setImportingMeds(true);
-    setImportProgress(0);
-    try {
-      await medicineMasterService.loadDefaultSamples();
-      showToast('Demo medicines loaded successfully!', 'success');
-      await loadMasterCount();
-    } catch (err) {
-      console.error('Error loading demo medicines:', err);
-      showToast('Failed to load demo medicines.', 'danger');
-    } finally {
-      setImportingMeds(false);
-    }
-  };
-
   const handleCloudMasterImport = async () => {
     setImportingMeds(true);
     setImportProgress(0);
@@ -421,8 +406,8 @@ export default function Settings() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.storeName || !formData.phone || !formData.email) {
-      showToast('Please fill in all required fields', 'danger');
+    if (!formData.storeName.trim()) {
+      showToast('Store name is required', 'danger');
       return;
     }
 
@@ -433,7 +418,7 @@ export default function Settings() {
 
     setIsSaving(true);
     try {
-      await updateSettings(formData);
+      await updateSettings({ ...formData, currency: '₹' });
       showToast('Settings updated successfully', 'success');
     } catch (error) {
       showToast('Failed to save settings', 'danger');
@@ -517,7 +502,6 @@ export default function Settings() {
                 value={formData.phone}
                 onChange={handleInputChange}
                 placeholder="+91 XXXXX XXXXX"
-                required
               />
               <Input
                 label="Email Address"
@@ -526,7 +510,6 @@ export default function Settings() {
                 value={formData.email}
                 onChange={handleInputChange}
                 placeholder="store@example.com"
-                required
               />
             </div>
             <div>
@@ -647,17 +630,7 @@ export default function Settings() {
                 <p className="text-[10px] font-medium text-text/50 leading-normal">
                   IndexedDB manages storage in your local browser. It keeps searches <span className="font-bold text-primary">under 5 milliseconds</span> even with 250,000 records, offline, and with zero impact on performance.
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleLoadDemoMeds}
-                    disabled={importingMeds}
-                    className="text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 py-2.5 w-full"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    Load Demo (150)
-                  </Button>
+                <div className="grid grid-cols-1 gap-2 pt-2">
                   {masterMedicineCount > 0 && (
                     <Button
                       variant="danger"
