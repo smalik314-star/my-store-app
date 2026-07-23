@@ -11,6 +11,7 @@ import {
 import { auth, db } from '../firebase/config';
 import type { Purchase, SupplierPaymentRecord } from '../types';
 import { addMoney, roundMoney, subtractMoney } from '../utils/currency';
+import { applyPaymentToOutstanding } from '../utils/transactions';
 
 interface RecordSupplierPaymentInput {
   requestId: string;
@@ -51,9 +52,11 @@ export const supplierPaymentService = {
           ? Number(purchase.payableAmount)
           : subtractMoney(purchase.totalAmount, currentPaid)
       );
-      if (currentPayable <= 0) throw new Error('This purchase bill is already fully paid.');
-      if (amount > currentPayable) {
-        throw new Error(`Payment cannot exceed the bill payable amount of ${currentPayable}.`);
+      let newPayable: number;
+      try {
+        newPayable = applyPaymentToOutstanding(currentPayable, amount);
+      } catch (error) {
+        throw new Error(`Supplier payment failed: ${(error as Error).message} Current payable: ${currentPayable}.`);
       }
 
       const supplierRef = doc(db, 'suppliers', purchase.supplierId);
@@ -63,7 +66,6 @@ export const supplierPaymentService = {
       }
 
       const newPaid = addMoney(currentPaid, amount);
-      const newPayable = subtractMoney(currentPayable, amount);
       const paymentNumber = `PAY-${new Date().getFullYear()}-${paymentRef.id.slice(-8).toUpperCase()}`;
       const payment: Omit<SupplierPaymentRecord, 'id'> = {
         tenantId,
