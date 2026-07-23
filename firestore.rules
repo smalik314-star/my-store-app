@@ -153,12 +153,37 @@ service cloud.firestore {
     match /purchases/{purchaseId} {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
-      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']) && sameTenant()
-        && resource.data.status != 'cancelled'
-        && request.resource.data.status == 'cancelled'
-        && request.resource.data.cancelledBy == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancellationReason']);
+      allow update: if inTenant(resource.data.tenantId) && sameTenant() && resource.data.status != 'cancelled'
+        && (
+          (roleIs(['owner','admin'])
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.cancelledBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancellationReason']))
+          ||
+          (roleIs(['owner','admin','staff'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['paidAmount','payableAmount','paymentStatus'])
+            && request.resource.data.paidAmount is number
+            && request.resource.data.payableAmount is number
+            && request.resource.data.paidAmount >= resource.data.paidAmount
+            && request.resource.data.payableAmount >= 0
+            && request.resource.data.paidAmount + request.resource.data.payableAmount
+              == resource.data.totalAmount - (resource.data.returnAmount is number ? resource.data.returnAmount : 0)
+            && request.resource.data.paymentStatus in ['paid','partial']))
+          ||
+          (roleIs(['owner','admin','staff'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['returnAmount','returnCount','payableAmount','paymentStatus'])
+            && request.resource.data.returnAmount is number
+            && request.resource.data.returnAmount > (resource.data.returnAmount is number ? resource.data.returnAmount : 0)
+            && request.resource.data.returnAmount <= resource.data.totalAmount
+            && request.resource.data.returnCount is int
+            && request.resource.data.returnCount > (resource.data.returnCount is int ? resource.data.returnCount : 0)
+            && request.resource.data.payableAmount is number
+            && request.resource.data.payableAmount >= 0
+            && request.resource.data.payableAmount <= resource.data.payableAmount)
+        );
       allow delete: if false;
     }
 
@@ -193,6 +218,16 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /supplierPayments/{paymentId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0;
+      allow update, delete: if false;
+    }
+
     match /ledgerEntries/{entryId} {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
@@ -217,6 +252,29 @@ service cloud.firestore {
       allow create, update: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.invoiceId == invoiceId;
+      allow delete: if false;
+    }
+
+    match /purchaseReturns/{returnId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'posted'
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount > 0;
+      allow update, delete: if false;
+    }
+
+    match /purchaseReturnSummaries/{purchaseId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.purchaseId == purchaseId;
+      allow update: if inTenant(resource.data.tenantId)
+        && sameTenant()
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.purchaseId == purchaseId;
       allow delete: if false;
     }
 
