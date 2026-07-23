@@ -228,13 +228,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     }
   }, [debouncedBrandName]);
 
-  // Initialize master medicine default samples on load so the dropdown isn't empty initially
-  useEffect(() => {
-    medicineMasterService.loadDefaultSamples().catch(err => {
-      console.error('Error loading default samples:', err);
-    });
-  }, []);
-
   const resolveSelectedBrand = (medicineName: string, selectedBrand?: string) => {
     const directBrand = selectedBrand?.trim();
     if (directBrand) return directBrand;
@@ -253,22 +246,23 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     return medicineMasterService.resolveBuiltInBrand(medicineName);
   };
 
-  const applySelectedMedicine = (medicineName: string, selectedBrand?: string) => {
-    const resolvedBrand = resolveSelectedBrand(medicineName, selectedBrand);
-
-    setProductNameInput(medicineName);
+  const handleSelectMasterMedicine = (med: MasterMedicine) => {
+    const resolvedBrand = resolveSelectedBrand(med.name, med.brand);
+    setProductNameInput(med.name);
     setBrandNameInput(resolvedBrand);
     setFormData(prev => ({
       ...prev,
-      name: medicineName,
+      name: med.name,
       brand: resolvedBrand,
+      genericName: med.genericName || '',
+      category: med.category || 'Others',
+      manufacturer: med.manufacturer || '',
+      mrp: med.mrp || 0,
+      unit: med.unit || 'Strip',
+      purchasePrice: med.purchasePrice || 0,
+      sellingPrice: med.sellingPrice || 0,
     }));
-    setProductActiveIndex(-1);
     setShowProductDropdown(false);
-  };
-
-  const handleSelectMasterMedicine = (med: MasterMedicine) => {
-    applySelectedMedicine(med.name, med.brand);
   };
 
   useEffect(() => {
@@ -326,11 +320,32 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   }, [user?.tenantId]);
 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
-    // Medicine selection binds only the medicine identity and its resolved brand.
-    // Batch, dates, stock and pricing remain user-controlled for the new entry.
-    applySelectedMedicine(selectedProd.name, selectedProd.brand);
-    setSelectedSuggestionProduct(null);
-    setShowAutofillConfirm(false);
+    const resolvedBrand = resolveSelectedBrand(selectedProd.name, selectedProd.brand);
+    setProductNameInput(selectedProd.name);
+    setSelectedSuggestionProduct(selectedProd);
+    
+    // Instantly autofill basic metadata so the Brand and other fields are visually filled immediately!
+    setBrandNameInput(resolvedBrand);
+    setFormData(prev => ({
+      ...prev,
+      name: selectedProd.name,
+      brand: resolvedBrand,
+      genericName: selectedProd.genericName || '',
+      category: selectedProd.category || 'Others',
+      manufacturer: selectedProd.manufacturer || '',
+      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
+      unit: selectedProd.unit || 'Strip',
+      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
+      sku: selectedProd.sku || '',
+      barcode: selectedProd.barcode || '',
+      rackLocation: selectedProd.rackLocation || '',
+      description: selectedProd.description || '',
+    }));
+    if (selectedProd.imageUrl) {
+      setImagePreview(selectedProd.imageUrl);
+    }
+
+    setShowAutofillConfirm(true);
   };
 
   const applyAutofillMetadata = (selectedProd: Product) => {
@@ -590,6 +605,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       if (imageFile) {
         setIsUploading(true);
         const storageId = product?.id || `temp_${Date.now()}`;
+        if (!user?.tenantId) throw new Error('Store profile is not available');
         imageUrl = await uploadProductImage(imageFile, user.tenantId, storageId, (progress) => setUploadProgress(progress));
         setIsUploading(false);
       }
@@ -784,7 +800,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. Paracetamol 500mg"
                     autoComplete="off"
-                    autoFocus
                     required
                   />
                 </div>
@@ -820,7 +835,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                       <div>
                         <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-primary flex justify-between items-center">
                           <span>From Master Database (2.5L+ Meds)</span>
-                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Brand Auto-Fill</span>
+                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Form Auto-Fill</span>
                         </div>
                         <ul className="divide-y divide-border/30">
                           {masterSuggestions.slice(0, 10).map((med, idx) => {
@@ -932,7 +947,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     <option value="" disabled>Month</option>
                     {Array.from({ length: 12 }, (_, i) => {
                       const monthNum = String(i + 1).padStart(2, '0');
-                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-US', { month: 'short' });
+                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-IN', { month: 'short' });
                       return (
                         <option key={monthNum} value={monthNum}>
                           {monthNum} - {monthName}
@@ -974,7 +989,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     <option value="" disabled>Month</option>
                     {Array.from({ length: 12 }, (_, i) => {
                       const monthNum = String(i + 1).padStart(2, '0');
-                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-US', { month: 'short' });
+                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-IN', { month: 'short' });
                       return (
                         <option key={monthNum} value={monthNum}>
                           {monthNum} - {monthName}
