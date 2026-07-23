@@ -403,7 +403,7 @@ export default function ExpiryAlerts() {
                       <div className="flex items-center gap-2">
                         <Calendar className="h-4 w-4 text-text/20" />
                         <span className="font-bold text-sm">
-                          {toJsDate(product.expiryDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {toJsDate(product.expiryDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
                         </span>
                       </div>
                     </td>
