@@ -19,6 +19,7 @@ import type {
 } from '../types';
 import { addMoney, roundMoney, subtractMoney } from '../utils/currency';
 import { toJsDate } from '../utils/date';
+import { settleReturnAgainstOutstanding, validateReturnQuantity } from '../utils/transactions';
 
 interface PurchaseReturnRequestLine {
   purchaseItemId: string;
@@ -101,10 +102,10 @@ export const purchaseReturnService = {
 
       for (const row of prepared) {
         const previouslyReturned = Number(returnedByItem[row.item.id]) || 0;
-        if (previouslyReturned + row.quantity > row.item.quantity) {
-          throw new Error(
-            `${row.item.productName} return exceeds the purchased quantity. Purchased: ${row.item.quantity}, already returned: ${previouslyReturned}.`
-          );
+        try {
+          validateReturnQuantity(row.item.quantity, previouslyReturned, row.quantity);
+        } catch (error) {
+          throw new Error(`${row.item.productName}: ${(error as Error).message}`);
         }
         const productSnap = productSnaps.get(row.item.productId);
         if (!productSnap.exists() || productSnap.data().tenantId !== tenantId) {
@@ -131,9 +132,10 @@ export const purchaseReturnService = {
           ? Number(purchase.payableAmount)
           : subtractMoney(purchase.totalAmount, Number(purchase.paidAmount) || 0)
       );
-      const payableAdjusted = Math.min(currentPayable, totalAmount);
-      const supplierCredit = subtractMoney(totalAmount, payableAdjusted);
-      const newPayable = subtractMoney(currentPayable, payableAdjusted);
+      const settlement = settleReturnAgainstOutstanding(totalAmount, currentPayable);
+      const payableAdjusted = settlement.outstandingAdjusted;
+      const supplierCredit = settlement.creditCreated;
+      const newPayable = settlement.newOutstanding;
       const newReturnAmount = addMoney(currentReturnAmount, totalAmount);
       const returnNumber = `PRN-${new Date().getFullYear()}-${returnRef.id.slice(-8).toUpperCase()}`;
 
