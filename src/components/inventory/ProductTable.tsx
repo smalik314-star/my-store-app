@@ -193,7 +193,7 @@ export function ProductTable({
                             expiryStatus.color
                           )}>
                             <Calendar className="h-3 w-3" />
-                            {toJsDate(product.expiryDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                            {toJsDate(product.expiryDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
                           </span>
                         )}
                       </td>
@@ -201,12 +201,14 @@ export function ProductTable({
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                           <button 
                             onClick={() => onEdit(product)}
+                            aria-label={`Edit ${product.name}`}
                             className="p-2.5 hover:bg-info/10 text-text/40 hover:text-info rounded-xl transition-all"
                           >
                             <Edit2 className="h-4 w-4" />
                           </button>
                           <button 
                             onClick={() => onDelete(product)}
+                            aria-label={`Archive ${product.name}`}
                             className="p-2.5 hover:bg-danger/10 text-text/40 hover:text-danger rounded-xl transition-all"
                           >
                             <Trash2 className="h-4 w-4" />
