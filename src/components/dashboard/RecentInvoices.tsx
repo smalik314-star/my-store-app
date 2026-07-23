@@ -91,7 +91,7 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-text/60 font-medium">
-                      {toJsDate(inv.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   </td>
                   <td className="px-6 py-4">
