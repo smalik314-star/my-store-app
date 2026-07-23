@@ -95,7 +95,9 @@ export const dashboardService = {
       query(collection(db, 'invoices'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         try {
-          const invoices = snapshot.docs.map(doc => doc.data() as Invoice);
+          const invoices = snapshot.docs
+            .map(doc => doc.data() as Invoice)
+            .filter(invoice => invoice.status !== 'cancelled');
           stats.totalInvoices = invoices.length;
           
           stats.todaySales = invoices
