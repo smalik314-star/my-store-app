@@ -169,10 +169,15 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
       
       // If within our 7-day range, aggregate volume
       if (grouped[dateStr] !== undefined) {
-        if (m.type === 'PURCHASE_IN' || m.type === 'SALE_RETURN') {
-          grouped[dateStr].incoming += m.quantity;
-        } else if (m.type === 'SALE_OUT' || m.type === 'MANUAL_ADJUST' || m.type === 'PURCHASE_DELETE_REVERSE') {
-          grouped[dateStr].outgoing += m.quantity;
+        if (m.type === 'PURCHASE_IN' || m.type === 'SALE_RETURN' || m.type === 'SALE_CANCEL_REVERSE') {
+          grouped[dateStr].incoming += Math.abs(m.quantity);
+        } else if (
+          m.type === 'SALE_OUT'
+          || m.type === 'MANUAL_ADJUST'
+          || m.type === 'PURCHASE_DELETE_REVERSE'
+          || m.type === 'PURCHASE_CANCEL_REVERSE'
+        ) {
+          grouped[dateStr].outgoing += Math.abs(m.quantity);
         }
       }
     });
@@ -226,8 +231,8 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
 
       const matchesType = 
         movementTypeFilter === 'all' ||
-        (movementTypeFilter === 'in' && (m.type === 'PURCHASE_IN' || m.type === 'SALE_RETURN')) ||
-        (movementTypeFilter === 'out' && (m.type === 'SALE_OUT' || m.type === 'PURCHASE_DELETE_REVERSE')) ||
+        (movementTypeFilter === 'in' && (m.type === 'PURCHASE_IN' || m.type === 'SALE_RETURN' || m.type === 'SALE_CANCEL_REVERSE')) ||
+        (movementTypeFilter === 'out' && (m.type === 'SALE_OUT' || m.type === 'PURCHASE_DELETE_REVERSE' || m.type === 'PURCHASE_CANCEL_REVERSE')) ||
         (movementTypeFilter === 'adjust' && m.type === 'MANUAL_ADJUST');
 
       return matchesSearch && matchesType;
@@ -753,13 +758,19 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
                     typeLabel = 'SALES BILL';
                     typeBadgeVariant = 'danger';
                   } else if (m.type === 'SALE_RETURN') {
-                    typeLabel = 'BILL VOIDED';
+                    typeLabel = 'SALE RETURN';
+                    typeBadgeVariant = 'success';
+                  } else if (m.type === 'SALE_CANCEL_REVERSE') {
+                    typeLabel = 'INVOICE CANCELLED';
                     typeBadgeVariant = 'success';
                   } else if (m.type === 'MANUAL_ADJUST') {
                     typeLabel = 'ADJUST';
                     typeBadgeVariant = 'warning';
                   } else if (m.type === 'PURCHASE_DELETE_REVERSE') {
                     typeLabel = 'PURCHASE REVERSED';
+                    typeBadgeVariant = 'danger';
+                  } else if (m.type === 'PURCHASE_CANCEL_REVERSE') {
+                    typeLabel = 'PURCHASE CANCELLED';
                     typeBadgeVariant = 'danger';
                   }
 
