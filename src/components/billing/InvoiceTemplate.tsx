@@ -38,14 +38,14 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
           <div className="flex justify-center mb-2">
             <Logo className="h-12 w-12" variant="color" />
           </div>
-          <p>{settings?.address || '123 Healthcare Avenue, Mumbai'}</p>
-          <p>Tel: {settings?.phone || '+91 98765 43210'}</p>
+          {settings?.address && <p>{settings.address}</p>}
+          {settings?.phone && <p>Tel: {settings.phone}</p>}
           {settings?.gstNumber && <p>GSTIN: {settings.gstNumber}</p>}
         </div>
 
         <div className="flex justify-between mb-1">
           <span>Date:</span>
-          <span>{toJsDate(invoice.createdAt).toLocaleDateString(settings?.dateFormat === 'DD/MM/YYYY' ? 'en-IN' : 'en-US')}</span>
+          <span>{toJsDate(invoice.createdAt).toLocaleDateString('en-IN')}</span>
         </div>
         <div className="flex justify-between mb-4">
           <span>Bill No:</span>
@@ -100,7 +100,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
         </div>
 
         <div className="mt-8 text-center text-[8px] uppercase">
-          <p>{settings?.invoiceFooterText || 'Thank you for visiting!'}</p>
+          <p>{settings?.invoiceFooterText || 'Thank you for your business.'}</p>
           <p>Medicines once sold will not be returned</p>
         </div>
       </div>
@@ -125,13 +125,13 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             </div>
             <div>
               <h2 className="text-2xl font-black text-text tracking-tighter">{settings?.storeName || 'PharmaFlow'}</h2>
-              <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em]">{settings?.ownerName ? `Owned by ${settings.ownerName}` : 'Central Pharmacy Solutions'}</p>
+              {settings?.ownerName && <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em]">Owned by {settings.ownerName}</p>}
             </div>
           </div>
           <div className="space-y-1 text-xs font-bold text-text/60">
-            <p className="max-w-[250px] leading-relaxed">{settings?.address || '123 Healthcare Avenue, Medical District, Mumbai, Maharashtra - 400001'}</p>
-            <p className="flex items-center gap-2 mt-2"><Phone className="h-3 w-3" /> {settings?.phone || '+91 98765 43210'}</p>
-            <p className="flex items-center gap-2"><Mail className="h-3 w-3" /> {settings?.email || 'support@pharmaflow.com'}</p>
+            {settings?.address && <p className="max-w-[250px] leading-relaxed">{settings.address}</p>}
+            {settings?.phone && <p className="flex items-center gap-2 mt-2"><Phone className="h-3 w-3" /> {settings.phone}</p>}
+            {settings?.email && <p className="flex items-center gap-2"><Mail className="h-3 w-3" /> {settings.email}</p>}
             {settings?.gstNumber && <p className="flex items-center gap-2"><CreditCard className="h-3 w-3 text-primary" /> GSTIN: {settings.gstNumber}</p>}
           </div>
         </div>
@@ -292,7 +292,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
 
       {/* Footer */}
       <div className="p-8 bg-text text-white/40 text-center mt-auto">
-        <p className="text-[9px] font-black uppercase tracking-[0.5em]">{settings?.invoiceFooterText || 'Thank you for choosing PharmaFlow Pharmacy'}</p>
+        <p className="text-[9px] font-black uppercase tracking-[0.5em]">{settings?.invoiceFooterText || 'Thank you for your business.'}</p>
       </div>
     </div>
   );
