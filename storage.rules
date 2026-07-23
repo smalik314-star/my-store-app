@@ -1,35 +1,40 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    function signedIn() { return request.auth != null; }
-    function userDoc() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    function signedIn() {
+      return request.auth != null;
     }
-    function inTenant(tenantId) {
+
+    function userRecord() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function belongsToTenant(tenantId) {
       return signedIn()
-        && userDoc().data.status == 'active'
-        && userDoc().data.tenantId == tenantId;
+        && userRecord().status == 'active'
+        && userRecord().tenantId == tenantId;
     }
-    function canWrite(tenantId) {
-      return inTenant(tenantId) && userDoc().data.role in ['owner', 'admin', 'staff'];
-    }
-    function validImage() {
+
+    function validImageUpload() {
       return request.resource != null
         && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/(jpeg|png|webp)');
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /tenants/{tenantId}/logos/{fileName} {
+      allow read: if belongsToTenant(tenantId);
+      allow create, update: if belongsToTenant(tenantId) && validImageUpload();
+      allow delete: if belongsToTenant(tenantId);
     }
 
     match /tenants/{tenantId}/products/{fileName} {
-      allow read: if inTenant(tenantId);
-      allow create, update: if canWrite(tenantId) && validImage();
-      allow delete: if canWrite(tenantId);
+      allow read: if belongsToTenant(tenantId);
+      allow create, update: if belongsToTenant(tenantId) && validImageUpload();
+      allow delete: if belongsToTenant(tenantId);
     }
-    match /tenants/{tenantId}/logos/{fileName} {
-      allow read: if inTenant(tenantId);
-      allow create, update: if inTenant(tenantId)
-        && userDoc().data.role in ['owner', 'admin'] && validImage();
-      allow delete: if inTenant(tenantId) && userDoc().data.role in ['owner', 'admin'];
+
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
-    match /{allPaths=**} { allow read, write: if false; }
   }
 }
