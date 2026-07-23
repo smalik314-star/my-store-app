@@ -24,7 +24,7 @@ import { cn } from '../../utils/cn';
 import { invoiceService } from '../../services/invoiceService';
 import { useSettings } from '../../context/SettingsContext';
 import { useToast } from '../../context/ToastContext';
-import { formatCurrency } from '../../utils/currency';
+import { formatCurrency, roundMoney, subtractMoney } from '../../utils/currency';
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 
@@ -50,6 +50,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   // Loading/saving state
   const [loading, setLoading] = useState(false);
   const saveInProgressRef = useRef(false);
+  const invoiceRequestIdRef = useRef<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   
   // Custom metadata
@@ -178,6 +179,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   };
 
   const resetForm = () => {
+    invoiceRequestIdRef.current = null;
     setCart([{ productId: '', name: '', quantity: 1, price: 0, total: 0 }]);
     setCustomerName('');
     setCustomerPhone('');
@@ -199,13 +201,12 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
     }
 
     saveInProgressRef.current = true;
+    invoiceRequestIdRef.current ||= crypto.randomUUID();
     setLoading(true);
     try {
       const prefix = settings?.invoicePrefix || 'INV';
-      const invoiceNumber = await invoiceService.generateInvoiceNumber(user.tenantId, `${prefix}-QKB`);
-      
-      const parsedAmtReceived = Number(amountReceived) || 0;
-      const parsedAmtDue = Math.max(0, grandTotal - parsedAmtReceived);
+      const parsedAmtReceived = roundMoney(Number(amountReceived) || 0);
+      const parsedAmtDue = Math.max(0, subtractMoney(grandTotal, parsedAmtReceived));
 
       // Build invoice format compatible with main DB
       const invoiceItems: InvoiceItem[] = validItems.map(item => ({
@@ -222,7 +223,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
       const finalCustomerName = customerName.trim() || 'Walk-In Customer';
 
       const invoiceData: any = {
-        invoiceNumber,
+        requestId: invoiceRequestIdRef.current,
         customerId: 'walk-in', // Quick Bills default to Counter Walk-In
         customerName: finalCustomerName,
         items: invoiceItems,
@@ -235,14 +236,14 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
         amountReceived: parsedAmtReceived,
         outstandingAmount: parsedAmtDue,
         isQuickBill: true,
-        createdAt: Timestamp.now()
+        invoiceDate: Timestamp.now()
       };
 
-      const invoiceId = await invoiceService.saveInvoice(user.tenantId, invoiceData);
+      const saved = await invoiceService.saveInvoice(user.tenantId, invoiceData, `${prefix}-QKB`);
       
       const payload = {
-        id: invoiceId,
-        invoiceNumber,
+        id: saved!.id,
+        invoiceNumber: saved!.invoiceNumber,
         customerName: finalCustomerName,
         customerPhone: customerPhone.trim(),
         grandTotal,
@@ -260,7 +261,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
         triggerWhatsAppShare(payload);
       } else if (actionType === 'print') {
         // Trigger silent printing
-        window.open(`/invoice/${invoiceId}/print`, '_blank');
+        window.open(`/invoice/${saved!.id}/print`, '_blank');
       }
     } catch (err: any) {
       console.error('Quick Bill Save Error:', err);
