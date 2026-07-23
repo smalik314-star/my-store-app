@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, query, onSnapshot, orderBy, where, limit, Timestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { Invoice, Product, Customer } from '../../types';
+import { Invoice, Product, Customer, Purchase, SaleReturnRecord } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
@@ -9,7 +9,7 @@ import { handleFirestoreError, OperationType } from '../../utils/firestore-error
 import { 
   TrendingUp, 
   TrendingDown, 
-  DollarSign, 
+  IndianRupee, 
   ShoppingCart, 
   Percent, 
   Users, 
@@ -48,7 +48,7 @@ import { useNavigate } from 'react-router-dom';
 import { PageTransition } from '../../components/common/PageTransition';
 import { SkeletonChart, SkeletonCard } from '../../components/common/Skeleton';
 import { EmptyState } from '../../components/common/EmptyState';
-import { formatCurrency } from '../../utils/currency';
+import { formatCurrency, roundMoney } from '../../utils/currency';
 import { Logo } from '../../components/common/Logo';
 
 type DateRange = 'today' | '7days' | '30days' | 'thisMonth' | 'lastMonth' | 'custom';
@@ -59,6 +59,8 @@ export default function Reports() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [saleReturns, setSaleReturns] = useState<SaleReturnRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState<DateRange>('30days');
   const [customRange, setCustomRange] = useState<{ start: Date; end: Date }>({
@@ -116,14 +118,27 @@ export default function Reports() {
       setLoading(false);
     });
 
+    const unsubPurchases = onSnapshot(
+      query(collection(db, 'purchases'), where('tenantId', '==', user.tenantId)),
+      snapshot => setPurchases(snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Purchase))),
+      error => handleFirestoreError(error, OperationType.LIST, 'purchases')
+    );
+    const unsubReturns = onSnapshot(
+      query(collection(db, 'saleReturns'), where('tenantId', '==', user.tenantId)),
+      snapshot => setSaleReturns(snapshot.docs.map(row => ({ id: row.id, ...row.data() } as SaleReturnRecord))),
+      error => handleFirestoreError(error, OperationType.LIST, 'saleReturns')
+    );
+
     return () => {
       unsubInvoices();
       unsubProducts();
       unsubCustomers();
+      unsubPurchases();
+      unsubReturns();
     };
   }, [user?.tenantId]);
 
-  const filteredInvoices = useMemo(() => {
+  const activeWindow = useMemo(() => {
     const now = new Date();
     let start: Date;
     let end: Date = endOfDay(now);
@@ -153,13 +168,26 @@ export default function Reports() {
         start = startOfDay(subDays(now, 30));
     }
 
+    return { start, end };
+  }, [dateRange, customRange]);
+
+  const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
       if (inv.status === 'cancelled') return false;
       const date = toJsDate(inv.createdAt);
       if (!date) return false;
-      return isWithinInterval(date, { start, end });
+      return isWithinInterval(date, activeWindow);
     });
-  }, [invoices, dateRange, customRange]);
+  }, [invoices, activeWindow]);
+
+  const filteredPurchases = useMemo(() => purchases.filter(purchase => (
+    purchase.status !== 'cancelled' &&
+    isWithinInterval(toJsDate(purchase.invoiceDate || purchase.createdAt), activeWindow)
+  )), [purchases, activeWindow]);
+
+  const filteredSaleReturns = useMemo(() => saleReturns.filter(row => (
+    isWithinInterval(toJsDate(row.createdAt), activeWindow)
+  )), [saleReturns, activeWindow]);
 
   const stats = useMemo(() => {
     const productMap = new Map(products.map(p => [p.id, p]));
@@ -204,6 +232,29 @@ export default function Reports() {
       });
     });
 
+    const invoiceMap = new Map(filteredInvoices.map(invoice => [invoice.id, invoice]));
+    filteredSaleReturns.forEach(returnRecord => {
+      totalRevenue -= returnRecord.totalAmount;
+      const invoice = invoiceMap.get(returnRecord.invoiceId);
+      if (!invoice) return;
+      const gstRatio = invoice.grandTotal > 0 ? invoice.gstTotal / invoice.grandTotal : 0;
+      totalGst -= roundMoney(returnRecord.totalAmount * gstRatio);
+      if (customerPerformance[invoice.customerId]) {
+        customerPerformance[invoice.customerId].revenue -= returnRecord.totalAmount;
+      }
+      returnRecord.lines.forEach(returnLine => {
+        const sourceLine = invoice.items.find(item => item.productId === returnLine.productId);
+        if (!sourceLine) return;
+        const margin = (Number(sourceLine.price) || 0) - (Number(sourceLine.purchaseCost) || 0);
+        totalProfit -= margin * returnLine.quantity;
+        if (productPerformance[returnLine.productId]) {
+          productPerformance[returnLine.productId].quantity -= returnLine.quantity;
+          productPerformance[returnLine.productId].revenue -= returnLine.amount;
+          productPerformance[returnLine.productId].profit -= margin * returnLine.quantity;
+        }
+      });
+    });
+
     const topProducts = Object.values(productPerformance)
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
@@ -222,18 +273,19 @@ export default function Reports() {
       .slice(0, 10);
 
     return {
-      totalRevenue,
-      totalProfit,
-      totalGst,
+      totalRevenue: roundMoney(Math.max(0, totalRevenue)),
+      totalProfit: roundMoney(totalProfit),
+      totalGst: roundMoney(Math.max(0, totalGst)),
       totalSales: filteredInvoices.length,
       avgInvoiceValue: filteredInvoices.length > 0 ? totalRevenue / filteredInvoices.length : 0,
       pendingDues,
+      totalPurchases: filteredPurchases.reduce((sum, purchase) => sum + (Number(purchase.totalAmount) || 0), 0),
       topProducts,
       topProfitProducts,
       topCustomers,
       topDueCustomers
     };
-  }, [filteredInvoices, products]);
+  }, [filteredInvoices, filteredPurchases, filteredSaleReturns, products]);
 
   const salesTrendData = useMemo(() => {
     const dailyData: Record<string, { date: string; revenue: number; profit: number }> = {};
@@ -419,18 +471,16 @@ export default function Reports() {
             <StatCard 
               label="Total Revenue" 
               value={formatCurrency(stats.totalRevenue)} 
-              icon={<DollarSign className="h-5 w-5 text-primary" />}
-              trend="+12.5%" 
+              icon={<IndianRupee className="h-5 w-5 text-primary" />}
             />
             <StatCard 
-              label="Total Profit" 
+              label="Gross Profit" 
               value={formatCurrency(stats.totalProfit)} 
               icon={<TrendingUp className="h-5 w-5 text-success" />}
-              trend="+8.2%" 
             />
             <StatCard 
-              label="Sales Count" 
-              value={stats.totalSales.toString()} 
+              label="Purchases" 
+              value={formatCurrency(stats.totalPurchases)} 
               icon={<ShoppingCart className="h-5 w-5 text-purple-500" />}
             />
             <StatCard 
@@ -447,8 +497,6 @@ export default function Reports() {
               label="Pending Dues" 
               value={formatCurrency(stats.pendingDues)} 
               icon={<Users className="h-5 w-5 text-danger" />}
-              trend="-5.4%"
-              trendType="down"
             />
           </div>
 
