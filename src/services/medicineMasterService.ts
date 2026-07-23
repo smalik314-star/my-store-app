@@ -47,22 +47,9 @@ class MedicineMasterService {
         }
       };
 
-      request.onsuccess = async (event: any) => {
+      request.onsuccess = (event: any) => {
         this.db = event.target.result;
         this.initializing = null;
-        
-        // Silently seed the database on initialization if it is empty!
-        // This ensures the 150+ high-quality medicines are built-in automatically for every user.
-        try {
-          const count = await this.countMedicines();
-          if (count === 0) {
-            console.log('Master medicine database is empty. Auto-populating with built-in medicines...');
-            await this.loadDefaultSamples();
-          }
-        } catch (e) {
-          console.error('Failed to auto-seed master medicine database:', e);
-        }
-
         resolve(this.db!);
       };
 
