@@ -61,6 +61,8 @@ export default function InvoiceList() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PAID' | 'DUE' | 'PARTIAL'>('ALL');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
   const [dateFilter, setDateFilter] = useState<'ALL' | 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM'>('ALL');
+  const [customFromDate, setCustomFromDate] = useState('');
+  const [customToDate, setCustomToDate] = useState('');
   
   const [currentPage, setCurrentPage] = useState(1);
   const [lastDoc, setLastDoc] = useState<any>(null);
@@ -164,12 +166,16 @@ export default function InvoiceList() {
           matchesDate = date >= weekAgo;
         } else if (dateFilter === 'MONTH') {
           matchesDate = date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+        } else if (dateFilter === 'CUSTOM') {
+          const from = customFromDate ? new Date(`${customFromDate}T00:00:00`) : null;
+          const to = customToDate ? new Date(`${customToDate}T23:59:59`) : null;
+          matchesDate = (!from || date >= from) && (!to || date <= to);
         }
       }
 
       return matchesSearch && matchesStatus && matchesMethod && matchesDate;
     });
-  }, [invoices, searchTerm, statusFilter, methodFilter, dateFilter]);
+  }, [invoices, searchTerm, statusFilter, methodFilter, dateFilter, customFromDate, customToDate]);
 
   // Client-side pagination for the filtered results
   const paginatedInvoices = useMemo(() => {
@@ -191,6 +197,36 @@ export default function InvoiceList() {
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const exportFilteredInvoices = () => {
+    if (filteredInvoices.length === 0) {
+      showToast('No invoice records match the current filters.', 'info');
+      return;
+    }
+    const customerPhoneMap = new Map(customers.map(customer => [customer.id, customer.phone]));
+    const escapeCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const rows = filteredInvoices.map(invoice => [
+      invoice.invoiceNumber,
+      toJsDate(invoice.createdAt).toLocaleDateString('en-IN'),
+      invoice.customerName,
+      customerPhoneMap.get(invoice.customerId) || '',
+      invoice.paymentStatus,
+      invoice.paymentMethod,
+      invoice.grandTotal
+    ].map(escapeCell).join(','));
+    const csv = [
+      ['Invoice Number', 'Date', 'Customer', 'Phone', 'Status', 'Payment Method', 'Amount'].map(escapeCell).join(','),
+      ...rows
+    ].join('\n');
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `pharmaflow-sale-register-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast(`${filteredInvoices.length} invoice records exported.`, 'success');
   };
 
   if (loading) {
@@ -231,14 +267,24 @@ export default function InvoiceList() {
           </p>
         </div>
         
-        <Button 
-          variant="primary" 
-          onClick={() => navigate('/billing')}
-          leftIcon={<CreditCard className="h-5 w-5" />} 
-          className="font-black shadow-xl shadow-primary/20 h-14 px-8 rounded-2xl"
-        >
-          Generate New Bill
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={exportFilteredInvoices}
+            leftIcon={<Download className="h-4 w-4" />}
+            className="font-black h-12 px-5 rounded-xl"
+          >
+            Export Sale Register
+          </Button>
+          <Button 
+            variant="primary" 
+            onClick={() => navigate('/billing')}
+            leftIcon={<CreditCard className="h-5 w-5" />} 
+            className="font-black shadow-xl shadow-primary/20 h-12 px-6 rounded-xl"
+          >
+            Generate New Bill
+          </Button>
+        </div>
       </div>
 
       {/* Analytics Summary */}
@@ -296,7 +342,7 @@ export default function InvoiceList() {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="flex flex-wrap items-center gap-3 max-w-full">
               <div className="flex items-center gap-1 p-1 bg-background/50 rounded-2xl border border-border w-fit overflow-x-auto scrollbar-none">
-                {['ALL', 'PAID', 'DUE'].map((tab) => (
+                {['ALL', 'PAID', 'DUE', 'PARTIAL'].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => { setStatusFilter(tab as any); setCurrentPage(1); }}
@@ -344,7 +390,7 @@ export default function InvoiceList() {
 
           <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/50">
             <span className="text-[10px] font-black text-text/20 uppercase tracking-[0.2em] mr-2">Timeline:</span>
-            {['ALL', 'TODAY', 'WEEK', 'MONTH'].map((period) => (
+            {['ALL', 'TODAY', 'WEEK', 'MONTH', 'CUSTOM'].map((period) => (
               <button
                 key={period}
                 onClick={() => { setDateFilter(period as any); setCurrentPage(1); }}
@@ -358,6 +404,25 @@ export default function InvoiceList() {
                 {period}
               </button>
             ))}
+            {dateFilter === 'CUSTOM' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={customFromDate}
+                  onChange={(event) => { setCustomFromDate(event.target.value); setCurrentPage(1); }}
+                  className="h-9 rounded-xl border border-border bg-background px-3 text-[10px] font-black outline-none focus:border-primary"
+                  aria-label="Sale register from date"
+                />
+                <span className="text-[10px] font-black text-text/30">TO</span>
+                <input
+                  type="date"
+                  value={customToDate}
+                  onChange={(event) => { setCustomToDate(event.target.value); setCurrentPage(1); }}
+                  className="h-9 rounded-xl border border-border bg-background px-3 text-[10px] font-black outline-none focus:border-primary"
+                  aria-label="Sale register to date"
+                />
+              </div>
+            )}
           </div>
         </div>
 
