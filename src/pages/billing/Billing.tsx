@@ -39,10 +39,11 @@ import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
-import { formatCurrency } from '../../utils/currency';
+import { addMoney, calculateLineTax, formatCurrency, roundMoney, subtractMoney } from '../../utils/currency';
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 import { toJsDate } from '../../utils/date';
+import { getFefoAvailableBatch, getValidBatchQuantity } from '../../utils/stock';
 
 const WALK_IN_CUSTOMER: Customer = {
   id: 'walk-in',
@@ -75,6 +76,7 @@ export default function Billing() {
   // Primary POS States
   const [loading, setLoading] = useState(false);
   const saveInProgressRef = useRef(false);
+  const invoiceRequestIdRef = useRef<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
@@ -159,25 +161,6 @@ export default function Billing() {
     const unsubInvoices = onSnapshot(qInvoices, (snapshot) => {
       const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Invoice));
       setRecentInvoices(items);
-
-      // Derive top recently billed customers from invoices
-      const uniqueCustIds = new Set<string>();
-      const recentCusts: Customer[] = [];
-      
-      items.forEach(inv => {
-        if (inv.customerId !== 'walk-in' && !uniqueCustIds.has(inv.customerId)) {
-          uniqueCustIds.add(inv.customerId);
-        }
-      });
-
-      // Match against customers fetched
-      const unsubCustomersList = onSnapshot(qCustomers, (custSnap) => {
-        const allCusts = custSnap.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
-        const matched = allCusts.filter(c => uniqueCustIds.has(c.id)).slice(0, 4);
-        setRecentCustomers(matched);
-      });
-
-      return () => unsubCustomersList();
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'invoices'));
 
     return () => {
@@ -187,11 +170,20 @@ export default function Billing() {
     };
   }, [user?.tenantId]);
 
+  useEffect(() => {
+    const recentCustomerIds = new Set(
+      recentInvoices
+        .filter(invoice => invoice.customerId && invoice.customerId !== 'walk-in')
+        .map(invoice => invoice.customerId)
+    );
+    setRecentCustomers(customers.filter(customer => recentCustomerIds.has(customer.id)).slice(0, 4));
+  }, [customers, recentInvoices]);
+
   // Cart Calculations
   const totals = useMemo(() => {
-    const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-    const gstTotal = cart.reduce((acc, item) => acc + (item.gst * item.quantity), 0);
-    const grandTotal = Math.max(0, subtotal + gstTotal - discount);
+    const subtotal = addMoney(...cart.map(item => roundMoney(item.price * item.quantity)));
+    const gstTotal = addMoney(...cart.map(item => roundMoney(item.gst * item.quantity)));
+    const grandTotal = Math.max(0, subtractMoney(addMoney(subtotal, gstTotal), discount));
     
     return { subtotal, gstTotal, grandTotal };
   }, [cart, discount]);
@@ -252,16 +244,21 @@ export default function Billing() {
   const handleSaveCustomerInline = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.tenantId) return;
-    if (!newCustName || !newCustPhone) {
-      showToast('Please enter both name and phone number!', 'danger');
+    if (!newCustName.trim()) {
+      showToast('Customer name is required.', 'danger');
+      return;
+    }
+    const normalizedPhone = newCustPhone.replace(/\D/g, '');
+    if (normalizedPhone && !/^\d{10}$/.test(normalizedPhone)) {
+      showToast('Enter a valid 10-digit phone number or leave it blank.', 'danger');
       return;
     }
     
     setIsSavingCustomer(true);
     try {
       const customerId = await customerService.addCustomer(user.tenantId, {
-        name: newCustName,
-        phone: newCustPhone,
+        name: newCustName.trim(),
+        phone: normalizedPhone,
         address: 'Counter Sale',
         outstandingBalance: 0,
         totalPurchases: 0,
@@ -271,8 +268,8 @@ export default function Billing() {
       const newCust: Customer = {
         id: customerId!,
         tenantId: user.tenantId,
-        name: newCustName,
-        phone: newCustPhone,
+        name: newCustName.trim(),
+        phone: normalizedPhone,
         address: 'Counter Sale',
         outstandingBalance: 0,
         totalPurchases: 0,
@@ -325,32 +322,39 @@ export default function Billing() {
     return products.filter(p => 
       p.name.toLowerCase().includes(term) || 
       (p.genericName && p.genericName.toLowerCase().includes(term)) ||
-      (p.brand && p.brand.toLowerCase().includes(term))
-    ).slice(0, 6);
+      (p.brand && p.brand.toLowerCase().includes(term)) ||
+      (p.manufacturer && p.manufacturer.toLowerCase().includes(term)) ||
+      p.sku?.toLowerCase().includes(term) ||
+      p.barcode?.toLowerCase().includes(term)
+    ).slice(0, 8);
   };
 
   // Auto-fill row with selected product suggestion
   const handleSelectProductSuggestion = (index: number, product: Product) => {
-    if (product.stockQuantity <= 0) {
-      showToast(`${product.name} is out of stock!`, 'danger');
+    const fefoBatch = getFefoAvailableBatch(product.batches || []);
+    const validStock = product.batches?.length
+      ? getValidBatchQuantity(product.batches)
+      : product.stockQuantity;
+    if (product.stockQuantity <= 0 || validStock <= 0 || (product.batches?.length && !fefoBatch)) {
+      showToast(`${product.name} has no saleable, non-expired batch stock.`, 'danger');
       return;
     }
 
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
         const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
-        const gstAmount = (product.sellingPrice * effectiveGstRate) / 100;
+        const gstAmount = calculateLineTax({ quantity: 1, rate: product.sellingPrice, gstRate: effectiveGstRate }).tax;
         return {
           productId: product.id,
           name: product.name,
           sku: product.sku || '',
-          batchNumber: product.batchNumber || '',
-          expiryDate: product.expiryDate || null,
-          manufacturingDate: product.manufacturingDate || null,
+          batchNumber: fefoBatch?.batchNumber || product.batchNumber || '',
+          expiryDate: fefoBatch?.expiryDate || product.expiryDate || null,
+          manufacturingDate: fefoBatch?.mfgDate || product.manufacturingDate || null,
           quantity: 1,
           price: product.sellingPrice,
           gst: gstAmount,
-          total: product.sellingPrice + gstAmount
+          total: addMoney(product.sellingPrice, gstAmount)
         };
       }
       return item;
@@ -427,6 +431,7 @@ export default function Billing() {
   };
 
   const resetBill = () => {
+    invoiceRequestIdRef.current = null;
     setCart([{ ...EMPTY_BILL_ROW }]);
     setSelectedCustomer(WALK_IN_CUSTOMER);
     setCustomerSearch('');
@@ -548,14 +553,14 @@ export default function Billing() {
           
           // Use product's gst if product was resolved
           const matchedProd = products.find(p => p.id === item.productId);
-          const gstRate = matchedProd ? matchedProd.gstPercentage : 12; // default 12% if custom item name
+          const gstRate = matchedProd ? matchedProd.gstPercentage : 0;
           const effectiveGstRate = settings?.taxMode ? gstRate : 0;
-          const gstAmount = (rate * effectiveGstRate) / 100;
+          const gstAmount = calculateLineTax({ quantity: 1, rate, gstRate: effectiveGstRate }).tax;
           
           updated.quantity = qty;
           updated.price = rate;
           updated.gst = gstAmount;
-          updated.total = qty * (rate + gstAmount);
+          updated.total = calculateLineTax({ quantity: qty, rate, gstRate: effectiveGstRate }).total;
         }
         return updated;
       }
@@ -579,38 +584,57 @@ export default function Billing() {
       showToast('Please add at least one valid item from inventory autocomplete.', 'danger');
       return;
     }
+    for (const item of validItems) {
+      const product = products.find(candidate => candidate.id === item.productId);
+      if (!product) {
+        showToast(`Select ${item.name} again from inventory.`, 'danger');
+        return;
+      }
+      if (!Number.isFinite(item.price) || item.price < 0) {
+        showToast(`Enter a valid sale rate for ${item.name}.`, 'danger');
+        return;
+      }
+      if (product.mrp > 0 && item.price > product.mrp) {
+        showToast(`${item.name} sale rate cannot exceed MRP ${formatCurrency(product.mrp)}.`, 'danger');
+        return;
+      }
+    }
+    const parsedAmtReceived = roundMoney(Number(amountReceived) || 0);
+    if (paymentStatus === 'partial' && (parsedAmtReceived <= 0 || parsedAmtReceived >= totals.grandTotal)) {
+      showToast('For a partial payment, received amount must be above zero and below the bill total.', 'danger');
+      return;
+    }
 
     saveInProgressRef.current = true;
+    invoiceRequestIdRef.current ||= crypto.randomUUID();
     setLoading(true);
     try {
       const prefix = settings?.invoicePrefix || 'INV';
-      const invoiceNumber = await invoiceService.generateInvoiceNumber(user.tenantId, prefix);
-      
-      const parsedAmtReceived = Number(amountReceived) || 0;
-      const parsedAmtDue = Math.max(0, totals.grandTotal - parsedAmtReceived);
+      const parsedAmtDue = Math.max(0, subtractMoney(totals.grandTotal, parsedAmtReceived));
+      const selectedDate = new Date(`${customInvoiceDate}T12:00:00`);
 
       const invoiceData: any = {
-        invoiceNumber,
+        requestId: invoiceRequestIdRef.current,
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.name,
         items: validItems,
-        subtotal: validItems.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-        gstTotal: validItems.reduce((sum, item) => sum + (item.gst * item.quantity), 0),
-        discount,
+        subtotal: addMoney(...validItems.map(item => roundMoney(item.price * item.quantity))),
+        gstTotal: addMoney(...validItems.map(item => roundMoney(item.gst * item.quantity))),
+        discount: roundMoney(discount),
         grandTotal: totals.grandTotal,
         paymentStatus,
         paymentMethod,
         amountReceived: parsedAmtReceived,
         outstandingAmount: parsedAmtDue,
-        createdAt: customInvoiceDate ? Timestamp.fromDate(new Date(customInvoiceDate)) : Timestamp.now()
+        invoiceDate: Timestamp.fromDate(selectedDate)
       };
 
-      const invoiceId = await invoiceService.saveInvoice(user.tenantId, invoiceData);
+      const saved = await invoiceService.saveInvoice(user.tenantId, invoiceData, prefix);
       
       // Store saved invoice details for the instant WhatsApp sharing flow
       setSavedInvoice({
-        id: invoiceId,
-        invoiceNumber,
+        id: saved!.id,
+        invoiceNumber: saved!.invoiceNumber,
         customerName: selectedCustomer.name,
         customerPhone: selectedCustomer.phone,
         grandTotal: totals.grandTotal,
@@ -925,11 +949,10 @@ _Powered by PharmaFlow_`;
                       <input
                         type="tel"
                         maxLength={10}
-                        placeholder="Mobile Number (10 digits)"
+                        placeholder="Mobile Number (optional)"
                         value={newCustPhone}
                         onChange={(e) => setNewCustPhone(e.target.value)}
                         className="w-full px-4 py-2.5 rounded-xl border border-border bg-surface text-xs font-bold"
-                        required
                       />
                     </div>
                     <div className="flex justify-end gap-2">
