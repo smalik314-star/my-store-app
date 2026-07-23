@@ -15,13 +15,13 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 
 const DEFAULT_SETTINGS: StoreSettings = {
   storeName: 'PharmaFlow',
-  ownerName: 'Admin',
-  phone: '+91 98765 43210',
-  email: 'support@pharmaflow.com',
-  address: '123 Healthcare Avenue, Mumbai, Maharashtra - 400001',
-  gstNumber: '27AAAAA0000A1Z5',
+  ownerName: '',
+  phone: '',
+  email: '',
+  address: '',
+  gstNumber: '',
   logoURL: '',
-  invoiceFooterText: 'Thank you for choosing PharmaFlow Pharmacy',
+  invoiceFooterText: 'Thank you for your business.',
   currency: '₹',
   dateFormat: 'DD/MM/YYYY',
   timeFormat: '12h',
@@ -51,7 +51,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     const unsub = onSnapshot(doc(db, 'settings', user.tenantId), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as StoreSettings;
-        setSettings(data);
+        // Old records remain readable, while business identity is never
+        // invented and currency cannot drift away from INR.
+        setSettings({ ...DEFAULT_SETTINGS, ...data, currency: '₹' });
       } else {
         // Initialize with defaults if not found for this new tenant
         setSettings({ ...DEFAULT_SETTINGS });
@@ -103,6 +105,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       await setDoc(settingsRef, {
         ...settings,
         ...newSettings,
+        currency: '₹',
         tenantId: user.tenantId,
         updatedAt: serverTimestamp(),
       }, { merge: true });
