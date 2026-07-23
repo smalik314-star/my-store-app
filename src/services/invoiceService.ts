@@ -20,6 +20,8 @@ import { Invoice, Product, Customer, Tenant } from '../types';
 import { handleFirestoreError, OperationType, logFirestoreOperation } from '../utils/firestore-errors';
 import { tenantService } from './tenantService';
 import { toJsDate } from '../utils/date';
+import { allocateFefo, getValidBatchQuantity, isBatchExpired } from '../utils/stock';
+import { addMoney, calculateLineTax, roundMoney, subtractMoney } from '../utils/currency';
 
 const COLLECTION_NAME = 'invoices';
 
@@ -102,18 +104,11 @@ export const invoiceService = {
         
         // 2. Get all unique Product Docs needed for this invoice
         const productDocsMap = new Map<string, any>();
-        // Quick Bills are intentionally stock-neutral and can contain custom
-        // counter items. Do not read product documents for them: a custom or
-        // deleted product has no resource.data and a secure Firestore rule must
-        // reject that document read. Normal invoices still load and validate
-        // every product before deducting stock.
-        if (!invoiceData.isQuickBill) {
-          for (const item of invoiceData.items) {
-            if (item.productId && !productDocsMap.has(item.productId)) {
-              const productRef = doc(db, 'products', item.productId);
-              const productDoc = await transaction.get(productRef);
-              productDocsMap.set(item.productId, productDoc);
-            }
+        for (const item of invoiceData.items) {
+          if (item.productId && !productDocsMap.has(item.productId)) {
+            const productRef = doc(db, 'products', item.productId);
+            const productDoc = await transaction.get(productRef);
+            productDocsMap.set(item.productId, productDoc);
           }
         }
 
@@ -168,12 +163,13 @@ export const invoiceService = {
             const canReconcileLegacyBatch = productBatches.length === 0
               && product.stockQuantity > 0
               && Boolean(product.batchNumber?.trim())
-              && Boolean(product.expiryDate);
+              && Boolean(product.expiryDate)
+              && !isBatchExpired(product.expiryDate);
             const batchStock = canReconcileLegacyBatch
               ? product.stockQuantity
-              : productBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.quantity) || 0), 0);
+              : getValidBatchQuantity(productBatches);
             if (product.stockQuantity < required.quantity || batchStock < required.quantity) {
-              throw new Error(`Insufficient reconciled batch stock for ${required.name}. Available: ${Math.min(product.stockQuantity, batchStock)}`);
+              throw new Error(`Insufficient valid batch stock for ${required.name}. Available: ${Math.min(product.stockQuantity, batchStock)}`);
             }
           }
         } else {
@@ -197,7 +193,7 @@ export const invoiceService = {
         const invoice = {
           ...invoiceData,
           tenantId,
-          createdBy: auth.currentUser?.uid,
+          status: invoiceData.status || 'posted',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
@@ -231,44 +227,30 @@ export const invoiceService = {
               }];
             }
             
-            // Sort by expiry date ascending for FEFO
-            batchesList.sort((a, b) => {
-              const dateA = toJsDate(a.expiryDate).getTime();
-              const dateB = toJsDate(b.expiryDate).getTime();
-              return dateA - dateB;
-            });
-
-            let remainingToDeduct = item.quantity;
-            const batchDeductions: any[] = [];
-            for (let i = 0; i < batchesList.length; i++) {
-              if (remainingToDeduct <= 0) break;
-              const b = batchesList[i];
-              if (b.quantity > 0) {
-                const deduct = Math.min(b.quantity, remainingToDeduct);
-                batchDeductions.push({
-                  batchNumber: b.batchNumber,
-                  quantity: deduct,
-                  purchaseCost: Number(b.purchasePrice) || 0,
-                  salePrice: Number(b.salePrice) || Number(item.price) || 0,
-                  expiryDate: b.expiryDate ?? null
-                });
-                b.quantity -= deduct;
-                remainingToDeduct -= deduct;
-              }
-            }
-
-            if (remainingToDeduct > 0) throw new Error(`Batch stock mismatch for ${item.name}. Reconcile inventory before billing.`);
+            const allocation = allocateFefo(batchesList, item.quantity);
+            batchesList = allocation.batches;
+            const batchDeductions = allocation.deductions.map(deduction => ({
+              ...deduction,
+              salePrice: deduction.salePrice || Number(item.price) || 0,
+            }));
 
             const productGstRate = Number(product.gstPercentage) || 0;
             const authoritativePrice = Number(product.sellingPrice) || 0;
-            const lineGst = authoritativePrice * productGstRate / 100;
-            storedItems.push({ ...item, price: authoritativePrice, gst: lineGst, gstRate: productGstRate,
-              total: item.quantity * (authoritativePrice + lineGst),
-              purchaseCost: batchDeductions.reduce((sum, d) => sum + d.purchaseCost * d.quantity, 0) / item.quantity,
+            const lineTax = calculateLineTax({
+              quantity: item.quantity,
+              rate: authoritativePrice,
+              gstRate: productGstRate,
+            });
+            storedItems.push({ ...item, price: authoritativePrice,
+              gst: roundMoney(lineTax.tax / item.quantity), gstRate: productGstRate,
+              total: lineTax.total,
+              purchaseCost: roundMoney(batchDeductions.reduce((sum, d) => sum + d.purchaseCost * d.quantity, 0) / item.quantity),
               batchDeductions });
 
             // Recalculate nearest active batch
-            const activeBatches = batchesList.filter(b => b.quantity > 0);
+            const activeBatches = batchesList.filter(
+              batch => batch.quantity > 0 && !isBatchExpired(batch.expiryDate)
+            );
             const currentBatch = activeBatches.length > 0 ? activeBatches[0] : batchesList[0];
 
             const updatedFields: Product = {
@@ -296,7 +278,7 @@ export const invoiceService = {
               type: "SALE_OUT",
               productId: item.productId,
               productName: item.name,
-              batchNumber: currentBatch ? (currentBatch.batchNumber ?? 'N/A') : 'N/A',
+              batchNumber: batchDeductions.map(deduction => deduction.batchNumber).join(', ') || 'N/A',
               quantity: -item.quantity,
               previousStock,
               newStock,
@@ -325,14 +307,26 @@ export const invoiceService = {
         }
 
         if (invoiceData.isQuickBill) storedItems.push(...invoiceData.items);
-        const authoritativeSubtotal = storedItems.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
-        const authoritativeGst = storedItems.reduce((sum, item) => sum + Number(item.gst) * Number(item.quantity), 0);
-        const safeDiscount = Math.min(Math.max(0, Number(invoiceData.discount) || 0), authoritativeSubtotal + authoritativeGst);
-        const authoritativeTotal = Math.round((authoritativeSubtotal + authoritativeGst - safeDiscount) * 100) / 100;
+        const authoritativeSubtotal = addMoney(
+          ...storedItems.map(item => Number(item.price) * Number(item.quantity))
+        );
+        const authoritativeGst = addMoney(
+          ...storedItems.map(item => Number(item.gst) * Number(item.quantity))
+        );
+        const safeDiscount = roundMoney(
+          Math.min(Math.max(0, Number(invoiceData.discount) || 0), addMoney(authoritativeSubtotal, authoritativeGst))
+        );
+        const authoritativeTotal = subtractMoney(
+          addMoney(authoritativeSubtotal, authoritativeGst),
+          safeDiscount
+        );
         const amountReceived = invoiceData.paymentStatus === 'paid' ? authoritativeTotal :
-          invoiceData.paymentStatus === 'partial' ? Math.min(authoritativeTotal, Math.max(0, Number(invoiceData.amountReceived) || 0)) : 0;
+          invoiceData.paymentStatus === 'partial'
+            ? roundMoney(Math.min(authoritativeTotal, Math.max(0, Number(invoiceData.amountReceived) || 0)))
+            : 0;
         Object.assign(invoice, { items: storedItems, subtotal: authoritativeSubtotal, gstTotal: authoritativeGst,
-          discount: safeDiscount, grandTotal: authoritativeTotal, amountReceived, outstandingAmount: authoritativeTotal - amountReceived });
+          discount: safeDiscount, grandTotal: authoritativeTotal, amountReceived,
+          outstandingAmount: subtractMoney(authoritativeTotal, amountReceived) });
         transaction.set(invoiceRef, sanitizeForFirestore(invoice));
 
         // 4. Update Customer Stats
@@ -411,10 +405,12 @@ export const invoiceService = {
     }
   },
 
-  async deleteInvoice(tenantId: string, invoiceId: string) {
+  async cancelInvoice(tenantId: string, invoiceId: string, cancellationReason: string = 'Cancelled by user') {
     if (!tenantId) throw new Error('Tenant ID required');
+    const actorId = auth.currentUser?.uid;
+    if (!actorId) throw new Error('You must be signed in to cancel an invoice.');
 
-    logFirestoreOperation(OperationType.DELETE, `${COLLECTION_NAME}/${invoiceId}`, 'pending');
+    logFirestoreOperation(OperationType.UPDATE, `${COLLECTION_NAME}/${invoiceId}`, 'pending');
     try {
       await runTransaction(db, async (transaction) => {
         const invoiceRef = doc(db, COLLECTION_NAME, invoiceId);
@@ -425,6 +421,9 @@ export const invoiceService = {
         }
 
         const invoice = invoiceDoc.data() as Invoice;
+        if (invoice.status === 'cancelled') {
+          throw new Error(`Invoice ${invoice.invoiceNumber} is already cancelled.`);
+        }
         // Read every dependent document before the first write.
         const productDocs = new Map<string, any>();
         if (!invoice.isQuickBill) {
@@ -477,7 +476,7 @@ export const invoiceService = {
             updatedAt: serverTimestamp()
           }));
           const movementRef = doc(collection(db, 'stockMovements'));
-          transaction.set(movementRef, sanitizeForFirestore({ id: movementRef.id, tenantId, type: 'SALE_RETURN',
+          transaction.set(movementRef, sanitizeForFirestore({ id: movementRef.id, tenantId, type: 'SALE_CANCEL_REVERSE',
             productId: item.productId, productName: item.name, batchNumber: item.batchDeductions.map(d => d.batchNumber).join(','),
             quantity: restoredQuantity, previousStock, newStock: previousStock + restoredQuantity,
             invoiceId, createdAt: serverTimestamp() }));
@@ -514,17 +513,24 @@ export const invoiceService = {
 
         const logRef = doc(collection(db, 'tenants', tenantId, 'logs'));
         transaction.set(logRef, sanitizeForFirestore({
-          action: 'DELETE_INVOICE',
+          action: 'CANCEL_INVOICE',
           targetId: invoiceId,
-          userId: auth.currentUser?.uid || null,
+          userId: actorId,
+          reason: cancellationReason.trim() || 'Cancelled by user',
           timestamp: serverTimestamp(),
         }));
 
-        transaction.delete(invoiceRef);
+        transaction.update(invoiceRef, sanitizeForFirestore({
+          status: 'cancelled',
+          cancelledAt: serverTimestamp(),
+          cancelledBy: actorId,
+          cancellationReason: cancellationReason.trim() || 'Cancelled by user',
+          updatedAt: serverTimestamp(),
+        }));
       });
-      logFirestoreOperation(OperationType.DELETE, `${COLLECTION_NAME}/${invoiceId}`, 'success');
+      logFirestoreOperation(OperationType.UPDATE, `${COLLECTION_NAME}/${invoiceId}`, 'success');
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${COLLECTION_NAME}/${invoiceId}`);
+      handleFirestoreError(error, OperationType.UPDATE, `${COLLECTION_NAME}/${invoiceId}`);
     }
   }
 };
