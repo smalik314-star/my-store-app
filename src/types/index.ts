@@ -324,6 +324,23 @@ export interface SaleReturnRecord {
   createdAt: any;
 }
 
+export interface LedgerEntry {
+  id: string;
+  tenantId: string;
+  partyType: 'customer' | 'supplier';
+  partyId: string;
+  partyName: string;
+  voucherType: string;
+  voucherId: string;
+  voucherNumber: string;
+  referenceId?: string;
+  referenceNumber?: string;
+  debit: number;
+  credit: number;
+  createdBy: string;
+  createdAt: any;
+}
+
 export interface SupplierPaymentRecord {
   id: string;
   tenantId: string;

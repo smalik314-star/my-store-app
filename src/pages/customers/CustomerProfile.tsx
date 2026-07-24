@@ -1,32 +1,40 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { doc, onSnapshot, collection, query, where, orderBy } from 'firebase/firestore';
-import { db } from '../../firebase/config';
-import { Customer, Invoice } from '../../types';
-import { Card } from '../../components/common/Card';
-import { Button } from '../../components/common/Button';
-import { Badge } from '../../components/common/Badge';
-import { 
-  ArrowLeft, 
-  Phone, 
-  Mail, 
-  MapPin, 
-  CreditCard, 
-  Calendar,
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import {
+  ArrowLeft,
+  CreditCard,
+  ExternalLink,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  Receipt,
+  RefreshCw,
   ShoppingBag,
   TrendingUp,
-  Receipt,
-  MoreVertical,
-  ExternalLink,
-  Plus,
-  Edit
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import { Badge } from '../../components/common/Badge';
+import { Button } from '../../components/common/Button';
+import { Card } from '../../components/common/Card';
+import { EmptyState } from '../../components/common/EmptyState';
+import { PageTransition } from '../../components/common/PageTransition';
+import CustomerForm from '../../components/customers/CustomerForm';
+import { useAuth } from '../../context/AuthContext';
+import { db } from '../../firebase/config';
+import type { Customer, Invoice, LedgerEntry } from '../../types';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
-import CustomerForm from '../../components/customers/CustomerForm';
-import { useAuth } from '../../context/AuthContext';
+import { buildRunningLedger } from '../../utils/ledger';
+
+const voucherLabel = (type: string) => ({
+  sale: 'Sale invoice',
+  sale_return: 'Sale return',
+  receipt: 'Receipt',
+  sale_cancel: 'Invoice cancellation',
+}[type] || type.replaceAll('_', ' '));
 
 export default function CustomerProfile() {
   const { user } = useAuth();
@@ -34,320 +42,367 @@ export default function CustomerProfile() {
   const navigate = useNavigate();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!id || !user?.tenantId) return;
-
-    // Fetch Customer
-    const unsubCustomer = onSnapshot(doc(db, 'customers', id), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.tenantId === user.tenantId) {
-          setCustomer({ ...data, id: docSnap.id } as Customer);
-        } else {
-          navigate('/customers');
-        }
-      }
+    setLoading(true);
+    setLoadError('');
+    let customerReady = false;
+    let invoicesReady = false;
+    let ledgerReady = false;
+    const finishLoading = () => {
+      if (customerReady && invoicesReady && ledgerReady) setLoading(false);
+    };
+    const fail = (error: Error) => {
+      setLoadError(error.message || 'Customer records could not be loaded.');
       setLoading(false);
-    });
+    };
 
-    // Fetch Purchase History (Invoices)
-    const q = query(
-      collection(db, 'invoices'), 
-      where('tenantId', '==', user.tenantId),
-      where('customerId', '==', id)
+    const unsubCustomer = onSnapshot(
+      doc(db, 'customers', id),
+      snapshot => {
+        customerReady = true;
+        if (!snapshot.exists() || snapshot.data().tenantId !== user.tenantId) {
+          setCustomer(null);
+        } else {
+          setCustomer({ id: snapshot.id, ...snapshot.data() } as Customer);
+        }
+        finishLoading();
+      },
+      fail
     );
-    
-    const unsubInvoices = onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id
-      } as Invoice));
-      
-      // Client-side sort by createdAt desc
-      items.sort((a, b) => {
-        const dateA = toJsDate(a.createdAt);
-        const dateB = toJsDate(b.createdAt);
-        return dateB.getTime() - dateA.getTime();
-      });
-      
-      setInvoices(items);
-    });
+
+    const unsubInvoices = onSnapshot(
+      query(
+        collection(db, 'invoices'),
+        where('tenantId', '==', user.tenantId),
+        where('customerId', '==', id)
+      ),
+      snapshot => {
+        invoicesReady = true;
+        const rows = snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Invoice));
+        rows.sort((a, b) => toJsDate(b.createdAt).getTime() - toJsDate(a.createdAt).getTime());
+        setInvoices(rows);
+        finishLoading();
+      },
+      fail
+    );
+
+    const unsubLedger = onSnapshot(
+      query(
+        collection(db, 'ledgerEntries'),
+        where('tenantId', '==', user.tenantId),
+        where('partyId', '==', id)
+      ),
+      snapshot => {
+        ledgerReady = true;
+        setLedgerEntries(
+          snapshot.docs
+            .map(row => ({ id: row.id, ...row.data() } as LedgerEntry))
+            .filter(row => row.partyType === 'customer')
+        );
+        finishLoading();
+      },
+      fail
+    );
 
     return () => {
       unsubCustomer();
       unsubInvoices();
+      unsubLedger();
     };
-  }, [id]);
+  }, [id, user?.tenantId, reloadKey]);
 
-  const stats = useMemo(() => {
-    if (!customer) return null;
-    return {
-      totalPurchases: customer.totalPurchases,
-      totalPaid: customer.totalPaid,
-      outstanding: customer.outstandingBalance,
-      invoiceCount: invoices.length,
-      lastPurchase: invoices[0]?.createdAt ? toJsDate(invoices[0].createdAt) : null
-    };
-  }, [customer, invoices]);
+  const ledger = useMemo(() => buildRunningLedger(ledgerEntries).reverse(), [ledgerEntries]);
+  const stats = useMemo(() => ({
+    totalPurchases: Number(customer?.totalPurchases) || 0,
+    totalPaid: Number(customer?.totalPaid) || 0,
+    outstanding: Number(customer?.outstandingBalance) || 0,
+    credit: Number(customer?.creditBalance) || 0,
+  }), [customer]);
 
   if (loading) {
     return (
-      <div className="p-8 flex flex-col gap-6 animate-pulse">
-        <div className="h-8 w-32 bg-border rounded-lg" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="h-64 bg-border rounded-3xl" />
-          <div className="md:col-span-2 h-64 bg-border rounded-3xl" />
+      <div className="mx-auto max-w-[1500px] animate-pulse space-y-5 p-4 md:p-8">
+        <div className="h-12 w-52 rounded-xl bg-border" />
+        <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+          <div className="h-80 rounded-2xl bg-border" />
+          <div className="h-80 rounded-2xl bg-border" />
         </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-3xl p-4 md:p-8">
+        <Card className="p-8 text-center">
+          <h2 className="text-xl font-bold text-danger">Customer records could not be loaded</h2>
+          <p className="mt-2 text-sm text-text/60">{loadError}</p>
+          <Button className="mt-5" onClick={() => setReloadKey(value => value + 1)}>
+            <RefreshCw className="h-4 w-4" /> Retry
+          </Button>
+        </Card>
       </div>
     );
   }
 
   if (!customer) {
     return (
-      <div className="p-8 text-center">
-        <h2 className="text-2xl font-black text-text">Customer Not Found</h2>
-        <Button variant="primary" onClick={() => navigate('/customers')} className="mt-4">
-          Back to CRM
-        </Button>
+      <div className="mx-auto max-w-3xl p-4 md:p-8">
+        <EmptyState
+          icon={<Receipt className="h-12 w-12" />}
+          title="Customer not found"
+          description="The customer is missing or does not belong to your store."
+          action={<Button onClick={() => navigate('/customers')}>Back to Customers</Button>}
+        />
       </div>
     );
   }
 
   return (
-    <div className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => navigate('/customers')}
-            className="h-12 w-12 rounded-2xl bg-surface border border-border flex items-center justify-center hover:bg-background transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5 text-text/40" />
-          </button>
-          <div>
-            <h1 className="text-3xl font-black text-text tracking-tight flex items-center gap-3">
-              {customer.name}
-              {customer.outstandingBalance > 0 && (
-                <Badge variant="warning" className="text-[10px] py-1">UNPAID DUES</Badge>
-              )}
-            </h1>
-            <p className="text-[10px] font-black text-text/30 uppercase tracking-[0.2em] mt-1">
-              Registered on {customer.createdAt ? toJsDate(customer.createdAt).toLocaleDateString() : 'N/A'}
-            </p>
+    <PageTransition>
+      <div className="mx-auto max-w-[1500px] space-y-4 p-4 md:space-y-6 md:p-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate('/customers')}
+              aria-label="Back to customers"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-2xl font-bold md:text-3xl">{customer.name}</h1>
+                {stats.outstanding > 0 && <Badge variant="warning">Unpaid dues</Badge>}
+                {stats.credit > 0 && <Badge variant="success">Credit available</Badge>}
+              </div>
+              <p className="mt-1 text-xs text-text/50">
+                Customer since {customer.createdAt ? toJsDate(customer.createdAt).toLocaleDateString('en-IN') : '—'}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <Button variant="outline" onClick={() => setShowForm(true)}>Edit Profile</Button>
+            <Button onClick={() => navigate('/billing')}>
+              <Plus className="h-4 w-4" /> New Sale
+            </Button>
+            {stats.outstanding > 0 && (
+              <Button className="col-span-2" variant="secondary" onClick={() => navigate('/receipts')}>
+                <Receipt className="h-4 w-4" /> Record Receipt
+              </Button>
+            )}
           </div>
         </div>
-        
-        <div className="flex items-center gap-3">
-          <Button 
-            variant="outline" 
-            className="font-bold border-border bg-surface"
-            onClick={() => setShowForm(true)}
-          >
-            Edit Profile
-          </Button>
-          <Button 
-            variant="primary" 
-            leftIcon={<Plus className="h-4 w-4" />} 
-            className="font-black shadow-lg shadow-primary/20"
-            onClick={() => navigate(`/invoices?customerId=${customer.id}`)}
-          >
-            Create Invoice
-          </Button>
-        </div>
-      </div>
 
-      <AnimatePresence>
-        {showForm && (
-          <CustomerForm 
-            onClose={() => setShowForm(false)} 
-            editingCustomer={customer}
-          />
-        )}
-      </AnimatePresence>
+        <AnimatePresence>
+          {showForm && <CustomerForm onClose={() => setShowForm(false)} editingCustomer={customer} />}
+        </AnimatePresence>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Profile Card */}
-        <div className="space-y-6">
-          <Card className="p-0 overflow-hidden border-border bg-surface">
-            <div className="p-8 bg-primary/5 border-b border-border text-center">
-              <div className="h-24 w-24 rounded-[2rem] bg-primary/10 border-4 border-surface shadow-xl flex items-center justify-center text-primary font-black text-3xl mx-auto mb-4">
+        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <Card className="overflow-hidden">
+            <div className="border-b border-border bg-primary/5 p-5 text-center">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
                 {customer.name.charAt(0).toUpperCase()}
               </div>
-              <h2 className="text-xl font-black text-text">{customer.name}</h2>
-              <p className="text-[10px] font-black text-text/40 uppercase tracking-widest mt-1">Pharmacy Client</p>
+              <h2 className="mt-3 font-bold">{customer.name}</h2>
             </div>
-            
-            <div className="p-8 space-y-6">
-              <div className="flex items-center gap-4 group">
-                <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center group-hover:border-primary/30 transition-colors">
-                  <Phone className="h-4 w-4 text-text/30 group-hover:text-primary transition-colors" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Phone</span>
-                  <a href={`tel:${customer.phone}`} className="text-sm font-black text-text hover:text-primary transition-colors">{customer.phone}</a>
-                </div>
-              </div>
-
+            <div className="space-y-4 p-5 text-sm">
+              <a href={`tel:${customer.phone}`} className="flex min-h-11 items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <Phone className="h-4 w-4 text-primary" />
+                <span>{customer.phone || 'No phone recorded'}</span>
+              </a>
               {customer.email && (
-                <div className="flex items-center gap-4 group">
-                  <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center group-hover:border-primary/30 transition-colors">
-                    <Mail className="h-4 w-4 text-text/30 group-hover:text-primary transition-colors" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Email</span>
-                    <span className="text-sm font-black text-text truncate max-w-[200px]">{customer.email}</span>
-                  </div>
-                </div>
+                <a href={`mailto:${customer.email}`} className="flex min-h-11 min-w-0 items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                  <Mail className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="truncate">{customer.email}</span>
+                </a>
               )}
-
-              <div className="flex items-start gap-4 group">
-                <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center group-hover:border-primary/30 transition-colors mt-1">
-                  <MapPin className="h-4 w-4 text-text/30 group-hover:text-primary transition-colors" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">Address</span>
-                  <span className="text-sm font-bold text-text leading-relaxed">{customer.address}</span>
-                </div>
+              <div className="flex items-start gap-3">
+                <MapPin className="mt-1 h-4 w-4 shrink-0 text-primary" />
+                <span>{customer.address || 'No address recorded'}</span>
               </div>
-
               {customer.gstNumber && (
-                <div className="flex items-center gap-4 group">
-                  <div className="h-10 w-10 rounded-xl bg-background border border-border flex items-center justify-center group-hover:border-primary/30 transition-colors">
-                    <CreditCard className="h-4 w-4 text-text/30 group-hover:text-primary transition-colors" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">GST Number</span>
-                    <span className="text-sm font-black text-text uppercase tracking-widest">{customer.gstNumber}</span>
-                  </div>
+                <div className="flex items-center gap-3">
+                  <CreditCard className="h-4 w-4 text-primary" />
+                  <span className="font-mono">{customer.gstNumber}</span>
                 </div>
               )}
             </div>
           </Card>
-        </div>
 
-        {/* Financials & History */}
-        <div className="lg:col-span-2 space-y-8">
-          {/* Financial Summary */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="p-6 border-border/50 bg-background/30">
-              <div className="flex items-center justify-between mb-4">
-                <ShoppingBag className="h-5 w-5 text-text/20" />
-                <Badge variant="neutral" className="text-[8px] font-black">LIFETIME</Badge>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <Card className="p-4">
+                <ShoppingBag className="h-5 w-5 text-primary" />
+                <div className="mt-3 text-xs text-text/50">Lifetime sales</div>
+                <div className="mt-1 text-lg font-bold">{formatCurrency(stats.totalPurchases)}</div>
+              </Card>
+              <Card className="p-4">
+                <TrendingUp className="h-5 w-5 text-success" />
+                <div className="mt-3 text-xs text-text/50">Total received</div>
+                <div className="mt-1 text-lg font-bold text-success">{formatCurrency(stats.totalPaid)}</div>
+              </Card>
+              <Card className={cn('p-4', stats.outstanding > 0 && 'border-warning/30 bg-warning/5')}>
+                <Receipt className="h-5 w-5 text-warning" />
+                <div className="mt-3 text-xs text-text/50">Receivable</div>
+                <div className="mt-1 text-lg font-bold">{formatCurrency(stats.outstanding)}</div>
+              </Card>
+              <Card className="p-4">
+                <CreditCard className="h-5 w-5 text-secondary" />
+                <div className="mt-3 text-xs text-text/50">Customer credit</div>
+                <div className="mt-1 text-lg font-bold">{formatCurrency(stats.credit)}</div>
+              </Card>
+            </div>
+
+            <Card className="overflow-hidden">
+              <div className="flex items-center justify-between border-b border-border p-4">
+                <div>
+                  <h2 className="font-bold">Invoices</h2>
+                  <p className="mt-1 text-xs text-text/50">{invoices.length} linked transaction(s)</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => navigate('/invoices')}>View All</Button>
               </div>
-              <span className="text-[10px] font-black text-text/40 uppercase tracking-widest block mb-1">Total Purchases</span>
-              <span className="text-2xl font-black text-text">{formatCurrency(stats?.totalPurchases || 0)}</span>
+              {invoices.length === 0 ? (
+                <EmptyState icon={<Receipt className="h-10 w-10" />} title="No invoices" description="This customer has no linked invoices yet." />
+              ) : (
+                <>
+                  <div className="divide-y divide-border md:hidden">
+                    {invoices.slice(0, 20).map(invoice => (
+                      <button
+                        key={invoice.id}
+                        type="button"
+                        onClick={() => navigate(`/invoice/${invoice.id}`)}
+                        className="w-full p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+                      >
+                        <div className="flex justify-between gap-3">
+                          <span className="font-mono font-bold text-primary">{invoice.invoiceNumber}</span>
+                          <span className="font-bold">{formatCurrency(invoice.grandTotal)}</span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-xs text-text/50">
+                          <span>{toJsDate(invoice.createdAt).toLocaleDateString('en-IN')}</span>
+                          <Badge variant={invoice.status === 'cancelled' ? 'danger' : invoice.paymentStatus === 'paid' ? 'success' : 'warning'}>
+                            {invoice.status === 'cancelled' ? 'Cancelled' : invoice.paymentStatus}
+                          </Badge>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full min-w-[700px] text-sm">
+                      <thead className="bg-background text-xs uppercase text-text/50">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Invoice</th>
+                          <th className="px-4 py-3 text-left">Date</th>
+                          <th className="px-4 py-3 text-right">Amount</th>
+                          <th className="px-4 py-3 text-right">Outstanding</th>
+                          <th className="px-4 py-3 text-left">Status</th>
+                          <th className="px-4 py-3 text-right">View</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {invoices.slice(0, 30).map(invoice => (
+                          <tr key={invoice.id}>
+                            <td className="px-4 py-3 font-mono font-bold text-primary">{invoice.invoiceNumber}</td>
+                            <td className="px-4 py-3">{toJsDate(invoice.createdAt).toLocaleDateString('en-IN')}</td>
+                            <td className="px-4 py-3 text-right font-bold">{formatCurrency(invoice.grandTotal)}</td>
+                            <td className="px-4 py-3 text-right">{formatCurrency(invoice.outstandingAmount || 0)}</td>
+                            <td className="px-4 py-3">
+                              <Badge variant={invoice.status === 'cancelled' ? 'danger' : invoice.paymentStatus === 'paid' ? 'success' : 'warning'}>
+                                {invoice.status === 'cancelled' ? 'Cancelled' : invoice.paymentStatus}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/invoice/${invoice.id}`)}
+                                aria-label={`View invoice ${invoice.invoiceNumber}`}
+                                className="rounded-lg p-2 hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </Card>
 
-            <Card className="p-6 border-success/20 bg-success/5">
-              <div className="flex items-center justify-between mb-4">
-                <TrendingUp className="h-5 w-5 text-success/40" />
-                <Badge variant="success" className="text-[8px] font-black">PAID</Badge>
+            <Card className="overflow-hidden">
+              <div className="border-b border-border p-4">
+                <h2 className="font-bold">Customer Ledger</h2>
+                <p className="mt-1 text-xs text-text/50">Debit increases receivable; credit reduces it or creates customer credit.</p>
               </div>
-              <span className="text-[10px] font-black text-success/40 uppercase tracking-widest block mb-1">Total Paid</span>
-              <span className="text-2xl font-black text-success">{formatCurrency(stats?.totalPaid || 0)}</span>
-            </Card>
-
-            <Card className={cn(
-              "p-6 border-warning/20 transition-all",
-              (stats?.outstanding || 0) > 0 ? "bg-warning/10 border-warning/30" : "bg-background/30"
-            )}>
-              <div className="flex items-center justify-between mb-4">
-                <Receipt className="h-5 w-5 text-warning/40" />
-                <Badge variant="warning" className="text-[8px] font-black">RECEIVABLE</Badge>
-              </div>
-              <span className="text-[10px] font-black text-warning/60 uppercase tracking-widest block mb-1">Outstanding Balance</span>
-              <span className={cn(
-                "text-2xl font-black",
-                (stats?.outstanding || 0) > 0 ? "text-warning" : "text-text"
-              )}>
-                {formatCurrency(stats?.outstanding || 0)}
-              </span>
+              {ledger.length === 0 ? (
+                <EmptyState
+                  icon={<CreditCard className="h-10 w-10" />}
+                  title="No linked ledger entries"
+                  description="New invoices, receipts and returns will create an auditable ledger. Existing records are not rewritten automatically."
+                />
+              ) : (
+                <>
+                  <div className="divide-y divide-border md:hidden">
+                    {ledger.slice(0, 30).map(row => (
+                      <div key={row.id} className="p-4">
+                        <div className="flex justify-between gap-3">
+                          <div>
+                            <div className="font-semibold capitalize">{voucherLabel(row.voucherType)}</div>
+                            <div className="mt-1 font-mono text-xs text-primary">{row.voucherNumber}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold">{formatCurrency(row.runningBalance)}</div>
+                            <div className="text-xs text-text/45">Running balance</div>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex justify-between text-xs text-text/55">
+                          <span>{toJsDate(row.createdAt).toLocaleDateString('en-IN')}</span>
+                          <span>Dr {formatCurrency(row.debit)} · Cr {formatCurrency(row.credit)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="w-full min-w-[760px] text-sm">
+                      <thead className="bg-background text-xs uppercase text-text/50">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Date</th>
+                          <th className="px-4 py-3 text-left">Particulars</th>
+                          <th className="px-4 py-3 text-left">Voucher</th>
+                          <th className="px-4 py-3 text-right">Debit</th>
+                          <th className="px-4 py-3 text-right">Credit</th>
+                          <th className="px-4 py-3 text-right">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {ledger.slice(0, 50).map(row => (
+                          <tr key={row.id}>
+                            <td className="px-4 py-3">{toJsDate(row.createdAt).toLocaleDateString('en-IN')}</td>
+                            <td className="px-4 py-3 font-semibold capitalize">{voucherLabel(row.voucherType)}</td>
+                            <td className="px-4 py-3 font-mono text-primary">{row.voucherNumber}</td>
+                            <td className="px-4 py-3 text-right">{formatCurrency(row.debit)}</td>
+                            <td className="px-4 py-3 text-right">{formatCurrency(row.credit)}</td>
+                            <td className="px-4 py-3 text-right font-bold">{formatCurrency(row.runningBalance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </Card>
           </div>
-
-          {/* History Table */}
-          <Card className="overflow-hidden border-border bg-surface">
-            <div className="p-6 border-b border-border bg-background/30 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-black text-text uppercase tracking-widest">Purchase History</h3>
-                <p className="text-[8px] font-bold text-text/30 uppercase mt-1">Transaction logs & invoice status</p>
-              </div>
-              <Button variant="outline" size="sm" className="font-black text-[10px] uppercase h-10 px-6">
-                View All Invoices
-              </Button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-background/20 border-b border-border">
-                    <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest">Invoice</th>
-                    <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest">Date</th>
-                    <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-center">Amount</th>
-                    <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest">Status</th>
-                    <th className="px-6 py-5 text-[10px] font-black text-text/40 uppercase tracking-widest text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {invoices.map((invoice) => (
-                    <tr key={invoice.id} className="group hover:bg-background/30 transition-all">
-                      <td className="px-6 py-5">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-black text-text uppercase group-hover:text-primary transition-colors">
-                            #{invoice.invoiceNumber}
-                          </span>
-                          <span className="text-[8px] font-bold text-text/30 uppercase tracking-widest">
-                            {invoice.items.length} items included
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-bold text-text/60">
-                            {toJsDate(invoice.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                          </span>
-                          <span className="text-[8px] font-bold text-text/20 uppercase">
-                            {toJsDate(invoice.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <span className="text-sm font-black text-text">{formatCurrency(invoice.grandTotal)}</span>
-                      </td>
-                      <td className="px-6 py-5">
-                        <Badge 
-                          variant={invoice.paymentStatus === 'paid' ? 'success' : invoice.paymentStatus === 'due' ? 'warning' : 'danger'}
-                          className="font-black text-[9px]"
-                        >
-                          {invoice.paymentStatus.toUpperCase()}
-                        </Badge>
-                      </td>
-                      <td className="px-6 py-5 text-right">
-                        <button className="p-2 hover:bg-background rounded-xl text-text/20 hover:text-text transition-all">
-                          <ExternalLink className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {invoices.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-20 text-center">
-                        <div className="flex flex-col items-center">
-                          <Receipt className="h-12 w-12 text-text/10 mb-4" />
-                          <span className="text-sm font-bold text-text/20 uppercase tracking-widest">No transaction history found</span>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
         </div>
       </div>
-    </div>
+    </PageTransition>
   );
 }

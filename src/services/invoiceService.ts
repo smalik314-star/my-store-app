@@ -391,6 +391,22 @@ export const invoiceService = {
           }
 
           transaction.update(customerRef, sanitizeForFirestore(updateData));
+          const ledgerRef = doc(db, 'ledgerEntries', `${tenantId}_sale_${invoiceRef.id}`);
+          transaction.set(ledgerRef, sanitizeForFirestore({
+            tenantId,
+            partyType: 'customer',
+            partyId: invoiceData.customerId,
+            partyName: invoiceData.customerName,
+            voucherType: 'sale',
+            voucherId: invoiceRef.id,
+            voucherNumber: generatedInvoiceNumber,
+            referenceId: invoiceRef.id,
+            referenceNumber: generatedInvoiceNumber,
+            debit: authoritativeTotal,
+            credit: 0,
+            createdBy: actorId,
+            createdAt: serverTimestamp(),
+          }));
         }
 
         // 5. Update Tenant Usage
@@ -467,6 +483,11 @@ export const invoiceService = {
         if (invoice.status === 'cancelled') {
           throw new Error(`Invoice ${invoice.invoiceNumber} is already cancelled.`);
         }
+        if ((Number(invoice.returnCount) || 0) > 0 || (Number(invoice.returnedAmount) || 0) > 0) {
+          throw new Error(
+            `Invoice ${invoice.invoiceNumber} has posted sale returns and cannot be cancelled safely. Return only the remaining eligible items.`
+          );
+        }
         // Read every dependent document before the first write.
         const productDocs = new Map<string, any>();
         if (!invoice.isQuickBill) {
@@ -482,9 +503,13 @@ export const invoiceService = {
 
         let customerRef: any = null;
         let customerDoc: any = null;
+        let originalSaleLedgerDoc: any = null;
         if (invoice.customerId && invoice.customerId !== 'walk-in') {
           customerRef = doc(db, 'customers', invoice.customerId);
           customerDoc = await transaction.get(customerRef);
+          originalSaleLedgerDoc = await transaction.get(
+            doc(db, 'ledgerEntries', `${tenantId}_sale_${invoiceId}`)
+          );
         }
         const tenantRef = doc(db, 'tenants', tenantId);
         const tenantDoc = await transaction.get(tenantRef);
@@ -522,7 +547,7 @@ export const invoiceService = {
           transaction.set(movementRef, sanitizeForFirestore({ id: movementRef.id, tenantId, type: 'SALE_CANCEL_REVERSE',
             productId: item.productId, productName: item.name, batchNumber: item.batchDeductions.map(d => d.batchNumber).join(','),
             quantity: restoredQuantity, previousStock, newStock: previousStock + restoredQuantity,
-            invoiceId, createdAt: serverTimestamp() }));
+            invoiceId, userId: actorId, createdAt: serverTimestamp() }));
         }
 
         if (customerDoc && customerRef) {
@@ -544,6 +569,24 @@ export const invoiceService = {
             }
 
             transaction.update(customerRef, sanitizeForFirestore(updateData));
+            if (originalSaleLedgerDoc?.exists()) {
+              const reversalLedgerRef = doc(db, 'ledgerEntries', `${tenantId}_sale_cancel_${invoiceId}`);
+              transaction.set(reversalLedgerRef, sanitizeForFirestore({
+                tenantId,
+                partyType: 'customer',
+                partyId: invoice.customerId,
+                partyName: invoice.customerName,
+                voucherType: 'sale_cancel',
+                voucherId: invoiceId,
+                voucherNumber: invoice.invoiceNumber,
+                referenceId: invoiceId,
+                referenceNumber: invoice.invoiceNumber,
+                debit: 0,
+                credit: invoice.grandTotal,
+                createdBy: actorId,
+                createdAt: serverTimestamp(),
+              }));
+            }
           }
         }
 

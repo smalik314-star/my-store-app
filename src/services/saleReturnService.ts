@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   increment,
   query,
@@ -18,6 +19,7 @@ import type {
 } from '../types';
 import { addMoney, roundMoney, subtractMoney } from '../utils/currency';
 import { settleReturnAgainstOutstanding, validateReturnQuantity } from '../utils/transactions';
+import { isBatchExpired } from '../utils/stock';
 
 interface RequestedReturnLine {
   lineIndex: number;
@@ -143,6 +145,11 @@ export const saleReturnService = {
           for (const restoration of batchRestorations) {
             const index = batches.findIndex(batch => normalizedBatch(batch.batchNumber) === normalizedBatch(restoration.batchNumber));
             if (index < 0) throw new Error(`Batch ${restoration.batchNumber} no longer exists for ${original.name}.`);
+            if (isBatchExpired(batches[index].expiryDate)) {
+              throw new Error(
+                `${original.name} batch ${restoration.batchNumber} is expired and cannot return to saleable stock. Mark it as damaged/non-resellable.`
+              );
+            }
             batches[index] = { ...batches[index], quantity: addMoney(batches[index].quantity, restoration.quantity) };
             newStock = addMoney(newStock, restoration.quantity);
           }
@@ -260,8 +267,24 @@ export const saleReturnService = {
     });
   },
 
+  async getReturnedQuantities(tenantId: string, invoiceId: string): Promise<Record<string, number>> {
+    if (!tenantId || !invoiceId) return {};
+    const snapshot = await getDoc(doc(db, 'saleReturnSummaries', invoiceId));
+    if (!snapshot.exists()) return {};
+    if (snapshot.data().tenantId !== tenantId) {
+      throw new Error('Sale return summary is not authorized.');
+    }
+    return { ...(snapshot.data().returnedByLine || {}) };
+  },
+
   async list(tenantId: string): Promise<SaleReturnRecord[]> {
     const snapshot = await getDocs(query(collection(db, 'saleReturns'), where('tenantId', '==', tenantId)));
-    return snapshot.docs.map(row => ({ id: row.id, ...row.data() } as SaleReturnRecord));
+    return snapshot.docs
+      .map(row => ({ id: row.id, ...row.data() } as SaleReturnRecord))
+      .sort((a, b) => {
+        const left = a.createdAt?.toMillis?.() ?? a.createdAt?.seconds * 1000 ?? 0;
+        const right = b.createdAt?.toMillis?.() ?? b.createdAt?.seconds * 1000 ?? 0;
+        return right - left;
+      });
   },
 };
