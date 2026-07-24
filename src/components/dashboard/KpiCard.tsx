@@ -28,7 +28,7 @@ export function KpiCard({
 }: KpiCardProps) {
   if (loading) {
     return (
-      <Card className="p-6 border-white/20 relative overflow-hidden">
+      <Card className="p-4 border-border relative overflow-hidden">
         <div className="animate-pulse flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <div className="h-4 w-20 bg-text/5 rounded-md" />
@@ -47,24 +47,24 @@ export function KpiCard({
 
   return (
     <motion.div
-      whileHover={isHoverable ? { y: -4 } : {}}
+      whileHover={isHoverable ? { y: -2 } : {}}
       transition={{ type: 'spring', stiffness: 300 }}
       onClick={onClick}
       className={isHoverable ? 'cursor-pointer' : ''}
     >
       <Card className={cn(
-        "flex flex-col gap-2 p-6 hover:shadow-xl transition-all border-white/40 overflow-hidden relative group",
+        "flex flex-col gap-2 p-4 hover:shadow-md transition-all border-border overflow-hidden relative group",
         isHoverable && "hover:border-primary/30"
       )}>
         <div className="flex items-center justify-between">
-          <span className="text-[12px] text-text/60 uppercase tracking-widest font-bold">{label}</span>
-          <div className={`p-2.5 rounded-xl ${colorClass} group-hover:scale-110 transition-transform`}>
-            <Icon className="h-5 w-5" />
+          <span className="text-[10px] text-text/55 uppercase tracking-[0.14em] font-black">{label}</span>
+          <div className={`p-2 rounded-lg ${colorClass} group-hover:scale-105 transition-transform`}>
+            <Icon className="h-4 w-4" />
           </div>
         </div>
         
         <div className="flex flex-col mt-1">
-          <span className="text-2xl font-black text-text tracking-tight">{value}</span>
+          <span className="text-xl font-black text-text tracking-tight">{value}</span>
           {trend && (
             <div className="mt-2 flex items-center gap-1.5">
               <span className={`flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-md ${isUp ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
