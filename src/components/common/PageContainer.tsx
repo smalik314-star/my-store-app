@@ -13,7 +13,7 @@ export function PageContainer({ children, className }: PageContainerProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={cn("space-y-6 max-w-7xl mx-auto w-full", className)}
+      className={cn("space-y-5 max-w-[1600px] mx-auto w-full", className)}
     >
       {children}
     </motion.div>
@@ -34,11 +34,11 @@ export function SectionHeader({
   className 
 }: SectionHeaderProps) {
   return (
-    <div className={cn("flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8", className)}>
+    <div className={cn("flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-5", className)}>
       <div>
-        <h1 className="text-2xl font-bold text-text md:text-3xl">{title}</h1>
+        <h1 className="text-xl font-bold text-text md:text-2xl">{title}</h1>
         {description && (
-          <p className="mt-1 text-text/60">{description}</p>
+          <p className="mt-1 text-sm text-text/55">{description}</p>
         )}
       </div>
       {action && (
