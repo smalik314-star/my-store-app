@@ -60,7 +60,8 @@ export function AIAssistant() {
       whileHover={{ scale: 1.1 }}
       whileTap={{ scale: 0.9 }}
       onClick={open}
-      className="fixed bottom-6 right-6 h-14 w-14 rounded-full bg-primary text-white shadow-2xl flex items-center justify-center z-50 group overflow-hidden"
+      className="fixed bottom-4 right-4 h-14 w-14 rounded-full bg-primary text-white shadow-2xl flex items-center justify-center z-40 group overflow-hidden sm:bottom-6 sm:right-6 sm:z-50"
+      aria-label="Open PharmaFlow assistant"
     >
       <div className="absolute inset-0 bg-gradient-to-tr from-primary via-primary to-accent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
       <Sparkles className="h-6 w-6 relative z-10 animate-pulse" />
