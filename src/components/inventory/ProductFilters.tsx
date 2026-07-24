@@ -53,7 +53,7 @@ export function ProductFilters({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   return (
-    <div className="flex flex-col gap-6 w-full">
+    <div className="flex flex-col gap-4 sm:gap-6 w-full">
       <div className="flex flex-col lg:flex-row items-center gap-4 w-full">
         {/* Search Bar */}
         <div className="relative flex-1 w-full group order-1">
@@ -103,7 +103,7 @@ export function ProductFilters({
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <Card className="p-6 border-primary/10 bg-primary/5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Card className="p-4 sm:p-6 border-primary/10 bg-primary/5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
               {/* Category Filter */}
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-black uppercase text-text/40 tracking-widest ml-1">Category</label>
@@ -173,6 +173,7 @@ export function ProductFilters({
                     setSelectedExpiryStatus('all');
                     setPriceRange({ min: 0, max: 0 });
                     setSearchQuery('');
+                    setBarcodeInput('');
                   }}
                   className="w-full p-3 rounded-xl border border-danger/20 text-danger text-xs font-black uppercase tracking-widest hover:bg-danger/5 transition-all"
                 >
@@ -185,13 +186,13 @@ export function ProductFilters({
       </AnimatePresence>
 
       {/* Status Filter Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {STATUSES.map((status) => (
           <button
             key={status.id}
             onClick={() => setSelectedStatus(status.id)}
             className={cn(
-              "p-4 rounded-2xl border transition-all flex items-center gap-3 group text-left",
+              "min-h-14 p-3 sm:p-4 rounded-2xl border transition-all flex items-center gap-3 group text-left",
               selectedStatus === status.id 
                 ? "bg-surface border-primary shadow-xl ring-2 ring-primary/10 scale-[1.02]" 
                 : "bg-surface border-border hover:border-primary/40"
