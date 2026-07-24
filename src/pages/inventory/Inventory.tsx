@@ -252,16 +252,16 @@ export default function Inventory() {
 
   return (
     <PageTransition>
-      <PageContainer className="p-4 md:p-6 lg:p-8 gap-8 relative overflow-hidden">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <PageContainer className="gap-4 pb-24 sm:gap-6 lg:gap-8 lg:pb-8 relative overflow-hidden">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
         <SectionHeader 
           title="Stock Management" 
           description="Advanced inventory control with real-time syncing and bulk operations."
         />
-        <div className="flex items-center gap-3">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center sm:gap-3">
           <Button 
             variant="outline" 
-            className="font-bold border-border bg-surface" 
+            className="min-h-11 w-full font-bold border-border bg-surface sm:w-auto" 
             leftIcon={<Download className="h-4 w-4" />}
             onClick={handleExportCSV}
           >
@@ -269,7 +269,7 @@ export default function Inventory() {
           </Button>
           <Button 
             onClick={() => setShowForm(true)} 
-            className="font-bold shadow-xl shadow-primary/20" 
+            className="min-h-11 w-full font-bold shadow-xl shadow-primary/20 sm:w-auto" 
             leftIcon={<Plus className="h-5 w-5" />}
           >
             Add Product
@@ -278,11 +278,11 @@ export default function Inventory() {
       </div>
 
       {/* Elegant Dual-Tab Selector */}
-      <div className="flex border-b border-border bg-background/50 backdrop-blur-sm sticky top-0 z-30 pt-2 pb-0 mb-2 gap-2">
+      <div className="flex overflow-x-auto border-b border-border bg-background/95 backdrop-blur-sm sticky top-0 z-30 pt-2 pb-0 mb-2 gap-1 sm:gap-2 scrollbar-none">
         <button
           onClick={() => setActiveTab('dashboard')}
           className={cn(
-            "pb-3.5 px-6 text-[10.5px] font-black uppercase tracking-widest border-b-2 transition-all duration-200 cursor-pointer relative",
+            "min-h-11 min-w-max pb-3 px-3 sm:px-6 text-[10px] sm:text-[10.5px] font-black uppercase tracking-wider sm:tracking-widest border-b-2 transition-all duration-200 cursor-pointer relative",
             activeTab === 'dashboard' 
               ? "border-primary text-primary" 
               : "border-transparent text-text/40 hover:text-text/75"
@@ -291,12 +291,13 @@ export default function Inventory() {
           {activeTab === 'dashboard' && (
             <motion.div layoutId="inventory-active-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
           )}
-          Dashboard Overview
+          <span className="sm:hidden">Overview</span>
+          <span className="hidden sm:inline">Dashboard Overview</span>
         </button>
         <button
           onClick={() => setActiveTab('ledger')}
           className={cn(
-            "pb-3.5 px-6 text-[10.5px] font-black uppercase tracking-widest border-b-2 transition-all duration-200 cursor-pointer relative",
+            "min-h-11 min-w-max pb-3 px-3 sm:px-6 text-[10px] sm:text-[10.5px] font-black uppercase tracking-wider sm:tracking-widest border-b-2 transition-all duration-200 cursor-pointer relative",
             activeTab === 'ledger' 
               ? "border-primary text-primary" 
               : "border-transparent text-text/40 hover:text-text/75"
@@ -305,7 +306,8 @@ export default function Inventory() {
           {activeTab === 'ledger' && (
             <motion.div layoutId="inventory-active-tab-indicator" className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
           )}
-          Stock Ledger ({products.length})
+          <span className="sm:hidden">Products ({products.length})</span>
+          <span className="hidden sm:inline">Stock Ledger ({products.length})</span>
         </button>
       </div>
 
@@ -347,7 +349,7 @@ export default function Inventory() {
                   initial={{ y: 50, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   exit={{ y: 50, opacity: 0 }}
-                  className="fixed bottom-6 left-6 right-6 lg:left-auto lg:right-8 lg:bottom-8 lg:w-auto z-40 flex flex-col md:flex-row items-center justify-between gap-4 p-4 bg-primary text-white rounded-3xl shadow-2xl shadow-primary/40 border border-white/20"
+                  className="fixed bottom-3 left-3 right-3 lg:left-auto lg:right-8 lg:bottom-8 lg:w-auto z-40 flex flex-col md:flex-row items-center justify-between gap-3 p-3 sm:p-4 bg-primary text-white rounded-2xl sm:rounded-3xl shadow-2xl shadow-primary/40 border border-white/20"
                 >
                   <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
                     <div className="flex items-center gap-4">
@@ -356,7 +358,7 @@ export default function Inventory() {
                     </div>
                     <button 
                       onClick={() => setSelectedIds([])}
-                      className="text-xs font-bold hover:underline opacity-60 hover:opacity-100"
+                      className="min-h-11 px-2 text-xs font-bold hover:underline opacity-80 hover:opacity-100"
                     >
                       Clear Selection
                     </button>
@@ -389,8 +391,8 @@ export default function Inventory() {
               )}
             </AnimatePresence>
 
-            <div className="flex items-center justify-between px-2">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-1 sm:px-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 <h3 className="text-[10px] font-black text-text/40 uppercase tracking-widest">Inventory Ledger</h3>
                 <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-black">
                   {products.length} ITEMS FOUND
