@@ -20,7 +20,7 @@ export function Card({ children, className, isHoverable = false, ...props }: Car
       } : undefined}
       transition={transitions.smooth}
       className={cn(
-        'bg-surface rounded-3xl border border-border p-6 shadow-sm transition-all duration-300',
+        'bg-surface rounded-xl border border-border p-5 shadow-sm transition-all duration-200',
         isHoverable && 'cursor-pointer',
         className
       )}
