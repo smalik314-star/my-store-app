@@ -34,7 +34,7 @@ export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
 
   return (
     <Card className="p-0 overflow-hidden flex flex-col border-white/20">
-      <div className="flex items-center justify-between p-5 border-b border-border bg-background/50">
+      <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-background/50">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-bold text-text uppercase tracking-wider">{title}</h3>
           <span className={cn(
@@ -47,7 +47,7 @@ export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
         {isStock ? <AlertCircle className="h-4 w-4 text-danger" /> : <Calendar className="h-4 w-4 text-warning" />}
       </div>
 
-      <div className="p-4 flex flex-col gap-3 min-h-[120px]">
+      <div className="p-3 sm:p-4 flex flex-col gap-3 min-h-[120px]">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center mb-3">
@@ -64,7 +64,7 @@ export function AlertPanel({ title, items, type, loading }: AlertPanelProps) {
               transition={{ delay: idx * 0.05 }}
               onClick={() => navigate(`/inventory?view=${item.id}`)}
               className={cn(
-                "group flex items-center gap-4 p-3 rounded-xl border transition-all hover:shadow-md cursor-pointer",
+                "group flex min-h-16 items-center gap-3 sm:gap-4 p-3 rounded-xl border transition-all hover:shadow-md cursor-pointer",
                 isStock ? "border-danger/10 bg-danger/5 hover:bg-danger/10" : "border-warning/10 bg-warning/5 hover:bg-warning/10"
               )}
             >
