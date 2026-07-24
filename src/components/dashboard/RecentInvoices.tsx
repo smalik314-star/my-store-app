@@ -29,10 +29,10 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
   }
 
   return (
-    <Card className="p-0 overflow-hidden flex flex-col border-white/20 shadow-xl">
-      <div className="flex items-center justify-between p-6 border-b border-border bg-background/50">
+    <Card className="p-0 overflow-hidden flex flex-col border-border">
+      <div className="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-border bg-background/50">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
+          <div className="hidden min-[360px]:flex h-9 w-9 rounded-lg bg-primary/10 items-center justify-center">
             <ReceiptText className="h-5 w-5 text-primary" />
           </div>
           <div>
@@ -42,13 +42,57 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
         </div>
         <button 
           onClick={() => navigate('/invoices')}
-          className="text-xs font-bold text-primary hover:bg-primary/5 px-4 py-2 rounded-xl transition-all border border-primary/20"
+          className="shrink-0 text-[10px] sm:text-xs font-bold text-primary hover:bg-primary/5 px-3 py-2 rounded-lg transition-all border border-primary/20"
         >
-          VIEW JOURNAL
+          VIEW ALL
         </button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="divide-y divide-border/60 md:hidden">
+        {invoices.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-text/40">
+            <ReceiptText className="h-8 w-8" />
+            <p className="text-sm font-medium">No transactions found</p>
+          </div>
+        ) : (
+          invoices.map((inv, idx) => (
+            <motion.button
+              type="button"
+              key={inv.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.02 }}
+              onClick={() => navigate(`/invoice/${inv.id}`)}
+              className="flex min-h-[84px] w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-black text-primary">#{inv.invoiceNumber}</span>
+                  <span className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase",
+                    inv.paymentStatus === 'paid' ? "bg-success/10 text-success" :
+                    inv.paymentStatus === 'due' ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger"
+                  )}>
+                    {inv.paymentStatus}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs font-bold text-text">{inv.customerName || 'Walk-in Customer'}</p>
+                <p className="mt-0.5 text-[10px] font-medium text-text/45">
+                  {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-sm font-black text-text">{formatCurrency(inv.grandTotal)}</p>
+                <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-primary">
+                  Open <ExternalLink className="h-3 w-3" />
+                </span>
+              </div>
+            </motion.button>
+          ))
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-background/30">
@@ -85,13 +129,13 @@ export function RecentInvoices({ invoices, loading }: RecentInvoicesProps) {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
-                      <span className="text-sm font-bold text-text">{inv.customerName}</span>
-                      <span className="text-[11px] text-text/40 font-medium tracking-tight">ID: {inv.customerId.slice(0, 8)}</span>
+                      <span className="text-sm font-bold text-text">{inv.customerName || 'Walk-in Customer'}</span>
+                      <span className="text-[11px] text-text/40 font-medium tracking-tight">ID: {inv.customerId?.slice(0, 8) || 'walk-in'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-text/60 font-medium">
-                      {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                     </span>
                   </td>
                   <td className="px-6 py-4">
