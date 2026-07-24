@@ -8,9 +8,11 @@ import {
   IndianRupee,
   Plus,
   ArrowRight,
-  Zap
+  Zap,
+  CalendarDays,
+  Activity
 } from 'lucide-react';
-import { PageContainer, SectionHeader } from '../../components/common/PageContainer';
+import { PageContainer } from '../../components/common/PageContainer';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
@@ -23,7 +25,6 @@ import { DashboardCharts } from '../../components/dashboard/DashboardCharts';
 import { Invoice, Product } from '../../types';
 import { formatCurrency, formatCurrencyCompact } from '../../utils/currency';
 import { useNavigate } from 'react-router-dom';
-import { SkeletonDashboard } from '../../components/common/Skeleton';
 import { PageTransition } from '../../components/common/PageTransition';
 
 export default function Dashboard() {
@@ -36,23 +37,16 @@ export default function Dashboard() {
     totalCustomers: 0,
     totalInvoices: 0,
     todaySales: 0,
-    todayGrossProfit: 0,
-    todayInvoiceCount: 0,
-    todayPurchases: 0,
     monthlyRevenue: 0,
-    totalReceivable: 0,
-    totalPayable: 0,
-    stockValue: 0,
     lowStockItems: 0,
     outOfStockItems: 0,
     criticalStockItems: 0,
     expiryAlerts: 0,
   });
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
-  const [alerts, setAlerts] = useState<{ lowStock: Product[], expiring: Product[], allProducts: Product[] }>({
+  const [alerts, setAlerts] = useState<{ lowStock: Product[], expiring: Product[] }>({
     lowStock: [],
-    expiring: [],
-    allProducts: []
+    expiring: []
   });
 
   useEffect(() => {
@@ -113,47 +107,91 @@ export default function Dashboard() {
 
   return (
     <PageTransition>
-      <PageContainer className="p-4 md:p-6 lg:p-8 gap-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <SectionHeader 
-          title={`Welcome back, ${user?.displayName?.split(' ')[0] || 'Administrator'}`} 
-          description="Here is a real-time overview of your pharmacy performance."
-        />
-        <div className="flex items-center gap-3">
+      <PageContainer className="gap-5">
+      <div className="erp-panel p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="hidden sm:flex h-11 w-11 rounded-lg bg-primary text-white items-center justify-center shadow-sm">
+            <Activity className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-xl md:text-2xl font-black text-text tracking-tight">Pharmacy Control Centre</h1>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-success">
+                <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                Live
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-text/55">
+              Welcome, {user?.displayName?.split(' ')[0] || 'Administrator'} — sales, stock and alerts in one operational view.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="h-9 px-3 rounded-lg border border-border bg-background flex items-center gap-2 text-[11px] font-bold text-text/60">
+            <CalendarDays className="h-3.5 w-3.5 text-primary" />
+            {new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date())}
+          </div>
           <Button 
             variant="outline" 
             size="sm" 
-            className="font-bold hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
+            className="font-bold h-9 hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
             leftIcon={<Zap className="h-4 w-4" />}
             onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
           >
-            ⚡ Quick Bill
+            Quick Bill
           </Button>
           <Button 
             variant="outline" 
             size="sm" 
-            className="hidden md:flex font-bold"
-            onClick={() => handleQuickAction('/inventory')}
+            className="hidden md:flex font-bold h-9"
+            onClick={() => handleQuickAction('/purchases/new')}
           >
-            Manage Inventory
+            New Purchase
           </Button>
           <Button 
             variant="primary" 
             size="sm" 
-            className="font-bold shadow-lg shadow-primary/20"
+            className="font-bold h-9 shadow-sm"
             leftIcon={<Plus className="h-4 w-4" />}
             onClick={() => handleQuickAction('/billing')}
           >
-            New Invoice
+            New Sale
           </Button>
         </div>
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        <KpiCard 
+          label="Products" 
+          value={stats.totalProducts} 
+          icon={Package} 
+          loading={loading}
+          colorClass="bg-primary/10 text-primary"
+          isHoverable
+          onClick={() => navigate('/inventory')}
+        />
+        <KpiCard 
+          label="Customers" 
+          value={stats.totalCustomers} 
+          icon={Users} 
+          loading={loading}
+          colorClass="bg-secondary/10 text-secondary"
+          isHoverable
+          onClick={() => navigate('/customers')}
+        />
+        <KpiCard 
+          label="Invoices" 
+          value={stats.totalInvoices} 
+          icon={ReceiptText} 
+          loading={loading}
+          colorClass="bg-accent/10 text-accent"
+          isHoverable
+          onClick={() => navigate('/reports')}
+        />
         <KpiCard 
           label="Today's Sales" 
-          value={formatCurrency(stats.todaySales)} 
+          value={formatCurrencyCompact(stats.todaySales)} 
           icon={ShoppingBag} 
           loading={loading}
           colorClass="bg-success/10 text-success"
@@ -161,45 +199,14 @@ export default function Dashboard() {
           onClick={() => navigate('/reports')}
         />
         <KpiCard 
-          label="Today's Gross Profit" 
-          value={formatCurrency(stats.todayGrossProfit)} 
-          icon={TrendingUp} 
-          loading={loading}
-          colorClass="bg-secondary/10 text-secondary"
-          isHoverable
-          onClick={() => navigate('/reports')}
-        />
-        <KpiCard 
-          label="Today's Invoices" 
-          value={stats.todayInvoiceCount} 
-          icon={ReceiptText} 
-          loading={loading}
-          colorClass="bg-accent/10 text-accent"
-          isHoverable
-          onClick={() => navigate('/invoices')}
-        />
-        <KpiCard 
-          label="Today's Purchases" 
-          value={formatCurrencyCompact(stats.todayPurchases)} 
-          icon={Package} 
-          loading={loading}
-          colorClass="bg-info/10 text-info"
-          isHoverable
-          onClick={() => navigate('/purchases')}
-        />
-        <KpiCard 
-          label="Stock Value" 
-          value={formatCurrency(stats.stockValue)} 
+          label="Monthly Rev" 
+          value={formatCurrency(stats.monthlyRevenue)} 
           icon={IndianRupee} 
           loading={loading}
           colorClass="bg-info/10 text-info"
           isHoverable
-          onClick={() => navigate('/inventory')}
+          onClick={() => navigate('/reports')}
         />
-        <KpiCard label="Receivable" value={formatCurrency(stats.totalReceivable)} icon={Users} loading={loading} colorClass="bg-danger/10 text-danger" isHoverable onClick={() => navigate('/receipts')} />
-        <KpiCard label="Payable" value={formatCurrency(stats.totalPayable)} icon={IndianRupee} loading={loading} colorClass="bg-warning/10 text-warning" isHoverable onClick={() => navigate('/supplier-payments')} />
-        <KpiCard label="Products" value={stats.totalProducts} icon={Package} loading={loading} colorClass="bg-primary/10 text-primary" isHoverable onClick={() => navigate('/inventory')} />
-        <KpiCard label="Customers" value={stats.totalCustomers} icon={Users} loading={loading} colorClass="bg-secondary/10 text-secondary" isHoverable onClick={() => navigate('/customers')} />
         <KpiCard 
           label="Low Stock" 
           value={stats.lowStockItems} 
@@ -218,7 +225,7 @@ export default function Dashboard() {
           {(settings?.showDashboardCharts ?? true) && (
             <DashboardCharts 
               invoices={recentInvoices} 
-              products={alerts.allProducts}
+              products={alerts.lowStock} // Using lowStock as a proxy for product data for now
               loading={loading} 
             />
           )}
