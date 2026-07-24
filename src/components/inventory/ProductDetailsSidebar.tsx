@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Edit2, Trash2, Package, MapPin, IndianRupee, Calendar, Info, Barcode, Factory, Tag } from 'lucide-react';
+import { X, Edit2, Trash2, Package, MapPin, IndianRupee, Calendar, Info, Barcode, Factory, Tag, AlertTriangle } from 'lucide-react';
 import { Product } from '../../types';
 import { ProductIntelligence } from '../../services/inventoryIntelligenceService';
 import { Button } from '../common/Button';
@@ -60,6 +60,9 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-[70] flex justify-end bg-text/40 backdrop-blur-sm"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="product-details-title"
     >
       <motion.div
         initial={{ x: '100%' }}
@@ -69,21 +72,21 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
         className="h-full w-full max-w-lg bg-surface shadow-2xl flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-6 border-b border-border bg-background/50">
+        <div className="flex items-center justify-between gap-3 p-4 sm:p-6 border-b border-border bg-background/50">
           <div>
-            <h2 className="text-xl font-bold text-text">Product Details</h2>
+            <h2 id="product-details-title" className="text-lg sm:text-xl font-bold text-text">Product Details</h2>
             <p className="text-[10px] font-black uppercase text-text/40 tracking-widest mt-1">Inventory Management System</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-border/50 rounded-full transition-colors">
+          <button onClick={onClose} aria-label="Close product details" className="h-11 w-11 shrink-0 flex items-center justify-center hover:bg-border/50 rounded-xl transition-colors">
             <X className="h-6 w-6 text-text/40" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8 scrollbar-thin">
-          <div className="flex flex-col gap-8">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 scrollbar-thin">
+          <div className="flex flex-col gap-6 sm:gap-8">
             {/* Hero Section */}
-            <div className="flex items-center gap-6">
-              <div className="h-24 w-24 rounded-3xl bg-primary/5 border-2 border-primary/10 flex items-center justify-center text-4xl font-black text-primary">
+            <div className="flex items-center gap-4 sm:gap-6">
+              <div className="h-16 w-16 sm:h-24 sm:w-24 shrink-0 rounded-2xl sm:rounded-3xl bg-primary/5 border-2 border-primary/10 flex items-center justify-center text-2xl sm:text-4xl font-black text-primary">
                 {product.name[0].toUpperCase()}
               </div>
               <div className="flex flex-col">
@@ -97,7 +100,7 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
                     </span>
                   )}
                 </div>
-                <h3 className="text-2xl font-black text-text leading-tight">{product.name}</h3>
+                <h3 className="text-xl sm:text-2xl font-black text-text leading-tight break-words">{product.name}</h3>
                 <p className="text-sm font-bold text-primary italic mt-1">{product.genericName || 'Generic medication'}</p>
               </div>
             </div>
@@ -217,7 +220,7 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
           </div>
         </div>
 
-        <div className="p-6 border-t border-border bg-background/50 flex items-center gap-4">
+        <div className="p-3 sm:p-6 border-t border-border bg-background/95 backdrop-blur-md grid grid-cols-2 gap-2 sm:gap-4">
           <Button
             variant="outline"
             className="flex-1 h-12 font-bold"
@@ -239,5 +242,3 @@ export function ProductDetailsSidebar({ product, intelligence, onClose, onEdit, 
     </motion.div>
   );
 }
-
-import { AlertTriangle } from 'lucide-react';
