@@ -5,27 +5,28 @@ import {
   LayoutDashboard, 
   Package, 
   Clock,
-  TriangleAlert,
+  ShoppingCart,
   Users, 
   ReceiptText, 
-  RotateCcw,
   BarChart3, 
   Settings, 
   Plus,
   LogOut,
   ChevronLeft,
+  ChevronRight,
+  Stethoscope,
   X,
+  Zap,
   CreditCard,
   Truck,
   UserCog
-  ,Banknote
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { Button } from '../common/Button';
 import { transitions } from '../../utils/animations';
 import { Logo } from '../common/Logo';
-import { UserRole } from '../../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -34,74 +35,50 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-interface MenuItem {
-  icon: typeof LayoutDashboard;
-  label: string;
-  path: string;
-  allowedRoles?: UserRole[];
-}
-
-const menuSections: Array<{ title: string; items: MenuItem[] }> = [
+const menuSections = [
   {
-    title: 'Overview',
+    title: 'Workspace',
     items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', active: true },
     ]
   },
   {
     title: 'Sales',
     items: [
-      { icon: Plus, label: 'New Sale / Billing', path: '/billing', allowedRoles: ['owner', 'admin', 'staff'] },
-      { icon: ReceiptText, label: 'Sales Invoices', path: '/invoices' },
-      { icon: RotateCcw, label: 'Sale Returns', path: '/sale-returns', allowedRoles: ['owner', 'admin', 'staff'] },
+      { icon: Plus, label: 'New Sale / Billing', path: '/billing', active: true },
+      { icon: ReceiptText, label: 'Sales Invoices', path: '/invoices', active: true },
+      { icon: Users, label: 'Customers', path: '/customers', active: true },
     ]
   },
   {
     title: 'Purchases',
     items: [
-      { icon: Truck, label: 'Purchase Bills', path: '/purchases', allowedRoles: ['owner', 'admin', 'staff'] },
-      { icon: RotateCcw, label: 'Purchase Returns', path: '/purchase-returns', allowedRoles: ['owner', 'admin', 'staff'] },
+      { icon: Plus, label: 'New Purchase', path: '/purchases/new', active: true },
+      { icon: Truck, label: 'Purchase Bills', path: '/purchases', active: true },
     ]
   },
   {
     title: 'Inventory',
     items: [
-      { icon: Package, label: 'Products & Stock', path: '/inventory' },
-      { icon: Clock, label: 'Expiry Management', path: '/expiry-alerts' },
-      { icon: TriangleAlert, label: 'Low Stock', path: '/low-stock' },
+      { icon: Package, label: 'Product Master', path: '/inventory', active: true },
+      { icon: ShoppingCart, label: 'Low Stock', path: '/low-stock', active: true },
+      { icon: Clock, label: 'Expiry Management', path: '/expiry-alerts', active: true },
     ]
   },
   {
-    title: 'Parties',
+    title: 'Reports & Admin',
     items: [
-      { icon: Users, label: 'Customers', path: '/customers' },
-    ]
-  },
-  {
-    title: 'Accounting',
-    items: [
-      { icon: Banknote, label: 'Customer Receipts', path: '/receipts', allowedRoles: ['owner', 'admin', 'staff'] },
-      { icon: Banknote, label: 'Supplier Payments', path: '/supplier-payments', allowedRoles: ['owner', 'admin', 'staff'] },
-    ]
-  },
-  {
-    title: 'Reports',
-    items: [
-      { icon: BarChart3, label: 'Business Reports', path: '/reports' },
-    ]
-  },
-  {
-    title: 'Administration',
-    items: [
-      { icon: UserCog, label: 'Users & Roles', path: '/users', allowedRoles: ['owner', 'admin'] },
-      { icon: CreditCard, label: 'Subscription', path: '/subscription', allowedRoles: ['owner'] },
-      { icon: Settings, label: 'Settings', path: '/settings', allowedRoles: ['owner', 'admin'] },
+      { icon: BarChart3, label: 'Reports', path: '/reports', active: true },
+      { icon: UserCog, label: 'Users', path: '/users', active: true },
+      { icon: Settings, label: 'Store Settings', path: '/settings', active: true },
+      { icon: CreditCard, label: 'Plan & Subscription', path: '/subscription', active: true },
     ]
   }
 ];
 
 export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarProps) {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const shouldReduceMotion = useReducedMotion();
@@ -111,14 +88,12 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
     navigate('/login');
   };
 
-  const handleNavClick = () => {
+  const handleNavClick = (path: string, isActive: boolean) => {
+    if (!isActive) {
+      showToast('This module is coming in a future update', 'info');
+      return;
+    }
     if (isMobile && onCloseMobile) onCloseMobile();
-  };
-
-  const isCurrentPath = (path: string) => {
-    if (path === '/dashboard') return location.pathname === path;
-    if (path === '/invoices') return location.pathname === path || location.pathname.startsWith('/invoice/');
-    return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
   const sidebarVariants = {
@@ -154,7 +129,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
         animate={isOpen ? 'open' : 'closed'}
         variants={sidebarVariants}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col bg-primary text-white border-r border-white/10 shadow-2xl lg:shadow-none no-print overflow-x-hidden",
+          "fixed inset-y-0 left-0 z-50 flex flex-col bg-[#123b39] text-white border-r border-white/10 shadow-2xl lg:shadow-none no-print overflow-x-hidden",
           !isOpen && !isMobile && "lg:static"
         )}
       >
@@ -189,14 +164,41 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
           )}
         </div>
 
+        <AnimatePresence>
+          {isOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="grid grid-cols-2 gap-2 p-3 border-b border-white/10 min-w-[260px]"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  navigate('/billing');
+                  if (isMobile && onCloseMobile) onCloseMobile();
+                }}
+                className="h-10 rounded-lg bg-secondary text-white text-[10px] font-black uppercase tracking-wider hover:bg-secondary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+              >
+                + New Sale
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  navigate('/purchases/new');
+                  if (isMobile && onCloseMobile) onCloseMobile();
+                }}
+                className="h-10 rounded-lg bg-white/10 border border-white/10 text-white text-[10px] font-black uppercase tracking-wider hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+              >
+                + Stock In
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Navigation Menu */}
-        <nav role="navigation" aria-label="Main Navigation" className="flex-1 py-4 overflow-y-auto min-w-[260px] custom-scrollbar space-y-4">
-          {menuSections.map((section, sectionIdx) => {
-            const visibleItems = section.items.filter(
-              item => !item.allowedRoles || (user?.role && item.allowedRoles.includes(user.role))
-            );
-            if (visibleItems.length === 0) return null;
-            return (
+        <nav role="navigation" aria-label="Main Navigation" className="flex-1 py-3 overflow-y-auto min-w-[260px] custom-scrollbar space-y-3">
+          {menuSections.map((section, sectionIdx) => (
             <div key={section.title} className="space-y-1">
               {isOpen ? (
                 <div className="px-6 py-1.5 text-[10px] font-black uppercase tracking-[2px] text-white/30">
@@ -208,20 +210,24 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                 )
               )}
               <div className="space-y-0.5">
-                {visibleItems.map((item) => (
+                {section.items.map((item) => (
                   <NavLink
                     key={item.label}
-                    to={item.path}
-                    onClick={handleNavClick}
+                    to={item.active ? item.path : '#'}
+                    end={item.path === '/purchases' || item.path === '/dashboard'}
+                    onClick={(e) => {
+                      if (!item.active) e.preventDefault();
+                      handleNavClick(item.path, item.active);
+                    }}
                     aria-label={item.label}
-                    className={() => cn(
-                      "flex items-center gap-3 px-6 py-3 text-sm font-medium transition-all group relative focus-visible:outline-none focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-secondary/50 focus-visible:ring-inset",
-                      isCurrentPath(item.path)
+                    className={({ isActive }) => cn(
+                      "flex items-center gap-3 px-6 py-2.5 text-[13px] font-semibold transition-all group relative focus-visible:outline-none focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-secondary/50 focus-visible:ring-inset",
+                      isActive && item.active
                         ? "text-white" 
                         : "text-white/70 hover:bg-white/5 hover:text-white"
                     )}
                   >
-                    {isCurrentPath(item.path) && (
+                    {location.pathname === item.path && item.active && (
                       <motion.div
                         layoutId="active-nav"
                         className="absolute inset-y-1 left-2 right-2 bg-white/10 rounded-xl -z-10"
@@ -231,7 +237,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                     
                     <item.icon className={cn(
                       "h-5 w-5 shrink-0 transition-transform group-hover:scale-110",
-                      isCurrentPath(item.path) ? "text-secondary" : "text-white/40 group-hover:text-white"
+                      location.pathname === item.path && item.active ? "text-secondary" : "text-white/40 group-hover:text-white"
                     )} />
                     <AnimatePresence>
                       {isOpen && (
@@ -243,6 +249,9 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                           className="whitespace-nowrap flex items-center justify-between flex-1"
                         >
                           {item.label}
+                          {!item.active && (
+                            <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded opacity-60 uppercase font-black">Soon</span>
+                          )}
                         </motion.span>
                       )}
                     </AnimatePresence>
@@ -255,7 +264,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                 ))}
               </div>
             </div>
-          )})}
+          ))}
         </nav>
 
         {/* Sidebar Footer */}
