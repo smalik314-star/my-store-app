@@ -2,15 +2,15 @@
 @import "tailwindcss";
 
 :root {
-  --color-primary-val: #0f766e;
-  --color-secondary-val: #14b8a6;
+  --color-primary-val: #0b6b63;
+  --color-secondary-val: #0f9f91;
   --color-accent-val: #f59e0b;
   --color-danger-val: #ef4444;
   --color-success-val: #22c55e;
-  --color-background-val: #f8fafc;
+  --color-background-val: #f3f7f6;
   --color-surface-val: #ffffff;
-  --color-text-val: #1e293b;
-  --color-border-val: #e2e8f0;
+  --color-text-val: #172a2a;
+  --color-border-val: #dbe6e3;
 }
 
 .dark {
@@ -47,6 +47,7 @@
 @layer base {
   body {
     @apply bg-background text-text font-sans antialiased overflow-x-hidden;
+    font-size: 14px;
   }
   
   h1, h2, h3, h4, h5, h6 {
@@ -58,11 +59,19 @@
   }
 
   th {
-    @apply text-left px-4 md:px-6 py-3 text-[10px] md:text-[12px] text-text/60 uppercase tracking-wider font-semibold bg-background;
+    @apply text-left px-3 md:px-4 py-2.5 text-[10px] md:text-[11px] text-text/55 uppercase tracking-wider font-bold bg-background;
   }
 
   td {
-    @apply px-4 md:px-6 py-4 border-b border-border text-[13px] md:text-[14px];
+    @apply px-3 md:px-4 py-3 border-b border-border text-[12px] md:text-[13px];
+  }
+
+  input, select, textarea {
+    @apply transition-colors duration-150;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    @apply outline-none ring-2 ring-primary/15 border-primary;
   }
 }
 
@@ -70,6 +79,18 @@
 @layer components {
   .touch-target {
     @apply min-h-[44px] flex items-center justify-center;
+  }
+
+  .erp-panel {
+    @apply bg-surface border border-border rounded-xl shadow-sm;
+  }
+
+  .erp-toolbar {
+    @apply flex flex-wrap items-center gap-2 bg-surface border border-border rounded-xl p-2.5 shadow-sm;
+  }
+
+  .erp-section-label {
+    @apply text-[10px] font-black uppercase tracking-[0.16em] text-text/45;
   }
 }
 
