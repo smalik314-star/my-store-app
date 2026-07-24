@@ -79,14 +79,14 @@ export default function PurchaseDetail() {
 
   return (
     <PageTransition>
-      <div className="p-4 md:p-8 max-w-[1200px] mx-auto space-y-8 print:p-0">
+      <div className="p-3 sm:p-4 md:p-8 max-w-[1200px] mx-auto space-y-5 md:space-y-8 print:p-0">
         
         {/* Back and Action Buttons */}
-        <div className="flex justify-between items-center no-print">
+        <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 no-print">
           <Button 
             variant="ghost" 
             onClick={() => navigate('/purchases')}
-            className="rounded-xl flex items-center gap-2 hover:bg-text/5 text-text/80 font-bold"
+            className="rounded-xl flex items-center justify-center gap-2 hover:bg-text/5 text-text/80 font-bold min-h-11"
           >
             <ArrowLeft className="h-5 w-5" />
             Back to Purchase History
@@ -94,7 +94,7 @@ export default function PurchaseDetail() {
           <Button 
             onClick={handlePrint}
             variant="outline"
-            className="rounded-xl flex items-center gap-2 border-border text-text hover:bg-text/5 font-bold h-11 px-5"
+            className="rounded-xl flex items-center justify-center gap-2 border-border text-text hover:bg-text/5 font-bold min-h-11 px-5"
           >
             <Printer className="h-5 w-5" />
             Print Receipt
@@ -104,15 +104,15 @@ export default function PurchaseDetail() {
         {/* Printable Voucher Section */}
         <div className="space-y-8 print:space-y-6">
           {/* Header Title */}
-          <div className="flex justify-between items-start border-b border-border pb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4 border-b border-border pb-6">
             <div>
               <div className="flex items-center gap-3">
                 <Truck className="h-8 w-8 text-primary print:text-black" />
-                <h1 className="text-3xl font-black text-text print:text-black tracking-tight">Stock Purchase Voucher</h1>
+                <h1 className="text-2xl md:text-3xl font-black text-text print:text-black tracking-tight">Stock Purchase Voucher</h1>
               </div>
               <p className="text-text/60 mt-1 font-medium">Purchase Number: <span className="font-mono font-bold text-primary print:text-black">{purchase.purchaseNumber}</span></p>
             </div>
-            <div className="text-right">
+            <div className="text-left sm:text-right">
               <span className={`inline-flex items-center rounded-full px-4 py-1.5 text-sm font-black print:border print:border-black print:text-black ${
                 purchase.status === 'cancelled' ? 'bg-red-500/10 text-red-600' : 'bg-emerald-500/10 text-emerald-500'
               }`}>
@@ -167,7 +167,40 @@ export default function PurchaseDetail() {
             <div className="px-6 py-4 border-b border-border bg-text/[0.02]">
               <h3 className="text-lg font-black text-text print:text-black">Items List</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="grid gap-3 p-3 md:hidden print:hidden">
+              {items.map((item) => (
+                <div key={item.id} className="rounded-xl border border-border p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-black text-text">{item.productName}</p>
+                      <p className="text-xs font-mono font-semibold text-text/60 mt-1">Batch {item.batchNumber}</p>
+                    </div>
+                    <p className="font-black whitespace-nowrap">{formatCurrency(item.total)}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-border text-xs">
+                    <div>
+                      <p className="text-text/50 font-semibold">MFG / EXP</p>
+                      <p className="font-bold mt-0.5">
+                        {formatDate(item.mfgDate, { month: '2-digit', year: 'numeric' })} / {formatDate(item.expiryDate, { month: '2-digit', year: 'numeric' })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-text/50 font-semibold">Quantity</p>
+                      <p className="font-bold mt-0.5">{item.quantity}</p>
+                    </div>
+                    <div>
+                      <p className="text-text/50 font-semibold">Purchase rate</p>
+                      <p className="font-bold mt-0.5">{formatCurrency(item.purchasePrice)}</p>
+                    </div>
+                    <div>
+                      <p className="text-text/50 font-semibold">Sale rate</p>
+                      <p className="font-bold mt-0.5">{formatCurrency(item.salePrice)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block print:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-text/[0.01]">
@@ -213,7 +246,7 @@ export default function PurchaseDetail() {
             </div>
 
             {/* Total summary row */}
-            <div className="p-6 bg-text/[0.02] border-t border-border flex justify-between items-center">
+            <div className="p-4 md:p-6 bg-text/[0.02] border-t border-border flex flex-col sm:flex-row justify-between sm:items-end gap-4">
               <div>
                 {purchase.notes && (
                   <p className="text-sm font-semibold text-text/60">
@@ -222,7 +255,7 @@ export default function PurchaseDetail() {
                   </p>
                 )}
               </div>
-              <div className="text-right space-y-1">
+              <div className="text-left sm:text-right space-y-1 sm:ml-auto">
                 {purchase.grossAmount != null && (
                   <>
                     <p className="text-xs font-semibold text-text/50">Gross: {formatCurrency(purchase.grossAmount)}</p>

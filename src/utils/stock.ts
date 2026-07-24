@@ -10,6 +10,20 @@ export interface BatchDeduction {
 
 const parseInventoryDate = (value: any): Date | null => {
   if (!value) return null;
+  if (typeof value === 'string') {
+    const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+      const [, year, month, day] = dateOnly;
+      const localDate = new Date(Number(year), Number(month) - 1, Number(day));
+      if (
+        Number.isNaN(localDate.getTime()) ||
+        localDate.getFullYear() !== Number(year) ||
+        localDate.getMonth() !== Number(month) - 1 ||
+        localDate.getDate() !== Number(day)
+      ) return null;
+      return localDate;
+    }
+  }
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value?.toDate === 'function') {
     const date = value.toDate();

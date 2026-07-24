@@ -2,15 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { purchaseService } from '../../services/purchaseService';
 import { productService } from '../../services/productService';
-import { brandService } from '../../services/brandService';
-import { Supplier, Product, PurchaseItem, ProductBatch } from '../../types';
+import { Supplier, Product } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { addMoney, calculateLineTax, formatCurrency, roundMoney } from '../../utils/currency';
-import { toJsDate } from '../../utils/date';
 import { Timestamp } from 'firebase/firestore';
 import { 
   ArrowLeft, 
@@ -21,8 +19,6 @@ import {
   X, 
   Search, 
   FileText, 
-  Percent, 
-  ChevronDown, 
   HelpCircle 
 } from 'lucide-react';
 
@@ -95,6 +91,8 @@ export default function PurchaseEntry() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const saveInProgressRef = useRef(false);
+  const productInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const batchInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Form Header State
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -112,8 +110,9 @@ export default function PurchaseEntry() {
   const [newSupplierGst, setNewSupplierGst] = useState('');
   const [newSupplierAddress, setNewSupplierAddress] = useState('');
   const [newSupplierEmail, setNewSupplierEmail] = useState('');
+  const [isCreatingSupplier, setIsCreatingSupplier] = useState(false);
 
-  // Autofill Modal State
+  // Price defaults are optional. Batch and dates always belong to this purchase.
   const [autofillModal, setAutofillModal] = useState<{
     itemIdx: number;
     product: Product;
@@ -175,7 +174,9 @@ export default function PurchaseEntry() {
   }
 
   const handleAddRow = () => {
-    setItems([...items, createEmptyItem()]);
+    const newItem = createEmptyItem();
+    setItems(current => [...current, newItem]);
+    window.requestAnimationFrame(() => productInputRefs.current[newItem.id]?.focus());
   };
 
   const handleRemoveRow = (idx: number) => {
@@ -227,9 +228,11 @@ export default function PurchaseEntry() {
 
     setItems(updated);
 
-    // Ask to optionally autofill pricing/batch details if they exist in the product master
-    if (product.batchNumber || product.purchasePrice || product.sellingPrice) {
+    // Pricing defaults can speed up entry, but purchase-specific batch/dates are never copied.
+    if (product.purchasePrice || product.sellingPrice || product.mrp) {
       setAutofillModal({ itemIdx: idx, product });
+    } else {
+      window.requestAnimationFrame(() => batchInputRefs.current[updated[idx].id]?.focus());
     }
   };
 
@@ -239,28 +242,16 @@ export default function PurchaseEntry() {
     const updated = [...items];
 
     if (accept) {
-      // User accepted autofill of Batch, Prices, and Dates
-      updated[itemIdx].batchNumber = product.batchNumber || '';
+      // Never populate batch, dates, quantity, or stock from master data.
       updated[itemIdx].purchasePrice = product.purchasePrice || 0;
       updated[itemIdx].salePrice = product.sellingPrice || 0;
       updated[itemIdx].mrp = product.mrp || product.sellingPrice || 0;
-
-      // Handle dates extraction
-      if (product.manufacturingDate) {
-        const mfg = toJsDate(product.manufacturingDate);
-        updated[itemIdx].mfgMonth = String(mfg.getMonth() + 1).padStart(2, '0');
-        updated[itemIdx].mfgYear = String(mfg.getFullYear());
-      }
-      if (product.expiryDate) {
-        const exp = toJsDate(product.expiryDate);
-        updated[itemIdx].expMonth = String(exp.getMonth() + 1).padStart(2, '0');
-        updated[itemIdx].expYear = String(exp.getFullYear());
-      }
-      showToast('Autofilled batch and price details from master', 'success');
+      showToast('Saved price defaults applied. Enter the new batch details.', 'success');
     }
 
     setItems(updated);
     setAutofillModal(null);
+    window.requestAnimationFrame(() => batchInputRefs.current[updated[itemIdx].id]?.focus());
   };
 
   const handleItemFieldChange = (idx: number, field: keyof FormItem, val: any) => {
@@ -299,8 +290,10 @@ export default function PurchaseEntry() {
     }
 
     try {
+      setIsCreatingSupplier(true);
+      const supplierName = newSupplierName.trim();
       const newId = await purchaseService.addSupplier(user.tenantId, {
-        name: newSupplierName.trim(),
+        name: supplierName,
         phone: newSupplierPhone.trim() || undefined,
         gstNumber: newSupplierGst.trim() || undefined,
         address: newSupplierAddress.trim() || undefined,
@@ -308,12 +301,17 @@ export default function PurchaseEntry() {
       });
 
       showToast('New Supplier registered successfully', 'success');
-      
-      // Refresh list
-      const supps = await purchaseService.getSuppliers(user.tenantId);
-      setSuppliers(supps);
-
-      // Select newly added supplier
+      // Make the new supplier selectable immediately; refresh in the background.
+      setSuppliers(current => [...current, {
+        id: newId,
+        tenantId: user.tenantId,
+        name: supplierName,
+        phone: newSupplierPhone.trim() || undefined,
+        gstNumber: newSupplierGst.trim() || undefined,
+        address: newSupplierAddress.trim() || undefined,
+        email: newSupplierEmail.trim() || undefined,
+        createdAt: new Date(),
+      }].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedSupplierId(newId);
 
       // Clear form & close modal
@@ -323,9 +321,14 @@ export default function PurchaseEntry() {
       setNewSupplierAddress('');
       setNewSupplierEmail('');
       setShowSupplierModal(false);
+      void purchaseService.getSuppliers(user.tenantId).then(refreshed => {
+        if (refreshed.some(supplier => supplier.id === newId)) setSuppliers(refreshed);
+      });
     } catch (err) {
       console.error(err);
       showToast('Failed to create new supplier', 'danger');
+    } finally {
+      setIsCreatingSupplier(false);
     }
   };
 
@@ -451,6 +454,9 @@ export default function PurchaseEntry() {
         setItems([createEmptyItem()]);
         setAutofillModal(null);
         window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.requestAnimationFrame(() => {
+          document.querySelector<HTMLInputElement>('[data-purchase-product-input="true"]')?.focus();
+        });
       } else {
         navigate('/purchases');
       }
@@ -475,10 +481,10 @@ export default function PurchaseEntry() {
 
   return (
     <PageTransition>
-      <div className="p-4 md:p-8 max-w-[1400px] mx-auto space-y-8">
+      <div className="p-3 sm:p-4 md:p-8 max-w-[1400px] mx-auto space-y-5 md:space-y-8 pb-28 md:pb-8">
         
         {/* Header Navigation */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-start gap-3 md:gap-4">
           <Button 
             variant="ghost" 
             onClick={() => navigate('/purchases')} 
@@ -487,7 +493,7 @@ export default function PurchaseEntry() {
             <ArrowLeft className="h-5 w-5 text-text/80" />
           </Button>
           <div>
-            <h1 className="text-3xl font-black text-text tracking-tight flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-black text-text tracking-tight flex items-center gap-3">
               New Purchase Entry
             </h1>
             <p className="text-text/60 text-sm mt-0.5">Separate stock entry: additions will increment batch levels and update pricing tables</p>
@@ -495,8 +501,8 @@ export default function PurchaseEntry() {
         </div>
 
         {/* Master Row: Supplier and Invoice */}
-        <Card className="p-6 border border-border rounded-3xl bg-surface shadow-sm">
-          <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
+        <Card className="p-4 md:p-6 border border-border rounded-2xl md:rounded-3xl bg-surface shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 border-b border-border pb-3">
             <h3 className="text-lg font-black text-text flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
               Supplier & Document Details
@@ -505,7 +511,7 @@ export default function PurchaseEntry() {
               variant="outline"
               size="sm"
               onClick={() => setShowSupplierModal(true)}
-              className="rounded-xl flex items-center gap-1 text-primary border-primary/20 hover:bg-primary/5 font-semibold h-9"
+              className="rounded-xl flex items-center justify-center gap-1 text-primary border-primary/20 hover:bg-primary/5 font-semibold min-h-11 sm:h-9 sm:min-h-0 w-full sm:w-auto"
             >
               <UserPlus className="h-4 w-4" />
               Add New Supplier
@@ -566,8 +572,8 @@ export default function PurchaseEntry() {
         </Card>
 
         {/* Purchase Items List Grid */}
-        <Card className="p-6 border border-border rounded-3xl bg-surface shadow-sm overflow-visible">
-          <div className="flex justify-between items-center mb-4 border-b border-border pb-3">
+        <Card className="p-3 sm:p-4 md:p-6 border border-border rounded-2xl md:rounded-3xl bg-surface shadow-sm overflow-visible">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4 border-b border-border pb-3">
             <h3 className="text-lg font-black text-text flex items-center gap-2">
               <Plus className="h-5 w-5 text-primary" />
               Purchase Items Row Entries
@@ -591,6 +597,8 @@ export default function PurchaseEntry() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text/40" />
                       <input
+                        ref={(element) => { productInputRefs.current[item.id] = element; }}
+                        data-purchase-product-input="true"
                         type="text"
                         placeholder="Type name, brand, or SKU..."
                         value={item.searchQuery}
@@ -602,7 +610,19 @@ export default function PurchaseEntry() {
                             setItems(updated);
                           }
                         }}
-                        className="w-full h-10 pl-9 pr-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-xs font-semibold transition-all placeholder:text-text/30"
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && suggestions.length > 0) {
+                            event.preventDefault();
+                            handleSelectProduct(idx, suggestions[0]);
+                          } else if (event.key === 'Escape') {
+                            const updated = [...items];
+                            updated[idx].showSuggestions = false;
+                            setItems(updated);
+                          }
+                        }}
+                        aria-label={`Search product for purchase row ${idx + 1}`}
+                        aria-expanded={item.showSuggestions && suggestions.length > 0}
+                        className="w-full min-h-11 pl-9 pr-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-semibold transition-all placeholder:text-text/30"
                       />
                     </div>
 
@@ -628,11 +648,12 @@ export default function PurchaseEntry() {
                   <div className="md:col-span-1">
                     <label className="block text-xs font-bold text-text/50 uppercase mb-2">Batch # *</label>
                     <input
+                      ref={(element) => { batchInputRefs.current[item.id] = element; }}
                       type="text"
                       placeholder="e.g. B-99"
                       value={item.batchNumber}
                       onChange={(e) => handleItemFieldChange(idx, 'batchNumber', e.target.value.toUpperCase())}
-                      className="w-full h-10 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-xs font-mono font-bold transition-all placeholder:text-text/30"
+                      className="w-full min-h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-mono font-bold transition-all placeholder:text-text/30"
                     />
                   </div>
 
@@ -803,22 +824,22 @@ export default function PurchaseEntry() {
         </Card>
 
         {/* Action Bottom Bar */}
-        <div className="flex justify-end gap-3 pb-8">
+        <div className="fixed md:static bottom-0 inset-x-0 z-40 flex gap-2 md:gap-3 p-3 md:p-0 md:pb-8 bg-surface/95 md:bg-transparent backdrop-blur border-t md:border-t-0 border-border shadow-2xl md:shadow-none">
           <Button
             variant="outline"
             onClick={() => navigate('/purchases')}
-            className="rounded-2xl h-12 px-6 border-border text-text hover:bg-text/5 font-bold"
+            className="rounded-xl md:rounded-2xl min-h-12 px-3 md:px-6 border-border text-text hover:bg-text/5 font-bold flex-1 md:flex-none"
           >
             Cancel
           </Button>
-          <Button variant="outline" onClick={() => void handleSavePurchase(true)} disabled={isSaving} className="rounded-2xl h-12 px-6 border-primary text-primary font-bold flex items-center gap-2">
+          <Button variant="outline" onClick={() => void handleSavePurchase(true)} disabled={isSaving} className="rounded-xl md:rounded-2xl min-h-12 px-3 md:px-6 border-primary text-primary font-bold flex items-center justify-center gap-2 flex-1 md:flex-none">
             <Save className="h-5 w-5" />
             {isSaving ? 'Saving...' : 'Save & New'}
           </Button>
           <Button
             onClick={() => void handleSavePurchase(false)}
             disabled={isSaving}
-            className="rounded-2xl h-12 px-6 font-bold flex items-center gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all"
+            className="rounded-xl md:rounded-2xl min-h-12 px-3 md:px-6 font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all flex-1 md:flex-none"
           >
             <Save className="h-5 w-5" />
             {isSaving ? "Saving stock in..." : "Save & Close"}
@@ -828,7 +849,7 @@ export default function PurchaseEntry() {
         {/* Inline Supplier Add Modal */}
         {showSupplierModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-text/40 backdrop-blur-sm">
-            <div className="bg-surface border border-border rounded-3xl p-6 max-w-md w-full shadow-2xl relative space-y-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="add-supplier-title" className="bg-surface border border-border rounded-3xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl relative space-y-4">
               <button
                 onClick={() => setShowSupplierModal(false)}
                 className="absolute top-4 right-4 text-text/40 hover:text-text"
@@ -837,7 +858,7 @@ export default function PurchaseEntry() {
               </button>
               
               <div>
-                <h3 className="text-xl font-black text-text flex items-center gap-2">
+                <h3 id="add-supplier-title" className="text-xl font-black text-text flex items-center gap-2">
                   <UserPlus className="h-5 w-5 text-primary" />
                   Add New Supplier
                 </h3>
@@ -912,9 +933,10 @@ export default function PurchaseEntry() {
                   </Button>
                   <Button
                     type="submit"
+                    disabled={isCreatingSupplier}
                     className="flex-1 rounded-xl h-11 font-bold"
                   >
-                    Save Supplier
+                    {isCreatingSupplier ? 'Saving...' : 'Save Supplier'}
                   </Button>
                 </div>
               </form>
@@ -931,17 +953,17 @@ export default function PurchaseEntry() {
                   <HelpCircle className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-text">Autofill batch info?</h3>
+                  <h3 className="text-lg font-black text-text">Use saved price defaults?</h3>
                   <p className="text-text/60 text-sm mt-1">
-                    An existing product matching <strong>{autofillModal.product.name}</strong> was selected. Do you want to autofill its last active batch number, prices, manufacturing date, and expiry date?
+                    Apply the saved rates for <strong>{autofillModal.product.name}</strong>? Batch number, manufacturing date, expiry date and quantity will remain manual for this purchase.
                   </p>
                 </div>
               </div>
 
               <div className="bg-text/[0.02] border border-border rounded-2xl p-4 text-xs space-y-1.5 font-semibold text-text/80">
-                <p><span className="text-text/50">Batch Number:</span> {autofillModal.product.batchNumber || 'N/A'}</p>
                 <p><span className="text-text/50">Purchase Price:</span> {formatCurrency(autofillModal.product.purchasePrice || 0)}</p>
                 <p><span className="text-text/50">Sale Price:</span> {formatCurrency(autofillModal.product.sellingPrice || 0)}</p>
+                <p><span className="text-text/50">MRP:</span> {formatCurrency(autofillModal.product.mrp || 0)}</p>
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -951,14 +973,14 @@ export default function PurchaseEntry() {
                   onClick={() => confirmAutofill(false)}
                   className="flex-1 rounded-xl h-11 font-bold border-border text-text/80"
                 >
-                  No, Enter Manually
+                  Enter Rates Manually
                 </Button>
                 <Button
                   type="button"
                   onClick={() => confirmAutofill(true)}
                   className="flex-1 rounded-xl h-11 font-bold"
                 >
-                  Yes, Autofill
+                  Apply Saved Rates
                 </Button>
               </div>
             </div>

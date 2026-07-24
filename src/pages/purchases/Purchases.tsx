@@ -33,6 +33,7 @@ export default function Purchases() {
 
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [cancelConfirm, setCancelConfirm] = useState<Purchase | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -45,11 +46,13 @@ export default function Purchases() {
   const loadPurchases = async () => {
     if (!user?.tenantId) return;
     setLoading(true);
+    setLoadError('');
     try {
       const data = await purchaseService.getPurchases(user.tenantId);
       setPurchases(data);
     } catch (error) {
       console.error('Error loading purchases:', error);
+      setLoadError('Purchase history could not be loaded. Check your connection and try again.');
       showToast('Failed to load purchases history', 'danger');
     } finally {
       setLoading(false);
@@ -98,7 +101,7 @@ export default function Purchases() {
 
   if (loading) {
     return (
-      <div className="p-4 md:p-8 max-w-[1600px] mx-auto space-y-8">
+      <div className="p-3 sm:p-4 md:p-8 max-w-[1600px] mx-auto space-y-5 md:space-y-8">
         <div className="flex justify-between items-center">
           <div className="h-10 w-48 bg-text/5 animate-pulse rounded-lg" />
           <div className="h-12 w-32 bg-text/5 animate-pulse rounded-lg" />
@@ -119,7 +122,7 @@ export default function Purchases() {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
-            <h1 className="text-4xl font-black text-text tracking-tight flex items-center gap-4">
+            <h1 className="text-2xl md:text-4xl font-black text-text tracking-tight flex items-center gap-3 md:gap-4">
               Stock In / Purchases
               <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center">
                 <Truck className="h-6 w-6 text-primary" />
@@ -129,7 +132,7 @@ export default function Purchases() {
           </div>
           <Button 
             onClick={() => navigate('/purchases/new')} 
-            className="rounded-2xl h-12 px-6 font-semibold flex items-center gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all self-start md:self-auto"
+            className="rounded-2xl min-h-12 px-6 font-semibold flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all w-full md:w-auto"
           >
             <Plus className="h-5 w-5" />
             New Purchase Entry
@@ -137,8 +140,8 @@ export default function Purchases() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="p-6 flex items-center justify-between">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6">
+          <Card className="p-4 md:p-6 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-text/60">Total Purchase Entries</p>
               <h3 className="text-3xl font-black mt-1 text-text">{stats.totalCount}</h3>
@@ -148,7 +151,7 @@ export default function Purchases() {
             </div>
           </Card>
 
-          <Card className="p-6 flex items-center justify-between">
+          <Card className="p-4 md:p-6 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-text/60">Total Purchase Value</p>
               <h3 className="text-3xl font-black mt-1 text-text">{formatCurrency(stats.totalValue)}</h3>
@@ -158,7 +161,7 @@ export default function Purchases() {
             </div>
           </Card>
 
-          <Card className="p-6 flex items-center justify-between">
+          <Card className="p-4 md:p-6 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-text/60">Active Suppliers</p>
               <h3 className="text-3xl font-black mt-1 text-text">{stats.uniqueSuppliers}</h3>
@@ -184,7 +187,12 @@ export default function Purchases() {
         </div>
 
         {/* Table View */}
-        {filteredPurchases.length === 0 ? (
+        {loadError ? (
+          <Card className="p-6 md:p-10 text-center border border-danger/20 rounded-2xl">
+            <p className="font-bold text-danger">{loadError}</p>
+            <Button className="mt-4 min-h-11" onClick={() => void loadPurchases()}>Retry</Button>
+          </Card>
+        ) : filteredPurchases.length === 0 ? (
           <EmptyState 
             title={searchTerm ? "No purchases found" : "No purchase transactions yet"} 
             description={searchTerm ? "Try searching with different terms" : "Log your first purchase entry to add inventory items"}
@@ -194,8 +202,46 @@ export default function Purchases() {
             ) : undefined}
           />
         ) : (
-          <Card className="overflow-hidden border border-border rounded-3xl bg-surface">
-            <div className="overflow-x-auto">
+          <>
+            <div className="grid gap-3 md:hidden">
+              {filteredPurchases.map((purchase) => (
+                <Card key={purchase.id} className="p-4 border border-border rounded-2xl bg-surface">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/purchases/${purchase.id}`)}
+                    className="w-full text-left"
+                    aria-label={`View purchase ${purchase.purchaseNumber}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-primary">{purchase.purchaseNumber}</span>
+                          {purchase.status === 'cancelled' && <Badge variant="danger">Cancelled</Badge>}
+                        </div>
+                        <p className="font-bold text-text mt-1">{purchase.supplierName}</p>
+                        <p className="text-xs text-text/55 mt-0.5">Invoice {purchase.invoiceNumber} · {formatDate(purchase.invoiceDate)}</p>
+                      </div>
+                      <p className="font-black text-text whitespace-nowrap">{formatCurrency(purchase.totalAmount)}</p>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-border flex items-center justify-between text-xs font-semibold text-text/60">
+                      <span>{purchase.itemsCount} item lines</span>
+                      <span className="text-primary">View details</span>
+                    </div>
+                  </button>
+                  {purchase.status !== 'cancelled' && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => setCancelConfirm(purchase)}
+                      className="mt-2 w-full min-h-11 text-danger hover:bg-danger/5 rounded-xl gap-2"
+                    >
+                      <Ban className="h-4 w-4" /> Cancel purchase
+                    </Button>
+                  )}
+                </Card>
+              ))}
+            </div>
+            <Card className="hidden md:block overflow-hidden border border-border rounded-3xl bg-surface">
+              <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-border bg-text/[0.02]">
@@ -260,8 +306,9 @@ export default function Purchases() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          </Card>
+              </div>
+            </Card>
+          </>
         )}
 
         {/* Cancellation Confirmation Modal */}
