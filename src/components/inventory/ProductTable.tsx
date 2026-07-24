@@ -1,11 +1,10 @@
 import { SkeletonTable } from '../common/Skeleton';
 import { EmptyState } from '../common/EmptyState';
 import { motion } from 'motion/react';
-import { Edit2, Trash2, MoreVertical, Package, AlertCircle, Calendar, CheckSquare, Square, ChevronRight } from 'lucide-react';
+import { Edit2, Trash2, Package, Calendar, CheckSquare, Square, ChevronRight } from 'lucide-react';
 import { Product } from '../../types';
 import { ProductIntelligence } from '../../services/inventoryIntelligenceService';
 import { cn } from '../../utils/cn';
-import { useState, useMemo } from 'react';
 import { formatCurrency } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
 
@@ -79,7 +78,7 @@ export function ProductTable({
             <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur-md border-b border-border shadow-sm">
               <tr>
                 <th className="px-6 py-5 text-left w-12">
-                  <button onClick={toggleAll} className="text-text/20 hover:text-primary transition-colors">
+                  <button onClick={toggleAll} aria-label="Select all products" className="h-11 w-11 flex items-center justify-center text-text/40 hover:text-primary transition-colors">
                     {selectedIds.length === products.length && products.length > 0 ? <CheckSquare className="h-5 w-5 text-primary" /> : <Square className="h-5 w-5" />}
                   </button>
                 </th>
@@ -175,7 +174,7 @@ export function ProductTable({
                           <div className="w-full h-1.5 bg-background rounded-full overflow-hidden border border-border">
                             <div 
                               className={cn("h-full rounded-full transition-all duration-1000", stockStatus.dot)}
-                              style={{ width: `${Math.min((product.stockQuantity / (product.minimumStock * 2)) * 100, 100)}%` }}
+                              style={{ width: `${Math.min((product.stockQuantity / Math.max(product.minimumStock * 2, 1)) * 100, 100)}%` }}
                             />
                           </div>
                         </div>
@@ -198,18 +197,18 @@ export function ProductTable({
                         )}
                       </td>
                       <td className="px-6 py-5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 group-focus-within:translate-x-0">
                           <button 
                             onClick={() => onEdit(product)}
                             aria-label={`Edit ${product.name}`}
-                            className="p-2.5 hover:bg-info/10 text-text/40 hover:text-info rounded-xl transition-all"
+                            className="h-11 w-11 flex items-center justify-center hover:bg-info/10 text-text/40 hover:text-info rounded-xl transition-all"
                           >
                             <Edit2 className="h-4 w-4" />
                           </button>
                           <button 
                             onClick={() => onDelete(product)}
                             aria-label={`Archive ${product.name}`}
-                            className="p-2.5 hover:bg-danger/10 text-text/40 hover:text-danger rounded-xl transition-all"
+                            className="h-11 w-11 flex items-center justify-center hover:bg-danger/10 text-text/40 hover:text-danger rounded-xl transition-all"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -225,7 +224,7 @@ export function ProductTable({
       </div>
 
       {/* Mobile Card View */}
-      <div className="lg:hidden grid grid-cols-1 gap-4">
+      <div className="lg:hidden grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
         {products.length === 0 ? (
           <EmptyState 
             title="No items found" 
@@ -236,6 +235,7 @@ export function ProductTable({
         ) : (
           products.map((product) => {
             const stockStatus = getStockStatus(product.stockQuantity, product.minimumStock);
+            const expiryStatus = getExpiryStatus(product.expiryDate);
             const isSelected = selectedIds.includes(product.id);
             
             return (
@@ -243,21 +243,21 @@ export function ProductTable({
                 key={product.id}
                 onClick={() => onView(product)}
                 className={cn(
-                  "p-5 bg-surface rounded-3xl border shadow-md flex flex-col gap-4 relative overflow-hidden transition-all active:scale-[0.98]",
+                  "p-4 sm:p-5 bg-surface rounded-2xl sm:rounded-3xl border shadow-md flex flex-col gap-4 relative overflow-hidden transition-all active:scale-[0.98]",
                   isSelected ? "border-primary ring-2 ring-primary/10" : "border-border"
                 )}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div className={cn(
                       "h-10 w-10 rounded-xl border flex items-center justify-center font-black",
                       isSelected ? "bg-primary text-white border-primary" : "bg-background border-border text-text/20"
                     )}>
                       {product.name[0].toUpperCase()}
                     </div>
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-text leading-tight">{product.name}</h4>
+                    <div className="flex min-w-0 flex-col">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <h4 className="truncate font-bold text-text leading-tight">{product.name}</h4>
                         {intelligence[product.id]?.movement === 'Fast Moving' && (
                           <span className="px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-[8px] font-black uppercase tracking-widest">Fast</span>
                         )}
@@ -265,12 +265,16 @@ export function ProductTable({
                           <span className="px-1.5 py-0.5 rounded-md bg-danger/10 text-danger text-[8px] font-black uppercase tracking-widest">Dead</span>
                         )}
                       </div>
-                      <p className="text-[10px] font-bold text-text/40 uppercase tracking-widest">{product.sku}</p>
+                      <p className="truncate text-[11px] font-bold text-primary">{product.brand || 'Generic'}</p>
+                      <p className="truncate text-[9px] font-bold text-text/40 uppercase tracking-wider">
+                        SKU: {product.sku || 'N/A'} · Batch: {product.batchNumber || 'N/A'}
+                      </p>
                     </div>
                   </div>
                   <button 
                     onClick={(e) => { e.stopPropagation(); toggleOne(product.id); }}
-                    className={cn("p-2 rounded-lg transition-colors", isSelected ? "bg-primary text-white" : "bg-background text-text/20")}
+                    aria-label={`${isSelected ? 'Deselect' : 'Select'} ${product.name}`}
+                    className={cn("h-11 w-11 shrink-0 flex items-center justify-center rounded-xl transition-colors", isSelected ? "bg-primary text-white" : "bg-background text-text/40")}
                   >
                     {isSelected ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                   </button>
@@ -288,16 +292,28 @@ export function ProductTable({
                   </div>
                   <div className="p-3 bg-background rounded-2xl border border-border">
                     <p className="text-[9px] font-black text-text/30 uppercase mb-1">Price</p>
-                    <span className="text-sm font-black text-text">{formatCurrency(product.sellingPrice)}</span>
+                      <span className="text-sm font-black text-text">{formatCurrency(product.sellingPrice)}</span>
+                      <span className="block text-[9px] font-bold text-text/35 line-through">MRP {formatCurrency(product.mrp)}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                  <span className="text-[10px] font-bold text-text/40 uppercase">
-                    Exp: {toJsDate(product.expiryDate).toLocaleDateString()}
-                  </span>
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="text-[10px] font-bold text-text/50 uppercase">
+                      Exp: {toJsDate(product.expiryDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
+                    </span>
+                    {expiryStatus && (
+                      <span className={cn("w-fit px-2 py-0.5 rounded-md text-[8px] font-black uppercase", expiryStatus.color)}>
+                        {expiryStatus.label}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); onEdit(product); }} className="p-2 text-text/20 hover:text-info">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onEdit(product); }}
+                      aria-label={`Edit ${product.name}`}
+                      className="h-11 w-11 flex items-center justify-center rounded-xl text-text/40 hover:bg-info/10 hover:text-info"
+                    >
                       <Edit2 className="h-4 w-4" />
                     </button>
                     <ChevronRight className="h-4 w-4 text-text/20" />
