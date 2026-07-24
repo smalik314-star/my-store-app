@@ -64,7 +64,7 @@ export function KpiCard({
         </div>
         
         <div className="flex flex-col mt-1">
-          <span className="text-xl font-black text-text tracking-tight">{value}</span>
+          <span className="text-lg sm:text-xl font-black text-text tracking-tight break-words leading-tight">{value}</span>
           {trend && (
             <div className="mt-2 flex items-center gap-1.5">
               <span className={`flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-md ${isUp ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
