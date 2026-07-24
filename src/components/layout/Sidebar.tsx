@@ -99,12 +99,12 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
   const sidebarVariants = {
     open: { 
       x: 0,
-      width: isMobile ? '280px' : '260px',
+      width: isMobile ? 'min(88vw, 320px)' : '260px',
       transition: shouldReduceMotion ? { duration: 0 } : transitions.default
     },
     closed: { 
-      x: isMobile ? -280 : 0,
-      width: isMobile ? '280px' : '88px',
+      x: isMobile ? -340 : 0,
+      width: isMobile ? 'min(88vw, 320px)' : '88px',
       transition: shouldReduceMotion ? { duration: 0 } : transitions.default
     }
   } as any;
@@ -125,7 +125,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
       </AnimatePresence>
 
       <motion.aside
-        initial={isMobile ? { x: -280 } : false}
+        initial={isMobile ? { x: -340 } : false}
         animate={isOpen ? 'open' : 'closed'}
         variants={sidebarVariants}
         className={cn(
