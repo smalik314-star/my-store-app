@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, AlertCircle, Package, IndianRupee, Calendar, MapPin, 
-  ImageIcon, Percent, TrendingUp, Calculator, Info, 
+  ImageIcon, Percent, TrendingUp, Calculator, Info,
   Barcode, Factory, Tag, ChevronDown, ChevronUp, Upload, Trash2,
   CheckCircle2, FileText
 } from 'lucide-react';
@@ -192,9 +192,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   const [showProductDropdown, setShowProductDropdown] = useState(false);
   const [showBrandDropdown, setShowBrandDropdown] = useState(false);
 
-  const [selectedSuggestionProduct, setSelectedSuggestionProduct] = useState<Product | null>(null);
-  const [showAutofillConfirm, setShowAutofillConfirm] = useState(false);
-
   const [masterSuggestions, setMasterSuggestions] = useState<MasterMedicine[]>([]);
   const [masterBrandSuggestions, setMasterBrandSuggestions] = useState<string[]>([]);
 
@@ -254,15 +251,9 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       ...prev,
       name: med.name,
       brand: resolvedBrand,
-      genericName: med.genericName || '',
-      category: med.category || 'Others',
-      manufacturer: med.manufacturer || '',
-      mrp: med.mrp || 0,
-      unit: med.unit || 'Strip',
-      purchasePrice: med.purchasePrice || 0,
-      sellingPrice: med.sellingPrice || 0,
     }));
     setShowProductDropdown(false);
+    focusNextProductField(resolvedBrand);
   };
 
   useEffect(() => {
@@ -322,72 +313,21 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
     const resolvedBrand = resolveSelectedBrand(selectedProd.name, selectedProd.brand);
     setProductNameInput(selectedProd.name);
-    setSelectedSuggestionProduct(selectedProd);
-    
-    // Instantly autofill basic metadata so the Brand and other fields are visually filled immediately!
     setBrandNameInput(resolvedBrand);
     setFormData(prev => ({
       ...prev,
       name: selectedProd.name,
       brand: resolvedBrand,
-      genericName: selectedProd.genericName || '',
-      category: selectedProd.category || 'Others',
-      manufacturer: selectedProd.manufacturer || '',
-      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
-      unit: selectedProd.unit || 'Strip',
-      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
-      sku: selectedProd.sku || '',
-      barcode: selectedProd.barcode || '',
-      rackLocation: selectedProd.rackLocation || '',
-      description: selectedProd.description || '',
     }));
-    if (selectedProd.imageUrl) {
-      setImagePreview(selectedProd.imageUrl);
-    }
-
-    setShowAutofillConfirm(true);
+    setShowProductDropdown(false);
+    focusNextProductField(resolvedBrand);
   };
 
-  const applyAutofillMetadata = (selectedProd: Product) => {
-    setBrandNameInput(selectedProd.brand || '');
-    setFormData(prev => ({
-      ...prev,
-      brand: selectedProd.brand || '',
-      genericName: selectedProd.genericName || '',
-      category: selectedProd.category || 'Others',
-      manufacturer: selectedProd.manufacturer || '',
-      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
-      unit: selectedProd.unit || 'Strip',
-      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
-    }));
-  };
-
-  const applyAutofillAll = (selectedProd: Product) => {
-    setBrandNameInput(selectedProd.brand || '');
-    setFormData(prev => ({
-      ...prev,
-      brand: selectedProd.brand || '',
-      genericName: selectedProd.genericName || '',
-      category: selectedProd.category || 'Others',
-      manufacturer: selectedProd.manufacturer || '',
-      gstPercentage: selectedProd.gstPercentage !== undefined ? selectedProd.gstPercentage : 12,
-      unit: selectedProd.unit || 'Strip',
-      minimumStock: selectedProd.minimumStock !== undefined ? selectedProd.minimumStock : 10,
-      batchNumber: selectedProd.batchNumber || '',
-      manufacturingDate: selectedProd.manufacturingDate ? toJsDate(selectedProd.manufacturingDate).toISOString().split('T')[0] : '',
-      expiryDate: selectedProd.expiryDate ? toJsDate(selectedProd.expiryDate).toISOString().split('T')[0] : '',
-      purchasePrice: selectedProd.purchasePrice || 0,
-      sellingPrice: selectedProd.sellingPrice || 0,
-      stockQuantity: selectedProd.stockQuantity || 0,
-      sku: selectedProd.sku || '',
-      barcode: selectedProd.barcode || '',
-      mrp: selectedProd.mrp || 0,
-      rackLocation: selectedProd.rackLocation || '',
-      description: selectedProd.description || '',
-    }));
-    if (selectedProd.imageUrl) {
-      setImagePreview(selectedProd.imageUrl);
-    }
+  const focusNextProductField = (resolvedBrand: string) => {
+    setTimeout(() => {
+      const targetName = resolvedBrand ? 'batchNumber' : 'brand';
+      document.querySelector<HTMLInputElement>(`input[name="${targetName}"]`)?.focus();
+    }, 50);
   };
 
   const uniqueProductsSuggestions: Product[] = [];
@@ -439,16 +379,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
           handleSelectProductSuggestion(item.data);
         } else {
           handleSelectMasterMedicine(item.data);
-          // Focus Brand input if it's empty, otherwise focus Batch Number
-          setTimeout(() => {
-            const brandInput = document.querySelector('input[name="brand"]') as HTMLInputElement;
-            const batchInput = document.querySelector('input[name="batchNumber"]') as HTMLInputElement;
-            if (brandInput && !brandInput.value) {
-              brandInput.focus();
-            } else if (batchInput) {
-              batchInput.focus();
-            }
-          }, 50);
         }
         setShowProductDropdown(false);
       }
@@ -462,16 +392,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
           handleSelectProductSuggestion(item.data);
         } else {
           handleSelectMasterMedicine(item.data);
-          // Focus Brand input if empty, otherwise focus Batch Number
-          setTimeout(() => {
-            const brandInput = document.querySelector('input[name="brand"]') as HTMLInputElement;
-            const batchInput = document.querySelector('input[name="batchNumber"]') as HTMLInputElement;
-            if (brandInput && !brandInput.value) {
-              brandInput.focus();
-            } else if (batchInput) {
-              batchInput.focus();
-            }
-          }, 50);
         }
         setShowProductDropdown(false);
       }
@@ -724,22 +644,25 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-text/40 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-text/40 backdrop-blur-sm overflow-hidden sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="product-form-title"
     >
       <motion.div
         initial={{ scale: 0.95, opacity: 0, y: 15 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 15 }}
-        className="bg-surface w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden my-4 border border-border flex flex-col max-h-[90vh]"
+        className="bg-surface w-full h-[100dvh] max-w-4xl overflow-hidden border-0 flex flex-col sm:h-auto sm:max-h-[90vh] sm:my-4 sm:rounded-[2rem] sm:border sm:border-border sm:shadow-2xl"
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border bg-background/50 shrink-0">
+        <div className="flex items-center justify-between gap-3 p-4 sm:p-6 border-b border-border bg-background/50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
               <Package className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h2 className="text-xl font-black text-text tracking-tight">
+              <h2 id="product-form-title" className="text-lg sm:text-xl font-black text-text tracking-tight">
                 {product ? 'Edit Product' : 'Add New Product'}
               </h2>
               <p className="text-[10px] font-bold text-text/30 uppercase tracking-[0.1em] mt-0.5">
@@ -750,14 +673,15 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
           <button 
             type="button"
             onClick={onClose} 
-            className="p-2 hover:bg-danger/10 hover:text-danger rounded-xl transition-all text-text/20"
+            aria-label="Close product form"
+            className="h-11 w-11 shrink-0 flex items-center justify-center hover:bg-danger/10 hover:text-danger rounded-xl transition-all text-text/40"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-6 space-y-6">
           {error && (
             <motion.div 
               initial={{ opacity: 0, y: -5 }}
@@ -834,8 +758,8 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     {masterSuggestions.length > 0 && (
                       <div>
                         <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-primary flex justify-between items-center">
-                          <span>From Master Database (2.5L+ Meds)</span>
-                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Form Auto-Fill</span>
+                          <span>From Medicine Catalogue</span>
+                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Brand Auto-Fill</span>
                         </div>
                         <ul className="divide-y divide-border/30">
                           {masterSuggestions.slice(0, 10).map((med, idx) => {
@@ -1346,13 +1270,13 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         </form>
 
         {/* Footer */}
-        <div className="p-6 border-t border-border bg-background/50 flex flex-wrap items-center justify-end gap-3 shrink-0">
+        <div className="grid grid-cols-2 gap-2 p-3 border-t border-border bg-background/95 backdrop-blur-md shrink-0 sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-3 sm:p-6">
           <Button 
             type="button"
             variant="outline" 
             onClick={onClose} 
             disabled={saveLoading} 
-            className="font-bold border-border bg-surface text-xs"
+            className="col-span-2 h-11 w-full font-bold border-border bg-surface text-xs sm:col-span-1 sm:w-auto"
           >
             Cancel
           </Button>
@@ -1362,7 +1286,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               variant="outline"
               onClick={(event) => handleSubmit(event, true)}
               isLoading={saveLoading || isUploading}
-              className="px-6 h-11 font-black text-xs uppercase tracking-widest rounded-xl border-primary text-primary"
+              className="w-full px-3 h-11 font-black text-[11px] uppercase tracking-wide rounded-xl border-primary text-primary sm:w-auto sm:px-6 sm:text-xs sm:tracking-widest"
               leftIcon={!(saveLoading || isUploading) && <CheckCircle2 className="h-4 w-4" />}
             >
               Save & New
@@ -1372,71 +1296,16 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
             type="button"
             onClick={(event) => handleSubmit(event, false)}
             isLoading={saveLoading || isUploading}
-            className="px-6 h-11 font-black text-xs uppercase tracking-widest shadow-lg shadow-primary/20 rounded-xl"
+            className={cn(
+              "w-full px-3 h-11 font-black text-[11px] uppercase tracking-wide shadow-lg shadow-primary/20 rounded-xl sm:w-auto sm:px-6 sm:text-xs sm:tracking-widest",
+              product && "col-span-2 sm:col-span-1"
+            )}
             leftIcon={!(saveLoading || isUploading) && <CheckCircle2 className="h-4 w-4" />}
           >
             {product ? 'Save Changes' : 'Save & Close'}
           </Button>
         </div>
 
-        {/* Autofill Confirmation Modal */}
-        <AnimatePresence>
-          {showAutofillConfirm && selectedSuggestionProduct && (
-            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-surface max-w-md w-full rounded-2xl p-6 shadow-2xl border border-border"
-              >
-                <div className="flex items-start gap-4">
-                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <Info className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-text">Autofill Stock & Pricing?</h3>
-                    <p className="text-xs text-text/60 mt-1.5 leading-relaxed font-semibold">
-                      We found <span className="font-bold text-text">"{selectedSuggestionProduct.name}"</span> in your inventory.
-                      Would you like to copy all pricing details, batch information, dates, and stock quantity too, or only copy the basic product metadata?
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2 mt-6">
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      applyAutofillAll(selectedSuggestionProduct);
-                      setShowAutofillConfirm(false);
-                    }}
-                    className="w-full text-xs font-bold py-2.5"
-                  >
-                    Yes, Copy Everything (Prices, Stock & Dates)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      applyAutofillMetadata(selectedSuggestionProduct);
-                      setShowAutofillConfirm(false);
-                    }}
-                    className="w-full text-xs font-bold py-2.5 border-border bg-background"
-                  >
-                    No, Basic Metadata Only (Brand, Category, GST % etc.)
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutofillConfirm(false);
-                    }}
-                    className="text-xs font-semibold text-text/40 hover:text-text/70 mt-2 transition-colors py-1"
-                  >
-                    Cancel / Name Only
-                  </button>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
       </motion.div>
     </motion.div>
   );
