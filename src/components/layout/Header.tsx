@@ -351,29 +351,31 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
 
   return (
     <>
-      <header className="sticky top-0 z-30 h-16 lg:h-[72px] w-full border-b border-border bg-surface/90 backdrop-blur-md px-4 md:px-8 no-print">
-        <div className="flex h-full items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+      <header className="sticky top-0 z-30 h-16 lg:h-[72px] w-full border-b border-border bg-surface/95 backdrop-blur-md px-2 min-[360px]:px-3 md:px-6 no-print">
+        <div className="flex h-full items-center justify-between gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-1 min-[360px]:gap-2 md:gap-3 min-w-0">
             <Button
               variant="ghost"
               size="sm"
               onClick={onMenuClick}
-              className="lg:hidden p-2 h-10 w-10 flex shrink-0"
+              className="lg:hidden p-2 h-11 w-11 flex shrink-0"
+              aria-label="Open navigation menu"
               id="menu-toggle-btn"
             >
               <Menu className="h-6 w-6" />
             </Button>
-            <Logo className="h-[32px] w-[32px] md:h-[36px] md:w-[36px] lg:hidden shrink-0" variant="color" />
-            <h2 className="text-base md:text-lg font-semibold text-text truncate">
+            <Logo className="hidden min-[360px]:block h-[30px] w-[30px] md:h-[36px] md:w-[36px] lg:hidden shrink-0" variant="color" />
+            <h2 className="hidden min-[430px]:block max-w-[120px] text-sm md:max-w-none md:text-lg font-semibold text-text truncate">
               {getPageTitle()}
             </h2>
           </div>
 
-          <div className="flex items-center gap-2 md:gap-6 shrink-0">
+          <div className="flex items-center gap-0.5 min-[360px]:gap-1 md:gap-4 shrink-0">
             {/* Quick Bill Trigger Button */}
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
-              className="flex items-center gap-1.5 px-3 py-2 md:px-4 md:py-2.5 text-xs font-black text-white bg-accent hover:bg-accent/90 rounded-xl transition-all shadow-md shadow-accent/15 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+              className="flex h-11 w-11 items-center justify-center gap-1.5 p-0 sm:w-auto sm:px-3 md:px-4 text-xs font-black text-white bg-accent hover:bg-accent/90 rounded-xl transition-all shadow-sm shadow-accent/15 cursor-pointer active:scale-[0.98]"
+              aria-label="Open quick bill"
               id="global-quick-bill-trigger"
             >
               <Zap className="h-3.5 w-3.5" />
@@ -394,7 +396,8 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
             {/* Mobile Search Button Icon */}
             <button 
               onClick={() => setSearchOpen(true)}
-              className="md:hidden text-text/40 hover:text-text transition-colors p-2"
+              className="md:hidden flex h-11 w-11 items-center justify-center rounded-xl text-text/50 hover:bg-background hover:text-text transition-colors"
+              aria-label="Search PharmaFlow"
               id="global-search-mobile-trigger"
             >
               <Search className="h-5 w-5" />
@@ -406,7 +409,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                 variant="ghost" 
                 size="sm" 
                 onClick={() => setNotifOpen(!notifOpen)}
-                className="relative p-2 h-10 w-10 rounded-full text-text/40 hover:text-text cursor-pointer"
+                className="relative p-2 h-11 w-11 rounded-xl text-text/50 hover:bg-background hover:text-text cursor-pointer"
                 id="notification-bell-btn"
               >
                 <Bell className="h-5 w-5" />
@@ -422,7 +425,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute right-0 mt-2 w-80 sm:w-96 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[480px]"
+                    className="fixed left-2 right-2 top-16 mt-1 bg-surface border border-border rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[calc(100dvh-5rem)] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 sm:max-h-[480px] sm:rounded-2xl"
                     id="notification-popover-dropdown"
                   >
                     {/* Popover Header */}
@@ -531,7 +534,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
             <div className="relative" ref={profileRef}>
               <button
                 onClick={() => setProfileOpen(!profileOpen)}
-                className="flex items-center gap-2 md:gap-3 md:pl-6 md:border-l md:border-border hover:opacity-85 active:opacity-75 transition-all text-left cursor-pointer focus:outline-none"
+                className="flex h-11 min-w-11 items-center justify-center gap-2 md:h-auto md:justify-start md:gap-3 md:pl-4 md:border-l md:border-border hover:opacity-85 active:opacity-75 transition-all text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl"
                 id="user-profile-menu-btn"
               >
                 <div className="hidden md:block text-right">
@@ -825,4 +828,3 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
     </>
   );
 }
-
