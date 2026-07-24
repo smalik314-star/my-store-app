@@ -37,13 +37,20 @@ export default function Dashboard() {
     totalCustomers: 0,
     totalInvoices: 0,
     todaySales: 0,
+    todayGrossProfit: 0,
+    todayInvoiceCount: 0,
+    todayPurchases: 0,
     monthlyRevenue: 0,
+    totalReceivable: 0,
+    totalPayable: 0,
+    stockValue: 0,
     lowStockItems: 0,
     outOfStockItems: 0,
     criticalStockItems: 0,
     expiryAlerts: 0,
   });
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
+  const [dashboardInvoices, setDashboardInvoices] = useState<Invoice[]>([]);
   const [alerts, setAlerts] = useState<{ lowStock: Product[], expiring: Product[] }>({
     lowStock: [],
     expiring: []
@@ -79,13 +86,13 @@ export default function Dashboard() {
         console.error('Dashboard: Stats error', err);
         setLoading(false);
         clearTimeout(timeoutId);
+      },
+      (invoices) => {
+        console.log('Dashboard: Received invoices update');
+        setDashboardInvoices(invoices);
+        setRecentInvoices(invoices.slice(0, 10));
       }
     );
-
-    const unsubInvoices = dashboardService.subscribeToRecentInvoices(user.tenantId, (invoices) => {
-      console.log('Dashboard: Received invoices update');
-      setRecentInvoices(invoices);
-    });
 
     const unsubAlerts = dashboardService.subscribeToAlerts(user.tenantId, (newAlerts) => {
       console.log('Dashboard: Received alerts update');
@@ -95,7 +102,6 @@ export default function Dashboard() {
     return () => {
       clearTimeout(timeoutId);
       unsubStats();
-      unsubInvoices();
       unsubAlerts();
     };
   }, [user]);
@@ -107,8 +113,8 @@ export default function Dashboard() {
 
   return (
     <PageTransition>
-      <PageContainer className="gap-5">
-      <div className="erp-panel p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+      <PageContainer className="gap-4 sm:gap-5 pb-20 lg:pb-0">
+      <div className="erp-panel p-3 sm:p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="hidden sm:flex h-11 w-11 rounded-lg bg-primary text-white items-center justify-center shadow-sm">
             <Activity className="h-5 w-5" />
@@ -126,15 +132,15 @@ export default function Dashboard() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="h-9 px-3 rounded-lg border border-border bg-background flex items-center gap-2 text-[11px] font-bold text-text/60">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+          <div className="col-span-2 h-10 px-3 rounded-lg border border-border bg-background flex items-center justify-center sm:justify-start gap-2 text-[11px] font-bold text-text/60 sm:h-9">
             <CalendarDays className="h-3.5 w-3.5 text-primary" />
             {new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date())}
           </div>
           <Button 
             variant="outline" 
             size="sm" 
-            className="font-bold h-9 hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
+            className="w-full justify-center font-bold h-11 sm:h-9 sm:w-auto hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
             leftIcon={<Zap className="h-4 w-4" />}
             onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
           >
@@ -143,7 +149,7 @@ export default function Dashboard() {
           <Button 
             variant="outline" 
             size="sm" 
-            className="hidden md:flex font-bold h-9"
+            className="col-span-2 w-full justify-center font-bold h-11 sm:col-span-1 sm:h-9 sm:w-auto"
             onClick={() => handleQuickAction('/purchases/new')}
           >
             New Purchase
@@ -151,7 +157,7 @@ export default function Dashboard() {
           <Button 
             variant="primary" 
             size="sm" 
-            className="font-bold h-9 shadow-sm"
+            className="w-full justify-center font-bold h-11 sm:h-9 sm:w-auto shadow-sm"
             leftIcon={<Plus className="h-4 w-4" />}
             onClick={() => handleQuickAction('/billing')}
           >
@@ -161,7 +167,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
         <KpiCard 
           label="Products" 
           value={stats.totalProducts} 
@@ -219,13 +225,12 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
         {/* Main Content Area */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        <div className="lg:col-span-2 flex flex-col gap-4 lg:gap-5">
           {(settings?.showDashboardCharts ?? true) && (
             <DashboardCharts 
-              invoices={recentInvoices} 
-              products={alerts.lowStock} // Using lowStock as a proxy for product data for now
+              invoices={dashboardInvoices}
               loading={loading} 
             />
           )}
@@ -233,13 +238,13 @@ export default function Dashboard() {
         </div>
 
         {/* Sidebar Widgets */}
-        <div className="flex flex-col gap-6">
-          <Card className="p-6 border-primary/20 bg-primary/5 flex flex-col gap-4">
+        <div className="flex flex-col gap-4 lg:gap-5">
+          <Card className="p-4 sm:p-5 border-primary/20 bg-primary/5 flex flex-col gap-3">
             <h3 className="text-sm font-bold text-primary uppercase tracking-widest">Quick Actions</h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
               <button 
                 onClick={() => handleQuickAction('/billing')}
-                className="flex items-center justify-between p-4 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group"
+                className="flex min-h-14 items-center justify-between p-3 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -251,7 +256,7 @@ export default function Dashboard() {
               </button>
               <button 
                 onClick={() => handleQuickAction('/inventory')}
-                className="flex items-center justify-between p-4 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group"
+                className="flex min-h-14 items-center justify-between p-3 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary"
               >
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-lg bg-secondary/10 flex items-center justify-center">
@@ -263,7 +268,7 @@ export default function Dashboard() {
               </button>
               <button 
                 onClick={() => handleQuickAction('/customers')}
-                className="flex items-center justify-between p-4 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group"
+                className="flex min-h-14 items-center justify-between p-3 bg-white rounded-xl border border-primary/10 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               >
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-lg bg-accent/10 flex items-center justify-center">
@@ -277,7 +282,7 @@ export default function Dashboard() {
           </Card>
 
           <Card className="p-0 overflow-hidden border-warning/20">
-            <div className="flex items-center justify-between p-5 border-b border-border bg-background/50">
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-background/50">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-text uppercase tracking-wider">Stock Intelligence</h3>
                 <div className="flex gap-1">
@@ -288,27 +293,27 @@ export default function Dashboard() {
               <TrendingUp className="h-4 w-4 text-warning" />
             </div>
             
-            <div className="p-4 grid grid-cols-3 gap-2">
+            <div className="p-3 sm:p-4 grid grid-cols-3 gap-1.5 sm:gap-2">
                <button 
                  onClick={() => navigate('/low-stock')}
-                 className="flex flex-col items-center p-3 rounded-xl bg-danger/5 border border-danger/10 hover:bg-danger/10 transition-colors"
+                 className="flex min-h-20 flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-danger/5 border border-danger/10 hover:bg-danger/10 transition-colors"
                >
                  <span className="text-xl font-black text-danger">{stats.outOfStockItems}</span>
-                 <span className="text-[8px] font-bold text-danger/60 uppercase whitespace-nowrap">Out of Stock</span>
+                 <span className="text-center text-[8px] font-bold leading-tight text-danger/60 uppercase">Out of Stock</span>
                </button>
                <button 
                  onClick={() => navigate('/low-stock')}
-                 className="flex flex-col items-center p-3 rounded-xl bg-orange-500/5 border border-orange-500/10 hover:bg-orange-500/10 transition-colors"
+                 className="flex min-h-20 flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-orange-500/5 border border-orange-500/10 hover:bg-orange-500/10 transition-colors"
                >
                  <span className="text-xl font-black text-orange-500">{stats.criticalStockItems}</span>
-                 <span className="text-[8px] font-bold text-orange-500/60 uppercase whitespace-nowrap">Critical</span>
+                 <span className="text-center text-[8px] font-bold leading-tight text-orange-500/60 uppercase">Critical</span>
                </button>
                <button 
                  onClick={() => navigate('/low-stock')}
-                 className="flex flex-col items-center p-3 rounded-xl bg-warning/5 border border-warning/10 hover:bg-warning/10 transition-colors"
+                 className="flex min-h-20 flex-col items-center justify-center p-2 sm:p-3 rounded-xl bg-warning/5 border border-warning/10 hover:bg-warning/10 transition-colors"
                >
                  <span className="text-xl font-black text-warning">{stats.lowStockItems}</span>
-                 <span className="text-[8px] font-bold text-warning/60 uppercase whitespace-nowrap">Low Stock</span>
+                 <span className="text-center text-[8px] font-bold leading-tight text-warning/60 uppercase">Low Stock</span>
                </button>
             </div>
 
