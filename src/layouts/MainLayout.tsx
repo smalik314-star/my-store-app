@@ -48,7 +48,7 @@ export default function MainLayout() {
         !isMobile && sidebarOpen ? "pl-[260px]" : !isMobile ? "pl-[88px]" : "pl-0"
       )}>
         <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
-        <div className="flex-1 p-3 md:p-4 lg:p-5 overflow-x-hidden w-full">
+        <div className="flex-1 p-2 min-[360px]:p-3 md:p-4 lg:p-5 overflow-x-hidden w-full">
           <Outlet />
         </div>
         <AIAssistant />
