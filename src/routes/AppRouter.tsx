@@ -10,6 +10,7 @@ const Dashboard = lazy(() => import('../pages/dashboard/Dashboard'));
 const Inventory = lazy(() => import('../pages/inventory/Inventory'));
 const ExpiryAlerts = lazy(() => import('../pages/inventory/ExpiryAlerts'));
 const LowStock = lazy(() => import('../pages/inventory/LowStock'));
+const StockAdjustment = lazy(() => import('../pages/inventory/StockAdjustment'));
 const Customers = lazy(() => import('../pages/customers/Customers'));
 const CustomerProfile = lazy(() => import('../pages/customers/CustomerProfile'));
 const Billing = lazy(() => import('../pages/billing/Billing'));
@@ -58,6 +59,7 @@ export function AppRouter() {
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/expiry-alerts" element={<ExpiryAlerts />} />
               <Route path="/low-stock" element={<LowStock />} />
+              <Route path="/stock-adjustment" element={<StockAdjustment />} />
               <Route path="/customers" element={<Customers />} />
               <Route path="/customers/:id" element={<CustomerProfile />} />
               <Route path="/billing" element={<Billing />} />

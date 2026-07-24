@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   increment,
   query,
@@ -36,6 +37,16 @@ interface CreatePurchaseReturnInput {
 const normalizeBatch = (value: string) => value.trim().toUpperCase();
 
 export const purchaseReturnService = {
+  async getReturnedQuantities(
+    tenantId: string,
+    purchaseId: string
+  ): Promise<Record<string, number>> {
+    if (!tenantId || !purchaseId) return {};
+    const snapshot = await getDoc(doc(db, 'purchaseReturnSummaries', purchaseId));
+    if (!snapshot.exists() || snapshot.data().tenantId !== tenantId) return {};
+    return { ...(snapshot.data().returnedByItem || {}) };
+  },
+
   async createReturn(tenantId: string, input: CreatePurchaseReturnInput): Promise<PurchaseReturnRecord> {
     const actorId = auth.currentUser?.uid;
     if (!tenantId || !actorId) throw new Error('You must be signed in to create a purchase return.');

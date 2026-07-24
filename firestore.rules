@@ -208,6 +208,31 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /stockAdjustments/{adjustmentId} {
+      allow read: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'posted'
+        && request.resource.data.reason in [
+          'physical_increase','physical_decrease','damage','breakage',
+          'expired','lost','found','correction','other'
+        ]
+        && request.resource.data.reasonNote is string
+        && request.resource.data.reasonNote.size() > 0
+        && request.resource.data.previousBatchQuantity is int
+        && request.resource.data.previousBatchQuantity >= 0
+        && request.resource.data.newBatchQuantity is int
+        && request.resource.data.newBatchQuantity >= 0
+        && request.resource.data.quantityDifference is int
+        && request.resource.data.quantityDifference
+          == request.resource.data.newBatchQuantity - request.resource.data.previousBatchQuantity
+        && request.resource.data.previousProductStock is int
+        && request.resource.data.newProductStock is int
+        && request.resource.data.newProductStock >= 0;
+      allow update, delete: if false;
+    }
+
     match /receipts/{receiptId} {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)

@@ -19,7 +19,9 @@ import {
   Zap,
   CreditCard,
   Truck,
-  UserCog
+  UserCog,
+  RotateCcw,
+  SlidersHorizontal
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -27,6 +29,7 @@ import { useToast } from '../../context/ToastContext';
 import { Button } from '../common/Button';
 import { transitions } from '../../utils/animations';
 import { Logo } from '../common/Logo';
+import type { UserRole } from '../../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -35,7 +38,15 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-const menuSections = [
+interface MenuItem {
+  icon: typeof LayoutDashboard;
+  label: string;
+  path: string;
+  active: boolean;
+  roles?: UserRole[];
+}
+
+const menuSections: Array<{ title: string; items: MenuItem[] }> = [
   {
     title: 'Workspace',
     items: [
@@ -55,6 +66,7 @@ const menuSections = [
     items: [
       { icon: Plus, label: 'New Purchase', path: '/purchases/new', active: true },
       { icon: Truck, label: 'Purchase Bills', path: '/purchases', active: true },
+      { icon: RotateCcw, label: 'Purchase Returns', path: '/purchase-returns', active: true },
     ]
   },
   {
@@ -63,6 +75,13 @@ const menuSections = [
       { icon: Package, label: 'Product Master', path: '/inventory', active: true },
       { icon: ShoppingCart, label: 'Low Stock', path: '/low-stock', active: true },
       { icon: Clock, label: 'Expiry Management', path: '/expiry-alerts', active: true },
+      {
+        icon: SlidersHorizontal,
+        label: 'Stock Adjustment',
+        path: '/stock-adjustment',
+        active: true,
+        roles: ['owner', 'admin'],
+      },
     ]
   },
   {
@@ -77,7 +96,7 @@ const menuSections = [
 ];
 
 export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarProps) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -210,7 +229,9 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                 )
               )}
               <div className="space-y-0.5">
-                {section.items.map((item) => (
+                {section.items
+                  .filter(item => !item.roles || (user && item.roles.includes(user.role)))
+                  .map((item) => (
                   <NavLink
                     key={item.label}
                     to={item.active ? item.path : '#'}
@@ -261,7 +282,7 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
                       </div>
                     )}
                   </NavLink>
-                ))}
+                  ))}
               </div>
             </div>
           ))}

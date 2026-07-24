@@ -177,6 +177,38 @@ export interface StockMovement {
   createdAt: any;
 }
 
+export type StockAdjustmentReason =
+  | 'physical_increase'
+  | 'physical_decrease'
+  | 'damage'
+  | 'breakage'
+  | 'expired'
+  | 'lost'
+  | 'found'
+  | 'correction'
+  | 'other';
+
+export interface StockAdjustmentRecord {
+  id: string;
+  tenantId: string;
+  requestId: string;
+  adjustmentNumber: string;
+  productId: string;
+  productName: string;
+  batchNumber: string;
+  reason: StockAdjustmentReason;
+  reasonNote: string;
+  notes?: string;
+  previousBatchQuantity: number;
+  newBatchQuantity: number;
+  quantityDifference: number;
+  previousProductStock: number;
+  newProductStock: number;
+  status: 'posted';
+  createdBy: string;
+  createdAt: any;
+}
+
 export interface Customer {
   id: string;
   tenantId: string;
