@@ -30,7 +30,12 @@ export interface DashboardStats {
 }
 
 export const dashboardService = {
-  subscribeToStats(tenantId: string, callback: (stats: DashboardStats) => void, onError?: (error: any) => void) {
+  subscribeToStats(
+    tenantId: string,
+    callback: (stats: DashboardStats) => void,
+    onError?: (error: any) => void,
+    onInvoices?: (invoices: Invoice[]) => void
+  ) {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -121,8 +126,19 @@ export const dashboardService = {
       (snapshot) => {
         try {
           const invoices = snapshot.docs
-            .map(doc => doc.data() as Invoice)
-            .filter(invoice => invoice.status !== 'cancelled');
+            .map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }) as Invoice)
+            .filter(invoice => (invoice as Invoice & { status?: string }).status !== 'cancelled');
+
+          invoices.sort((a, b) => {
+            const dateA = typeof a.createdAt?.toDate === 'function' ? a.createdAt.toDate() : new Date(a.createdAt);
+            const dateB = typeof b.createdAt?.toDate === 'function' ? b.createdAt.toDate() : new Date(b.createdAt);
+            return dateB.getTime() - dateA.getTime();
+          });
+
+          onInvoices?.(invoices);
           stats.totalInvoices = invoices.length;
           
           stats.todaySales = invoices
@@ -167,7 +183,7 @@ export const dashboardService = {
         stats.todayPurchases = snapshot.docs
           .map(row => row.data() as Purchase)
           .filter(purchase => {
-            if (purchase.status === 'cancelled') return false;
+            if ((purchase as Purchase & { status?: string }).status === 'cancelled') return false;
             const date = typeof purchase.createdAt?.toDate === 'function'
               ? purchase.createdAt.toDate()
               : new Date(purchase.createdAt);
@@ -184,7 +200,10 @@ export const dashboardService = {
       snapshot => {
         stats.totalPayable = snapshot.docs
           .map(row => row.data() as Supplier)
-          .reduce((total, supplier) => total + Math.max(0, Number(supplier.payableBalance) || 0), 0);
+          .reduce((total, supplier) => total + Math.max(
+            0,
+            Number((supplier as Supplier & { payableBalance?: number }).payableBalance) || 0
+          ), 0);
         callback({ ...stats });
       },
       error => onError?.(error)
