@@ -245,15 +245,17 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
   const handleSelectMasterMedicine = (med: MasterMedicine) => {
     const resolvedBrand = resolveSelectedBrand(med.name, med.brand);
+    const resolvedManufacturer = med.manufacturer?.trim() || '';
     setProductNameInput(med.name);
     setBrandNameInput(resolvedBrand);
     setFormData(prev => ({
       ...prev,
       name: med.name,
       brand: resolvedBrand,
+      manufacturer: resolvedManufacturer,
     }));
     setShowProductDropdown(false);
-    focusNextProductField(resolvedBrand);
+    focusNextProductField(resolvedManufacturer);
   };
 
   useEffect(() => {
@@ -312,20 +314,22 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
   const handleSelectProductSuggestion = (selectedProd: Product) => {
     const resolvedBrand = resolveSelectedBrand(selectedProd.name, selectedProd.brand);
+    const resolvedManufacturer = selectedProd.manufacturer?.trim() || '';
     setProductNameInput(selectedProd.name);
     setBrandNameInput(resolvedBrand);
     setFormData(prev => ({
       ...prev,
       name: selectedProd.name,
       brand: resolvedBrand,
+      manufacturer: resolvedManufacturer,
     }));
     setShowProductDropdown(false);
-    focusNextProductField(resolvedBrand);
+    focusNextProductField(resolvedManufacturer);
   };
 
-  const focusNextProductField = (resolvedBrand: string) => {
+  const focusNextProductField = (resolvedManufacturer: string) => {
     setTimeout(() => {
-      const targetName = resolvedBrand ? 'batchNumber' : 'brand';
+      const targetName = resolvedManufacturer ? 'batchNumber' : 'manufacturer';
       document.querySelector<HTMLInputElement>(`input[name="${targetName}"]`)?.focus();
     }, 50);
   };
@@ -483,8 +487,8 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       setError('Product Name is required');
       return;
     }
-    if (!formData.brand.trim()) {
-      setError('Brand Name is required');
+    if (!formData.manufacturer.trim()) {
+      setError('Manufacturer is required');
       return;
     }
     if (!formData.batchNumber.trim()) {
@@ -759,7 +763,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                       <div>
                         <div className="bg-background px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-primary flex justify-between items-center">
                           <span>From Medicine Catalogue</span>
-                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Brand Auto-Fill</span>
+                          <span className="text-[8px] font-bold bg-primary/10 px-1.5 py-0.5 rounded text-primary">Manufacturer Auto-Fill</span>
                         </div>
                         <ul className="divide-y divide-border/30">
                           {masterSuggestions.slice(0, 10).map((med, idx) => {
@@ -781,13 +785,13 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                                   {med.unit && <span className="text-[9px] font-bold text-primary/70 bg-primary/5 px-1 rounded-sm">{med.unit}</span>}
                                 </span>
                                 <div className="text-[10px] text-text/40 font-medium flex flex-wrap gap-x-2 items-center">
-                                  {med.brand && (
+                                  {med.manufacturer && (
                                     <span className="text-primary font-extrabold bg-primary/5 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wide">
-                                      Brand: {med.brand}
+                                      Mfg: {med.manufacturer}
                                     </span>
                                   )}
                                   {med.genericName && <span>Gen: {med.genericName}</span>}
-                                  {med.manufacturer && <span>• Mfg: {med.manufacturer}</span>}
+                                  {med.brand && <span>• Brand: {med.brand}</span>}
                                   {med.mrp && <span>• MRP: ₹{med.mrp}</span>}
                                 </div>
                               </li>
@@ -800,22 +804,23 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 )}
               </div>
 
-              {/* Brand Name */}
-              <div className="flex flex-col gap-1.5 relative">
+              {/* Manufacturer */}
+              <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Brand Name *
+                  Manufacturer *
                 </label>
-                <MedicineAutocomplete
-                  type="brand"
-                  value={brandNameInput}
-                  onChange={setBrandNameInput}
-                  onSelect={(brand) => {
-                    setBrandNameInput(brand as string);
-                  }}
-                  placeholder="e.g. Calpol"
-                  required
-                  name="brand"
-                />
+                <div className="relative">
+                  <Factory className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
+                  <input
+                    name="manufacturer"
+                    value={formData.manufacturer}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs"
+                    placeholder="e.g. Micro Labs"
+                    autoComplete="organization"
+                    required
+                  />
+                </div>
               </div>
 
               {/* Batch Number */}
@@ -1055,19 +1060,19 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                         </div>
                       </div>
 
-                      {/* Manufacturer */}
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">Manufacturer</label>
-                        <div className="relative">
-                          <Factory className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
-                          <input
-                            name="manufacturer"
-                            value={formData.manufacturer}
-                            onChange={handleChange}
-                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs"
-                            placeholder="e.g. GlaxoSmithKline"
-                          />
-                        </div>
+                      {/* Brand Name */}
+                      <div className="flex flex-col gap-1.5 relative">
+                        <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">Brand Name (Optional)</label>
+                        <MedicineAutocomplete
+                          type="brand"
+                          value={brandNameInput}
+                          onChange={setBrandNameInput}
+                          onSelect={(brand) => {
+                            setBrandNameInput(brand as string);
+                          }}
+                          placeholder="e.g. Dolo"
+                          name="brand"
+                        />
                       </div>
 
                       {/* Category */}
