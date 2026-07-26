@@ -1,4 +1,12 @@
 import { builtInMedicines } from '../data/builtInMedicines';
+import {
+  getCatalogBucket,
+  getCatalogBucketPath,
+  getCatalogPrefix,
+  normalizeCatalogText,
+  searchCatalogRows,
+  type MedicineCatalogRow,
+} from '../utils/medicineCatalog';
 
 export interface MasterMedicine {
   id?: number;
@@ -25,6 +33,9 @@ const STORE_NAME = 'medicines';
 class MedicineMasterService {
   private db: IDBDatabase | null = null;
   private initializing: Promise<IDBDatabase> | null = null;
+  private remoteBucketCache = new Map<number, MedicineCatalogRow[]>();
+  private remoteBucketRequests = new Map<number, Promise<MedicineCatalogRow[]>>();
+  private readonly maxCachedRemoteBuckets = 8;
 
   init(): Promise<IDBDatabase> {
     if (this.db) return Promise.resolve(this.db);
@@ -137,10 +148,82 @@ class MedicineMasterService {
   }
 
   /**
-   * Search medicines instantly using index prefix or falling back to custom cursor scanning
+   * Searches the user's local catalog and the shared Firebase Hosting catalog together.
+   * The shared catalog is split into deterministic buckets, so a search downloads only
+   * one small cacheable file instead of loading 2.5 lakh medicines into browser memory.
    */
   async search(queryText: string, limit: number = 30): Promise<MasterMedicine[]> {
     if (!queryText || queryText.trim().length < 2) return [];
+
+    const [localResults, sharedResults] = await Promise.all([
+      this.searchLocal(queryText, limit).catch(() => []),
+      this.searchSharedCatalog(queryText, limit).catch(() => []),
+    ]);
+
+    const uniqueResults = new Map<string, MasterMedicine>();
+    for (const medicine of [...localResults, ...sharedResults]) {
+      const key = `${normalizeCatalogText(medicine.name)}|${normalizeCatalogText(
+        medicine.manufacturer || ''
+      )}`;
+      if (!uniqueResults.has(key)) uniqueResults.set(key, medicine);
+      if (uniqueResults.size >= limit) break;
+    }
+
+    return Array.from(uniqueResults.values());
+  }
+
+  private async searchSharedCatalog(
+    queryText: string,
+    limit: number
+  ): Promise<MasterMedicine[]> {
+    if (getCatalogPrefix(queryText).length < 2 || typeof fetch === 'undefined') return [];
+
+    const bucket = getCatalogBucket(queryText);
+    const rows = await this.loadRemoteBucket(bucket);
+    return searchCatalogRows(rows, queryText, limit);
+  }
+
+  private async loadRemoteBucket(bucket: number): Promise<MedicineCatalogRow[]> {
+    const cachedRows = this.remoteBucketCache.get(bucket);
+    if (cachedRows) {
+      this.remoteBucketCache.delete(bucket);
+      this.remoteBucketCache.set(bucket, cachedRows);
+      return cachedRows;
+    }
+
+    const inFlightRequest = this.remoteBucketRequests.get(bucket);
+    if (inFlightRequest) return inFlightRequest;
+
+    const request = fetch(getCatalogBucketPath(bucket), {
+      cache: 'force-cache',
+      headers: { Accept: 'application/json' },
+    })
+      .then(async response => {
+        if (!response.ok) return [];
+        const rows = await response.json();
+        return Array.isArray(rows) ? (rows as MedicineCatalogRow[]) : [];
+      })
+      .then(rows => {
+        this.remoteBucketCache.set(bucket, rows);
+        while (this.remoteBucketCache.size > this.maxCachedRemoteBuckets) {
+          const oldestBucket = this.remoteBucketCache.keys().next().value;
+          if (oldestBucket === undefined) break;
+          this.remoteBucketCache.delete(oldestBucket);
+        }
+        return rows;
+      })
+      .finally(() => {
+        this.remoteBucketRequests.delete(bucket);
+      });
+
+    this.remoteBucketRequests.set(bucket, request);
+    return request;
+  }
+
+  /**
+   * Search the optional browser-local IndexedDB catalog.
+   */
+  private async searchLocal(queryText: string, limit: number): Promise<MasterMedicine[]> {
     
     const db = await this.init();
     const searchTerm = queryText.toLowerCase().trim();

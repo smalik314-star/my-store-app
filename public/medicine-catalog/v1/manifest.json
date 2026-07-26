@@ -1,0 +1,401 @@
+{
+  "version": "v1",
+  "generatedAt": "2026-07-26T18:33:53.195Z",
+  "records": 246068,
+  "skippedDiscontinued": 7905,
+  "bucketCount": 64,
+  "fields": [
+    "name",
+    "manufacturer",
+    "genericName",
+    "category",
+    "unit"
+  ],
+  "mrpImported": false,
+  "buckets": [
+    {
+      "bucket": 0,
+      "records": 6216,
+      "uncompressedBytes": 638589,
+      "compressedBytes": 94488
+    },
+    {
+      "bucket": 1,
+      "records": 500,
+      "uncompressedBytes": 51239,
+      "compressedBytes": 8538
+    },
+    {
+      "bucket": 2,
+      "records": 4010,
+      "uncompressedBytes": 420273,
+      "compressedBytes": 60661
+    },
+    {
+      "bucket": 3,
+      "records": 5624,
+      "uncompressedBytes": 586641,
+      "compressedBytes": 85868
+    },
+    {
+      "bucket": 4,
+      "records": 4515,
+      "uncompressedBytes": 455427,
+      "compressedBytes": 66473
+    },
+    {
+      "bucket": 5,
+      "records": 709,
+      "uncompressedBytes": 73273,
+      "compressedBytes": 12634
+    },
+    {
+      "bucket": 6,
+      "records": 3436,
+      "uncompressedBytes": 343302,
+      "compressedBytes": 50526
+    },
+    {
+      "bucket": 7,
+      "records": 4343,
+      "uncompressedBytes": 463368,
+      "compressedBytes": 67909
+    },
+    {
+      "bucket": 8,
+      "records": 5722,
+      "uncompressedBytes": 583558,
+      "compressedBytes": 79552
+    },
+    {
+      "bucket": 9,
+      "records": 4710,
+      "uncompressedBytes": 478841,
+      "compressedBytes": 69417
+    },
+    {
+      "bucket": 10,
+      "records": 4705,
+      "uncompressedBytes": 481741,
+      "compressedBytes": 67351
+    },
+    {
+      "bucket": 11,
+      "records": 1827,
+      "uncompressedBytes": 186820,
+      "compressedBytes": 28501
+    },
+    {
+      "bucket": 12,
+      "records": 4298,
+      "uncompressedBytes": 442239,
+      "compressedBytes": 63096
+    },
+    {
+      "bucket": 13,
+      "records": 2236,
+      "uncompressedBytes": 236669,
+      "compressedBytes": 34025
+    },
+    {
+      "bucket": 14,
+      "records": 4320,
+      "uncompressedBytes": 440736,
+      "compressedBytes": 58602
+    },
+    {
+      "bucket": 15,
+      "records": 1007,
+      "uncompressedBytes": 100627,
+      "compressedBytes": 15128
+    },
+    {
+      "bucket": 16,
+      "records": 7646,
+      "uncompressedBytes": 766664,
+      "compressedBytes": 107828
+    },
+    {
+      "bucket": 17,
+      "records": 2720,
+      "uncompressedBytes": 282408,
+      "compressedBytes": 39470
+    },
+    {
+      "bucket": 18,
+      "records": 3990,
+      "uncompressedBytes": 405242,
+      "compressedBytes": 54218
+    },
+    {
+      "bucket": 19,
+      "records": 5272,
+      "uncompressedBytes": 543795,
+      "compressedBytes": 76098
+    },
+    {
+      "bucket": 20,
+      "records": 3917,
+      "uncompressedBytes": 406108,
+      "compressedBytes": 57038
+    },
+    {
+      "bucket": 21,
+      "records": 9600,
+      "uncompressedBytes": 995655,
+      "compressedBytes": 124365
+    },
+    {
+      "bucket": 22,
+      "records": 2865,
+      "uncompressedBytes": 301034,
+      "compressedBytes": 41555
+    },
+    {
+      "bucket": 23,
+      "records": 1981,
+      "uncompressedBytes": 205029,
+      "compressedBytes": 31483
+    },
+    {
+      "bucket": 24,
+      "records": 3491,
+      "uncompressedBytes": 361984,
+      "compressedBytes": 52966
+    },
+    {
+      "bucket": 25,
+      "records": 3721,
+      "uncompressedBytes": 395977,
+      "compressedBytes": 56966
+    },
+    {
+      "bucket": 26,
+      "records": 6553,
+      "uncompressedBytes": 671356,
+      "compressedBytes": 91799
+    },
+    {
+      "bucket": 27,
+      "records": 3237,
+      "uncompressedBytes": 341729,
+      "compressedBytes": 49743
+    },
+    {
+      "bucket": 28,
+      "records": 6364,
+      "uncompressedBytes": 667191,
+      "compressedBytes": 82846
+    },
+    {
+      "bucket": 29,
+      "records": 5791,
+      "uncompressedBytes": 615165,
+      "compressedBytes": 77577
+    },
+    {
+      "bucket": 30,
+      "records": 7798,
+      "uncompressedBytes": 821603,
+      "compressedBytes": 104696
+    },
+    {
+      "bucket": 31,
+      "records": 1261,
+      "uncompressedBytes": 132589,
+      "compressedBytes": 20374
+    },
+    {
+      "bucket": 32,
+      "records": 3508,
+      "uncompressedBytes": 364539,
+      "compressedBytes": 52970
+    },
+    {
+      "bucket": 33,
+      "records": 3786,
+      "uncompressedBytes": 386354,
+      "compressedBytes": 53520
+    },
+    {
+      "bucket": 34,
+      "records": 7332,
+      "uncompressedBytes": 722339,
+      "compressedBytes": 100124
+    },
+    {
+      "bucket": 35,
+      "records": 263,
+      "uncompressedBytes": 26180,
+      "compressedBytes": 4852
+    },
+    {
+      "bucket": 36,
+      "records": 5643,
+      "uncompressedBytes": 576018,
+      "compressedBytes": 83487
+    },
+    {
+      "bucket": 37,
+      "records": 5177,
+      "uncompressedBytes": 537943,
+      "compressedBytes": 74735
+    },
+    {
+      "bucket": 38,
+      "records": 5458,
+      "uncompressedBytes": 555560,
+      "compressedBytes": 80969
+    },
+    {
+      "bucket": 39,
+      "records": 8413,
+      "uncompressedBytes": 881576,
+      "compressedBytes": 122268
+    },
+    {
+      "bucket": 40,
+      "records": 3365,
+      "uncompressedBytes": 339772,
+      "compressedBytes": 43356
+    },
+    {
+      "bucket": 41,
+      "records": 2607,
+      "uncompressedBytes": 275471,
+      "compressedBytes": 37357
+    },
+    {
+      "bucket": 42,
+      "records": 5566,
+      "uncompressedBytes": 556155,
+      "compressedBytes": 76949
+    },
+    {
+      "bucket": 43,
+      "records": 922,
+      "uncompressedBytes": 95446,
+      "compressedBytes": 14350
+    },
+    {
+      "bucket": 44,
+      "records": 2655,
+      "uncompressedBytes": 262025,
+      "compressedBytes": 38425
+    },
+    {
+      "bucket": 45,
+      "records": 386,
+      "uncompressedBytes": 39295,
+      "compressedBytes": 6797
+    },
+    {
+      "bucket": 46,
+      "records": 4725,
+      "uncompressedBytes": 492163,
+      "compressedBytes": 69747
+    },
+    {
+      "bucket": 47,
+      "records": 3143,
+      "uncompressedBytes": 314854,
+      "compressedBytes": 45399
+    },
+    {
+      "bucket": 48,
+      "records": 2681,
+      "uncompressedBytes": 275975,
+      "compressedBytes": 40812
+    },
+    {
+      "bucket": 49,
+      "records": 3118,
+      "uncompressedBytes": 323587,
+      "compressedBytes": 47723
+    },
+    {
+      "bucket": 50,
+      "records": 6757,
+      "uncompressedBytes": 700942,
+      "compressedBytes": 90107
+    },
+    {
+      "bucket": 51,
+      "records": 782,
+      "uncompressedBytes": 78966,
+      "compressedBytes": 12247
+    },
+    {
+      "bucket": 52,
+      "records": 5233,
+      "uncompressedBytes": 529176,
+      "compressedBytes": 74516
+    },
+    {
+      "bucket": 53,
+      "records": 5835,
+      "uncompressedBytes": 631658,
+      "compressedBytes": 82451
+    },
+    {
+      "bucket": 54,
+      "records": 4756,
+      "uncompressedBytes": 491104,
+      "compressedBytes": 66824
+    },
+    {
+      "bucket": 55,
+      "records": 1642,
+      "uncompressedBytes": 165137,
+      "compressedBytes": 25623
+    },
+    {
+      "bucket": 56,
+      "records": 2293,
+      "uncompressedBytes": 232776,
+      "compressedBytes": 34198
+    },
+    {
+      "bucket": 57,
+      "records": 1233,
+      "uncompressedBytes": 125733,
+      "compressedBytes": 20592
+    },
+    {
+      "bucket": 58,
+      "records": 3643,
+      "uncompressedBytes": 371070,
+      "compressedBytes": 55906
+    },
+    {
+      "bucket": 59,
+      "records": 200,
+      "uncompressedBytes": 20399,
+      "compressedBytes": 3951
+    },
+    {
+      "bucket": 60,
+      "records": 6474,
+      "uncompressedBytes": 669122,
+      "compressedBytes": 94175
+    },
+    {
+      "bucket": 61,
+      "records": 727,
+      "uncompressedBytes": 73246,
+      "compressedBytes": 11786
+    },
+    {
+      "bucket": 62,
+      "records": 3089,
+      "uncompressedBytes": 318005,
+      "compressedBytes": 49653
+    },
+    {
+      "bucket": 63,
+      "records": 271,
+      "uncompressedBytes": 27405,
+      "compressedBytes": 5116
+    }
+  ]
+}

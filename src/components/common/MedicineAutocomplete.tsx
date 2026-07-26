@@ -197,9 +197,6 @@ export function MedicineAutocomplete({
                       {(item as MasterMedicine).manufacturer && (
                         <span>• Mfg: {(item as MasterMedicine).manufacturer}</span>
                       )}
-                      {(item as MasterMedicine).mrp && (
-                        <span className="text-emerald-600 font-bold">• MRP: ₹{(item as MasterMedicine).mrp}</span>
-                      )}
                     </div>
                   </>
                 ) : (
