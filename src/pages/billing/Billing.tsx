@@ -44,6 +44,7 @@ import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 import { toJsDate } from '../../utils/date';
 import { getFefoAvailableBatch, getValidBatchQuantity } from '../../utils/stock';
+import { calculateLossSale } from '../../utils/pricing';
 
 const WALK_IN_CUSTOMER: Customer = {
   id: 'walk-in',
@@ -594,10 +595,6 @@ export default function Billing() {
         showToast(`Enter a valid sale rate for ${item.name}.`, 'danger');
         return;
       }
-      if (product.mrp > 0 && item.price > product.mrp) {
-        showToast(`${item.name} sale rate cannot exceed MRP ${formatCurrency(product.mrp)}.`, 'danger');
-        return;
-      }
     }
     const parsedAmtReceived = roundMoney(Number(amountReceived) || 0);
     if (paymentStatus === 'partial' && (parsedAmtReceived <= 0 || parsedAmtReceived >= totals.grandTotal)) {
@@ -1046,6 +1043,14 @@ _Powered by PharmaFlow_`;
                   <tbody className="divide-y divide-border/40">
                     {cart.map((item, index) => {
                       const suggestions = getProductSuggestions(item.name);
+                      const selectedProduct = products.find(candidate => candidate.id === item.productId);
+                      const selectedBatch = selectedProduct?.batches?.find(
+                        batch => batch.batchNumber === item.batchNumber
+                      );
+                      const purchaseRate = Number(
+                        selectedBatch?.purchasePrice ?? selectedProduct?.purchasePrice ?? 0
+                      );
+                      const lossSale = calculateLossSale(item.price, purchaseRate, item.quantity);
                       return (
                         <tr key={index} className="hover:bg-background/10 transition-colors relative">
                           {/* Row Index */}
@@ -1171,8 +1176,23 @@ _Powered by PharmaFlow_`;
                                   handleRateEnter(index);
                                 }
                               }}
-                              className="w-20 bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none"
+                              aria-invalid={lossSale.isLoss}
+                              className={cn(
+                                "w-20 bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none",
+                                lossSale.isLoss && "text-danger"
+                              )}
                             />
+                            {lossSale.isLoss && (
+                              <div
+                                role="alert"
+                                className="mt-1 ml-auto w-max max-w-40 rounded-md border border-danger/30 bg-danger/10 px-2 py-1 text-right text-[9px] font-black leading-tight text-danger"
+                              >
+                                LOSS {formatCurrency(lossSale.lossPerUnit)}/unit
+                                <span className="block">
+                                  {formatCurrency(lossSale.totalLoss)} total
+                                </span>
+                              </div>
+                            )}
                           </td>
 
                           {/* Amount (GST calculated) */}
