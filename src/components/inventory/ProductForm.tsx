@@ -792,7 +792,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                                   )}
                                   {med.genericName && <span>Gen: {med.genericName}</span>}
                                   {med.brand && <span>• Brand: {med.brand}</span>}
-                                  {med.mrp && <span>• MRP: ₹{med.mrp}</span>}
                                 </div>
                               </li>
                             );
