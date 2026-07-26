@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseMedicineCsv } from './medicineCsv';
 
 describe('parseMedicineCsv', () => {
-  it('maps the integrated dataset manufacturer without inventing a brand', () => {
+  it('maps the integrated dataset manufacturer without importing its stale price as MRP', () => {
     const csv = [
       'id,name,price(₹),Is_discontinued,manufacturer_name,type,pack_size_label,short_composition1,short_composition2',
       '1,Augmentin 625 Duo Tablet,223.42,FALSE,Glaxo SmithKline Pharmaceuticals Ltd,allopathy,10 tablets in 1 strip,Amoxycillin (500mg),Clavulanic Acid (125mg)',
@@ -18,9 +18,9 @@ describe('parseMedicineCsv', () => {
         genericName: 'Amoxycillin (500mg) + Clavulanic Acid (125mg)',
         category: 'Tablets',
         unit: 'Strip',
-        mrp: 223.42,
       }),
     ]);
+    expect(result.medicines[0]).not.toHaveProperty('mrp');
   });
 
   it('skips discontinued medicines', () => {
