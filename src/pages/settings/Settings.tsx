@@ -38,8 +38,9 @@ import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
 import { SkeletonForm } from '../../components/common/Skeleton';
 import { motion, AnimatePresence } from 'motion/react';
-import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
+import { medicineMasterService } from '../../services/medicineMasterService';
 import { useAuth } from '../../context/AuthContext';
+import { parseMedicineCsv } from '../../utils/medicineCsv';
 
 export default function Settings() {
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
@@ -198,73 +199,7 @@ export default function Settings() {
         reader.readAsText(file);
       });
 
-      // Parse CSV
-      const lines = fileText.split(/\r?\n/);
-      if (lines.length < 2) {
-        throw new Error('CSV file seems empty or lacks a header row.');
-      }
-
-      // Map headers
-      const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
-      
-      const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('medicine') || h.includes('title') || h === 'item');
-      if (nameIdx === -1) {
-        throw new Error('Could not find a "Name" or "Medicine" column in the header row of your CSV. Please ensure your file has headers like: Name, Generic Name, Category, MRP, Brand, Manufacturer.');
-      }
-
-      const genericIdx = headers.findIndex(h => h.includes('generic') || h.includes('composition') || h.includes('salt') || h.includes('formula'));
-      const categoryIdx = headers.findIndex(h => h.includes('category') || h.includes('type') || h.includes('group'));
-      const brandIdx = headers.findIndex(h => h.includes('brand') || h.includes('trade'));
-      const mfgIdx = headers.findIndex(h => h.includes('manufacturer') || h.includes('company') || h.includes('mfg'));
-      const mrpIdx = headers.findIndex(h => h.includes('mrp') || h.includes('price') && !h.includes('purchase') && !h.includes('sell'));
-      const purchaseIdx = headers.findIndex(h => h.includes('purchase') || h.includes('cost') || h.includes('buying'));
-      const sellingIdx = headers.findIndex(h => h.includes('selling') || h.includes('sell') || h.includes('retail'));
-      const unitIdx = headers.findIndex(h => h.includes('unit') || h.includes('pack') || h.includes('strip'));
-
-      const parsedMedicines: MasterMedicine[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        // Smart quote-aware parser
-        const cells: string[] = [];
-        let currentCell = '';
-        let inQuotes = false;
-        for (let j = 0; j < line.length; j++) {
-          const char = line[j];
-          if (char === '"' || char === "'") {
-            inQuotes = !inQuotes;
-          } else if (char === ',' && !inQuotes) {
-            cells.push(currentCell.trim());
-            currentCell = '';
-          } else {
-            currentCell += char;
-          }
-        }
-        cells.push(currentCell.trim());
-
-        if (cells.length === 0 || !cells[nameIdx]) continue;
-
-        const name = cells[nameIdx].replace(/^["']|["']$/g, '').trim();
-        if (!name) continue;
-
-        parsedMedicines.push({
-          name,
-          genericName: genericIdx !== -1 ? cells[genericIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
-          category: categoryIdx !== -1 ? cells[categoryIdx]?.replace(/^["']|["']$/g, '').trim() : 'Tablets',
-          brand: brandIdx !== -1 ? cells[brandIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
-          manufacturer: mfgIdx !== -1 ? cells[mfgIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
-          mrp: mrpIdx !== -1 ? Number(cells[mrpIdx]) || undefined : undefined,
-          purchasePrice: purchaseIdx !== -1 ? Number(cells[purchaseIdx]) || undefined : undefined,
-          sellingPrice: sellingIdx !== -1 ? Number(cells[sellingIdx]) || undefined : undefined,
-          unit: unitIdx !== -1 ? cells[unitIdx]?.replace(/^["']|["']$/g, '').trim() : 'Strip',
-        });
-      }
-
-      if (parsedMedicines.length === 0) {
-        throw new Error('No valid medicine rows could be parsed from this CSV.');
-      }
+      const { medicines: parsedMedicines, skippedDiscontinued } = parseMedicineCsv(fileText);
 
       showToast(`Found ${parsedMedicines.length.toLocaleString()} medicines. Starting fast import...`, 'success');
 
@@ -274,6 +209,9 @@ export default function Settings() {
       });
 
       showToast(`Successfully imported ${parsedMedicines.length.toLocaleString()} medicines!`, 'success');
+      if (skippedDiscontinued) {
+        showToast(`${skippedDiscontinued.toLocaleString()} discontinued medicines were safely skipped.`, 'info');
+      }
       await loadMasterCount();
     } catch (err: any) {
       console.error('Import failed:', err);
@@ -313,72 +251,7 @@ export default function Settings() {
       }
       const fileText = await response.text();
 
-      // Parse CSV
-      const lines = fileText.split(/\r?\n/);
-      if (lines.length < 2) {
-        throw new Error('CSV file seems empty or lacks a header row.');
-      }
-
-      // Map headers
-      const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase());
-      
-      const nameIdx = headers.findIndex(h => h.includes('name') || h.includes('medicine') || h.includes('title') || h === 'item');
-      if (nameIdx === -1) {
-        throw new Error('Invalid CSV structure: Name column missing.');
-      }
-
-      const genericIdx = headers.findIndex(h => h.includes('generic') || h.includes('composition') || h.includes('salt') || h.includes('formula'));
-      const categoryIdx = headers.findIndex(h => h.includes('category') || h.includes('type') || h.includes('group'));
-      const brandIdx = headers.findIndex(h => h.includes('brand') || h.includes('trade'));
-      const mfgIdx = headers.findIndex(h => h.includes('manufacturer') || h.includes('company') || h.includes('mfg'));
-      const mrpIdx = headers.findIndex(h => h.includes('mrp') || h.includes('price') && !h.includes('purchase') && !h.includes('sell'));
-      const purchaseIdx = headers.findIndex(h => h.includes('purchase') || h.includes('cost') || h.includes('buying'));
-      const sellingIdx = headers.findIndex(h => h.includes('selling') || h.includes('sell') || h.includes('retail'));
-      const unitIdx = headers.findIndex(h => h.includes('unit') || h.includes('pack') || h.includes('strip'));
-
-      const parsedMedicines: MasterMedicine[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        const cells: string[] = [];
-        let currentCell = '';
-        let inQuotes = false;
-        for (let j = 0; j < line.length; j++) {
-          const char = line[j];
-          if (char === '"' || char === "'") {
-            inQuotes = !inQuotes;
-          } else if (char === ',' && !inQuotes) {
-            cells.push(currentCell.trim());
-            currentCell = '';
-          } else {
-            currentCell += char;
-          }
-        }
-        cells.push(currentCell.trim());
-
-        if (cells.length === 0 || !cells[nameIdx]) continue;
-
-        const name = cells[nameIdx].replace(/^["']|["']$/g, '').trim();
-        if (!name) continue;
-
-        parsedMedicines.push({
-          name,
-          genericName: genericIdx !== -1 ? cells[genericIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
-          category: categoryIdx !== -1 ? cells[categoryIdx]?.replace(/^["']|["']$/g, '').trim() : 'Tablets',
-          brand: brandIdx !== -1 ? cells[brandIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
-          manufacturer: mfgIdx !== -1 ? cells[mfgIdx]?.replace(/^["']|["']$/g, '').trim() : undefined,
-          mrp: mrpIdx !== -1 ? Number(cells[mrpIdx]) || undefined : undefined,
-          purchasePrice: purchaseIdx !== -1 ? Number(cells[purchaseIdx]) || undefined : undefined,
-          sellingPrice: sellingIdx !== -1 ? Number(cells[sellingIdx]) || undefined : undefined,
-          unit: unitIdx !== -1 ? cells[unitIdx]?.replace(/^["']|["']$/g, '').trim() : 'Strip',
-        });
-      }
-
-      if (parsedMedicines.length === 0) {
-        throw new Error('No valid medicine rows could be parsed.');
-      }
+      const { medicines: parsedMedicines, skippedDiscontinued } = parseMedicineCsv(fileText);
 
       showToast(`Found ${parsedMedicines.length.toLocaleString()} standard medicines. Starting high-speed import...`, 'success');
 
@@ -388,6 +261,9 @@ export default function Settings() {
       });
 
       showToast(`Successfully imported all ${parsedMedicines.length.toLocaleString()} standard medicines!`, 'success');
+      if (skippedDiscontinued) {
+        showToast(`${skippedDiscontinued.toLocaleString()} discontinued medicines were safely skipped.`, 'info');
+      }
       await loadMasterCount();
     } catch (err: any) {
       console.error('Cloud import failed:', err);
