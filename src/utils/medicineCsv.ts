@@ -107,7 +107,6 @@ export const parseMedicineCsv = (csvText: string): MedicineCsvResult => {
   const composition2Idx = findColumn(headers, ['short_composition2', 'composition2']);
   const categoryIdx = findColumn(headers, ['category', 'medicine_category'], ['category', 'group']);
   const packIdx = findColumn(headers, ['pack_size_label', 'pack_size', 'unit'], ['pack', 'unit', 'strip']);
-  const mrpIdx = findColumn(headers, ['price(₹)', 'price', 'mrp'], ['mrp', 'price']);
   const purchaseIdx = findColumn(headers, ['purchase_price'], ['purchase', 'cost', 'buying']);
   const sellingIdx = findColumn(headers, ['selling_price'], ['selling', 'retail']);
   const discontinuedIdx = findColumn(headers, ['is_discontinued', 'discontinued']);
@@ -134,7 +133,6 @@ export const parseMedicineCsv = (csvText: string): MedicineCsvResult => {
       genericName: compositions.length ? compositions.join(' + ') : undefined,
       category: categoryIdx !== -1 ? clean(cells[categoryIdx]) : deriveCategory(name, pack),
       unit: deriveUnit(pack),
-      mrp: mrpIdx !== -1 ? parseAmount(cells[mrpIdx]) : undefined,
       purchasePrice: purchaseIdx !== -1 ? parseAmount(cells[purchaseIdx]) : undefined,
       sellingPrice: sellingIdx !== -1 ? parseAmount(cells[sellingIdx]) : undefined,
     });
