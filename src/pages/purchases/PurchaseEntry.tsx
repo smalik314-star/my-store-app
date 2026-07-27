@@ -10,6 +10,7 @@ import { useToast } from '../../context/ToastContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { addMoney, calculateLineTax, formatCurrency, roundMoney } from '../../utils/currency';
 import { Timestamp } from 'firebase/firestore';
+import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 import { 
   ArrowLeft, 
   Plus, 
@@ -50,6 +51,7 @@ interface FormItem {
   unit: string;
   gstPercentage: number;
   minimumStock: number;
+  isNewProduct: boolean;
   
   batchNumber: string;
   mfgMonth: string;
@@ -102,6 +104,8 @@ export default function PurchaseEntry() {
 
   // Form Items State
   const [items, setItems] = useState<FormItem[]>([createEmptyItem()]);
+  const [catalogSuggestions, setCatalogSuggestions] = useState<Record<string, MasterMedicine[]>>({});
+  const searchRequestRef = useRef<Record<string, number>>({});
 
   // Inline Supplier Add Modal State
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -156,6 +160,7 @@ export default function PurchaseEntry() {
       unit: 'Units',
       gstPercentage: 0,
       minimumStock: 10,
+      isNewProduct: false,
       
       batchNumber: '',
       mfgMonth: currentMonthStr,
@@ -187,15 +192,26 @@ export default function PurchaseEntry() {
     }
   };
 
-  // Autocomplete search filtering
-  const getProductSuggestions = (query: string) => {
+  // Existing inventory remains first; shared catalogue results are added per row.
+  const getProductSuggestions = (item: FormItem) => {
+    const query = item.searchQuery;
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    return products.filter(p => 
+    const inventory = products.filter(p =>
       p.name.toLowerCase().includes(q) || 
       (p.brand && p.brand.toLowerCase().includes(q)) ||
       p.sku.toLowerCase().includes(q)
-    );
+    ).slice(0, 8).map(product => ({ type: 'inventory' as const, product }));
+    const existingNames = new Set(inventory.map(({ product }) =>
+      `${product.name.trim().toLowerCase()}|${(product.manufacturer || '').trim().toLowerCase()}`
+    ));
+    const catalogue = (catalogSuggestions[item.id] || [])
+      .filter(medicine => !existingNames.has(
+        `${medicine.name.trim().toLowerCase()}|${(medicine.manufacturer || '').trim().toLowerCase()}`
+      ))
+      .slice(0, 10)
+      .map(medicine => ({ type: 'catalogue' as const, medicine }));
+    return [...inventory, ...catalogue];
   };
 
   const handleProductSearchChange = (idx: number, queryStr: string) => {
@@ -207,8 +223,24 @@ export default function PurchaseEntry() {
     if (updated[idx].productId) {
       updated[idx].productId = '';
       updated[idx].productName = '';
+      updated[idx].isNewProduct = false;
     }
     setItems(updated);
+
+    const rowId = updated[idx].id;
+    const requestId = (searchRequestRef.current[rowId] || 0) + 1;
+    searchRequestRef.current[rowId] = requestId;
+    if (queryStr.trim().length < 2) {
+      setCatalogSuggestions(current => ({ ...current, [rowId]: [] }));
+      return;
+    }
+    void medicineMasterService.search(queryStr, 20).then(results => {
+      if (searchRequestRef.current[rowId] !== requestId) return;
+      setCatalogSuggestions(current => ({ ...current, [rowId]: results }));
+    }).catch(() => {
+      if (searchRequestRef.current[rowId] !== requestId) return;
+      setCatalogSuggestions(current => ({ ...current, [rowId]: [] }));
+    });
   };
 
   const handleSelectProduct = (idx: number, product: Product) => {
@@ -222,6 +254,7 @@ export default function PurchaseEntry() {
     updated[idx].unit = product.unit || 'Units';
     updated[idx].gstPercentage = product.gstPercentage ?? 0;
     updated[idx].minimumStock = product.minimumStock ?? 10;
+    updated[idx].isNewProduct = false;
     
     updated[idx].searchQuery = product.name;
     updated[idx].showSuggestions = false;
@@ -234,6 +267,21 @@ export default function PurchaseEntry() {
     } else {
       window.requestAnimationFrame(() => batchInputRefs.current[updated[idx].id]?.focus());
     }
+  };
+
+  const handleSelectCatalogueMedicine = (idx: number, medicine: MasterMedicine) => {
+    const updated = [...items];
+    updated[idx].productId = `catalog_${crypto.randomUUID()}`;
+    updated[idx].productName = medicine.name;
+    updated[idx].searchQuery = medicine.name;
+    updated[idx].brand = medicine.brand || '';
+    updated[idx].manufacturer = medicine.manufacturer || '';
+    updated[idx].category = medicine.category || 'Others';
+    updated[idx].unit = medicine.unit || 'Units';
+    updated[idx].isNewProduct = true;
+    updated[idx].showSuggestions = false;
+    setItems(updated);
+    window.requestAnimationFrame(() => batchInputRefs.current[updated[idx].id]?.focus());
   };
 
   const confirmAutofill = (accept: boolean) => {
@@ -402,6 +450,12 @@ export default function PurchaseEntry() {
       validatedItems.push({
         productId: item.productId,
         productName: item.productName,
+        isNewProduct: item.isNewProduct,
+        productBrand: item.brand.trim(),
+        productManufacturer: item.manufacturer.trim(),
+        productCategory: item.category || 'Others',
+        productUnit: item.unit || 'Units',
+        productMinimumStock: item.minimumStock,
         batchNumber: item.batchNumber.trim().toUpperCase(),
         mfgDate: Timestamp.fromDate(mfgDateObj),
         expiryDate: Timestamp.fromDate(expDateObj),
@@ -583,7 +637,7 @@ export default function PurchaseEntry() {
 
           <div className="space-y-6">
             {items.map((item, idx) => {
-              const suggestions = getProductSuggestions(item.searchQuery);
+              const suggestions = getProductSuggestions(item);
               const itemAmounts = calculatePurchaseItem(item);
 
               return (
@@ -613,7 +667,9 @@ export default function PurchaseEntry() {
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' && suggestions.length > 0) {
                             event.preventDefault();
-                            handleSelectProduct(idx, suggestions[0]);
+                            const first = suggestions[0];
+                            if (first.type === 'inventory') handleSelectProduct(idx, first.product);
+                            else handleSelectCatalogueMedicine(idx, first.medicine);
                           } else if (event.key === 'Escape') {
                             const updated = [...items];
                             updated[idx].showSuggestions = false;
@@ -629,17 +685,28 @@ export default function PurchaseEntry() {
                     {/* Autocomplete Suggestions Panel */}
                     {item.showSuggestions && suggestions.length > 0 && (
                       <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-surface border border-border rounded-xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-border">
-                        {suggestions.map((p) => (
+                        {suggestions.map((suggestion) => {
+                          const isInventory = suggestion.type === 'inventory';
+                          const medicine = isInventory ? suggestion.product : suggestion.medicine;
+                          return (
                           <button
-                            key={p.id}
+                            key={isInventory ? suggestion.product.id : `catalog-${medicine.name}-${medicine.manufacturer || ''}`}
                             type="button"
-                            onClick={() => handleSelectProduct(idx, p)}
+                            onClick={() => {
+                              if (isInventory) handleSelectProduct(idx, suggestion.product);
+                              else handleSelectCatalogueMedicine(idx, suggestion.medicine);
+                            }}
                             className="w-full text-left px-4 py-2.5 hover:bg-text/[0.03] transition-all text-xs"
                           >
-                            <p className="font-bold text-text">{p.name}</p>
-                            <p className="text-text/50 font-medium">Brand: {p.brand || 'N/A'} | SKU: {p.sku} | Stock: {p.stockQuantity}</p>
+                            <p className="font-bold text-text">{medicine.name}</p>
+                            <p className="text-text/50 font-medium">
+                              {isInventory
+                                ? `Your inventory · Brand: ${suggestion.product.brand || 'N/A'} · Stock: ${suggestion.product.stockQuantity}`
+                                : `Medicine catalogue · Mfg: ${suggestion.medicine.manufacturer || 'Not listed'}`}
+                            </p>
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -770,10 +837,14 @@ export default function PurchaseEntry() {
                     </div>
                   </div>
 
-                  <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-6 gap-3 pt-3 border-t border-border/70">
+                  <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-7 gap-3 pt-3 border-t border-border/70">
                     <div>
                       <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand</label>
-                      <input value={item.brand || '—'} readOnly className="w-full h-9 px-3 border border-border rounded-lg bg-text/[0.02] text-xs font-semibold" />
+                      <input value={item.brand} onChange={(e) => handleItemFieldChange(idx, 'brand', e.target.value)} placeholder="Enter brand (optional)" className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Manufacturer</label>
+                      <input value={item.manufacturer} onChange={(e) => handleItemFieldChange(idx, 'manufacturer', e.target.value)} placeholder="Enter manufacturer" className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">MRP *</label>
