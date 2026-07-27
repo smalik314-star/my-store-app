@@ -27,6 +27,15 @@ const MOVEMENTS_COLL = 'stockMovements';
 const PRODUCTS_COLL = 'products';
 const PURCHASE_KEYS_COLL = 'purchaseKeys';
 
+type PurchaseEntryItem = Omit<PurchaseItem, 'id' | 'purchaseId'> & {
+  isNewProduct?: boolean;
+  productBrand?: string;
+  productManufacturer?: string;
+  productCategory?: string;
+  productUnit?: string;
+  productMinimumStock?: number;
+};
+
 const normalizedBatch = (value: string) => value.trim().toUpperCase();
 const normalizedInvoice = (value: string) => value.trim().toUpperCase().replace(/\s+/g, ' ');
 
@@ -152,7 +161,7 @@ export const purchaseService = {
   async addPurchase(
     tenantId: string, 
     purchaseData: Omit<Purchase, 'id' | 'tenantId' | 'createdAt' | 'purchaseNumber'>,
-    items: Omit<PurchaseItem, 'id' | 'purchaseId'>[]
+    items: PurchaseEntryItem[]
   ): Promise<string> {
     if (!tenantId) throw new Error('Tenant ID required');
     if (items.length === 0) throw new Error('Purchase must contain at least one item');
@@ -182,6 +191,10 @@ export const purchaseService = {
           if (!item.batchNumber?.trim()) throw new Error(`Batch number is required for ${item.productName}`);
           if (!productDocs.has(item.productId)) {
             const snap = await transaction.get(doc(db, PRODUCTS_COLL, item.productId));
+            if (!snap.exists() && item.isNewProduct) {
+              productDocs.set(item.productId, null);
+              continue;
+            }
             if (!snap.exists() || snap.data().tenantId !== tenantId) {
               throw new Error(`Product ${item.productName} not found or unauthorized.`);
             }
@@ -280,7 +293,33 @@ export const purchaseService = {
 
         for (const [productId, productItems] of itemsByProduct) {
           const productRef = doc(db, PRODUCTS_COLL, productId);
-          const product = productDocs.get(productId).data() as Product;
+          const productDoc = productDocs.get(productId);
+          const firstItem = productItems[0];
+          const product = productDoc
+            ? productDoc.data() as Product
+            : {
+                id: productId,
+                tenantId,
+                name: firstItem.productName,
+                brand: firstItem.productBrand || '',
+                manufacturer: firstItem.productManufacturer || '',
+                category: firstItem.productCategory || 'Others',
+                unit: firstItem.productUnit || 'Units',
+                minimumStock: Number(firstItem.productMinimumStock) || 10,
+                sku: '',
+                barcode: '',
+                purchasePrice: 0,
+                sellingPrice: 0,
+                mrp: 0,
+                gstPercentage: Number(firstItem.gstPercentage) || 0,
+                stockQuantity: 0,
+                batchNumber: '',
+                expiryDate: firstItem.expiryDate,
+                manufacturingDate: firstItem.mfgDate,
+                batches: [],
+                recordStatus: 'active',
+                createdAt: serverTimestamp(),
+              } as Product;
           let runningStock = product.stockQuantity || 0;
           const batchesList: ProductBatch[] = product.batches ? product.batches.map(batch => ({ ...batch })) : [];
 
@@ -351,7 +390,18 @@ export const purchaseService = {
             updatedProductFields.expiryDate = currentBatch.expiryDate;
             updatedProductFields.manufacturingDate = currentBatch.mfgDate;
           }
-          transaction.update(productRef, updatedProductFields);
+          if (productDoc) {
+            transaction.update(productRef, updatedProductFields);
+          } else {
+            transaction.set(productRef, {
+              ...product,
+              ...updatedProductFields,
+              id: productId,
+              tenantId,
+              createdBy: actorId,
+              createdAt: serverTimestamp(),
+            });
+          }
         }
 
         // Return purchaseId
