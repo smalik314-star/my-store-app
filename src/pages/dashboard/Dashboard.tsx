@@ -65,7 +65,6 @@ export default function Dashboard() {
       return;
     }
     
-    console.log('Dashboard: Starting data subscriptions for tenant', user.tenantId);
     setLoading(true);
 
     // Safety timeout: stop loading after 8 seconds no matter what
@@ -77,7 +76,6 @@ export default function Dashboard() {
     const unsubStats = dashboardService.subscribeToStats(
       user.tenantId,
       (newStats) => {
-        console.log('Dashboard: Received stats update');
         setStats(newStats);
         setLoading(false);
         clearTimeout(timeoutId);
@@ -88,14 +86,12 @@ export default function Dashboard() {
         clearTimeout(timeoutId);
       },
       (invoices) => {
-        console.log('Dashboard: Received invoices update');
         setDashboardInvoices(invoices);
         setRecentInvoices(invoices.slice(0, 10));
       }
     );
 
     const unsubAlerts = dashboardService.subscribeToAlerts(user.tenantId, (newAlerts) => {
-      console.log('Dashboard: Received alerts update');
       setAlerts(newAlerts);
     });
 

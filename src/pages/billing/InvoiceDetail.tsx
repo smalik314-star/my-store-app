@@ -33,6 +33,10 @@ import { cn } from '../../utils/cn';
 import { InvoiceTemplate } from '../../components/billing/InvoiceTemplate';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
+
+const debugLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) console.debug(...args);
+};
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
 import { toJsDate } from '../../utils/date';
@@ -130,16 +134,16 @@ export default function InvoiceDetail() {
     if (!invoice) return;
     setIsCalculatingBenchmark(true);
     try {
-      console.log('[Benchmark] Running size comparison...');
+      debugLog('[Benchmark] Running size comparison...');
       
       // 1. Generate unoptimized PDF (Scale 2, PNG, no compression)
-      console.log('[Benchmark] Generating original PDF (unoptimized)...');
+      debugLog('[Benchmark] Generating original PDF (unoptimized)...');
       const originalPdf = await generatePDFInstance({ scale: 2, format: 'png', quality: 1, compress: false });
       const originalBlob = originalPdf.output('blob');
       const originalSizeKB = Math.round(originalBlob.size / 1024);
       
       // 2. Generate optimized PDF (Scale 1.5, JPEG 75%, compress: true)
-      console.log('[Benchmark] Generating optimized PDF...');
+      debugLog('[Benchmark] Generating optimized PDF...');
       const optimizedPdf = await generatePDFInstance({ scale: 1.5, format: 'jpeg', quality: 0.75, compress: true });
       const optimizedBlob = optimizedPdf.output('blob');
       const optimizedSizeKB = Math.round(optimizedBlob.size / 1024);
@@ -153,7 +157,7 @@ export default function InvoiceDetail() {
         savedKB,
         savedPercent
       });
-      console.log(`[Benchmark] Done! Original: ${originalSizeKB} KB, Optimized: ${optimizedSizeKB} KB (Saved ${savedPercent}%)`);
+      debugLog(`[Benchmark] Done! Original: ${originalSizeKB} KB, Optimized: ${optimizedSizeKB} KB (Saved ${savedPercent}%)`);
     } catch (err) {
       console.error('[Benchmark] Error running size comparison:', err);
     } finally {
@@ -279,7 +283,7 @@ export default function InvoiceDetail() {
     const quality = options?.quality ?? 0.75;
     const compress = options?.compress ?? true;
 
-    console.log(`[PDF Export] Starting PDF generation flow for invoice: ${invoice.invoiceNumber}`, {
+    debugLog(`[PDF Export] Starting PDF generation flow for invoice: ${invoice.invoiceNumber}`, {
       invoiceId: invoice.id,
       customerId: invoice.customerId,
       hasCustomerData: !!customer,
@@ -289,14 +293,10 @@ export default function InvoiceDetail() {
       options: { scale, format, quality, compress }
     });
 
-    // === DIAGNOSTIC UTILITY: LOG FULL INVOICE DATA AND IMAGE STRUCTURE ===
-    console.group('=== PDF GENERATION DIAGNOSTICS ===');
-    console.log('[Diagnostics] Invoice Data Structure:', JSON.parse(JSON.stringify(invoice)));
-    console.log('[Diagnostics] Associated Customer:', customer ? JSON.parse(JSON.stringify(customer)) : 'None (Walk-In Customer)');
-    
+    // Keep diagnostics structural only; never log invoice or customer payloads.
     try {
       const imgElements = Array.from(printRef.current.querySelectorAll('img'));
-      console.log(`[Diagnostics] Found ${imgElements.length} image element(s) in print area:`);
+      debugLog(`[Diagnostics] Found ${imgElements.length} image element(s) in print area:`);
       
       const imgDiagnostics = imgElements.map((img, idx) => {
         const src = img.getAttribute('src') || '';
@@ -330,15 +330,14 @@ export default function InvoiceDetail() {
         if (corsRisks.length > 0) {
           console.warn('[Diagnostics] WARNING: Found external image(s) WITHOUT crossOrigin="anonymous". This WILL cause Canvas Tainting and break PDF export!', corsRisks);
         } else {
-          console.log('[Diagnostics] Image configurations checked. No high-risk external image patterns without CORS attribute detected.');
+          debugLog('[Diagnostics] Image configurations checked. No high-risk external image patterns without CORS attribute detected.');
         }
       } else {
-        console.log('[Diagnostics] No physical <img> elements detected inside the invoice print area.');
+        debugLog('[Diagnostics] No physical <img> elements detected inside the invoice print area.');
       }
     } catch (err) {
       console.error('[Diagnostics] Failed to extract image structures from print area:', err);
     }
-    console.groupEnd();
     // === END DIAGNOSTIC UTILITY ===
 
     const tempStyleElements: HTMLStyleElement[] = [];
@@ -368,7 +367,7 @@ export default function InvoiceDetail() {
     };
 
     try {
-      console.log('Preprocessing stylesheets for html2canvas compatibility...');
+      debugLog('Preprocessing stylesheets for html2canvas compatibility...');
 
       // 1. Process adopted stylesheets if they exist
       if ((document as any).adoptedStyleSheets && (document as any).adoptedStyleSheets.length > 0) {
@@ -413,7 +412,7 @@ export default function InvoiceDetail() {
             const cleanedCSS = cleanOklchAndOklab(cssText);
             styleRestorations.push({ element: el, originalText: cssText });
             el.textContent = cleanedCSS;
-            console.log('[PDF Export] Cleaned unsupported colors in physical <style> element');
+            debugLog('[PDF Export] Cleaned unsupported colors in physical <style> element');
           }
         } catch (e) {
           console.warn('Error cleaning physical style element:', el, e);
@@ -457,14 +456,14 @@ export default function InvoiceDetail() {
               // Disable the original link element so html2canvas doesn't try to parse it
               link.disabled = true;
               linkRestorations.push({ element: link, originalDisabled });
-              console.log('[PDF Export] Replaced local <link> with cleaned <style> element:', href);
+              debugLog('[PDF Export] Replaced local <link> with cleaned <style> element:', href);
             }
           } else {
             // For cross-origin or un-fetchable links, we MUST disable them during generation
             // because they might contain unsupported colors that would crash html2canvas
             link.disabled = true;
             linkRestorations.push({ element: link, originalDisabled });
-            console.log('[PDF Export] Disabled un-fetchable external <link>:', href);
+            debugLog('[PDF Export] Disabled un-fetchable external <link>:', href);
           }
         } catch (linkErr) {
           console.warn('Error processing link element:', link, linkErr);
@@ -484,8 +483,8 @@ export default function InvoiceDetail() {
         });
       }
 
-      console.log('Generating PDF from printRef...');
-      console.log('[PDF Export] Capturing element with html2canvas. Current document stylesheets count:', document.styleSheets.length);
+      debugLog('Generating PDF from printRef...');
+      debugLog('[PDF Export] Capturing element with html2canvas. Current document stylesheets count:', document.styleSheets.length);
       const canvas = await html2canvas(printRef.current, {
         scale: scale,
         useCORS: true,
@@ -494,8 +493,8 @@ export default function InvoiceDetail() {
         windowWidth: 1200 // Force standard desktop viewport width during capture to prevent mobile layout squishing
       });
       
-      console.log('Canvas generated successfully:', canvas.width, 'x', canvas.height);
-      console.log('[PDF Export] html2canvas rendering complete. Initiating jsPDF output creation.');
+      debugLog('Canvas generated successfully:', canvas.width, 'x', canvas.height);
+      debugLog('[PDF Export] html2canvas rendering complete. Initiating jsPDF output creation.');
       
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
       const imgData = canvas.toDataURL(mimeType, format === 'jpeg' ? quality : undefined);
@@ -561,9 +560,9 @@ export default function InvoiceDetail() {
     setIsGeneratingPDF(true);
     try {
       const pdf = await generatePDFInstance();
-      console.log('[PDF Export] Writing PDF binary. Name:', `Invoice_${invoice!.invoiceNumber}.pdf`);
+      debugLog('[PDF Export] Writing PDF binary. Name:', `Invoice_${invoice!.invoiceNumber}.pdf`);
       pdf.save(`Invoice_${invoice!.invoiceNumber}.pdf`);
-      console.log('[PDF Export] PDF export operation completed successfully.');
+      debugLog('[PDF Export] PDF export operation completed successfully.');
       showToast('PDF generated and downloaded successfully', 'success');
     } catch (error: any) {
       console.error('Failed to generate PDF. Full exception details:');
@@ -626,13 +625,13 @@ export default function InvoiceDetail() {
     setIsSendingEmail(true);
     setEmailResult(null);
     try {
-      console.log('[Email Share] Rendering PDF in background...');
+      debugLog('[Email Share] Rendering PDF in background...');
       const pdf = await generatePDFInstance();
       const pdfBase64 = pdf.output('datauristring').split(',')[1];
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) throw new Error('Please sign in again before sending email.');
       
-      console.log('[Email Share] Sending request to express backend endpoint...');
+      debugLog('[Email Share] Sending request to express backend endpoint...');
       const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
       if (!apiBaseUrl) throw new Error('Email service is not configured for this deployment.');
       const response = await fetch(`${apiBaseUrl}/api/send-email`, {

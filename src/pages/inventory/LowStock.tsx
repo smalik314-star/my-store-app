@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, doc, writeBatch, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { Product } from '../../types';
 import { Card } from '../../components/common/Card';
@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { Toast } from '../../components/common/Toast';
 import { useNavigate } from 'react-router-dom';
+import { productService } from '../../services/productService';
 
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
@@ -146,17 +147,26 @@ export default function LowStock() {
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete ${selectedItems.length} items?`)) return;
-    
-    const batch = writeBatch(db);
-    selectedItems.forEach(id => {
-      batch.delete(doc(db, 'products', id));
-    });
-    
-    await batch.commit();
-    setSelectedItems([]);
-    setToastMessage(`Successfully deleted ${selectedItems.length} items.`);
-    setShowToast(true);
+    if (!user?.tenantId || selectedItems.length === 0) return;
+    const selectedProducts = products.filter(product => selectedItems.includes(product.id));
+    const withStock = selectedProducts.filter(product => Number(product.stockQuantity) > 0);
+    if (withStock.length > 0) {
+      setToastMessage(`${withStock.length} selected item(s) still have stock. Use Stock Adjustment before archiving.`);
+      setShowToast(true);
+      return;
+    }
+    if (!window.confirm(`Archive ${selectedProducts.length} zero-stock item(s)? Their history will be preserved.`)) return;
+    try {
+      await Promise.all(selectedProducts.map(product =>
+        productService.deleteProduct(user.tenantId!, product.id)
+      ));
+      setSelectedItems([]);
+      setToastMessage(`Archived ${selectedProducts.length} zero-stock item(s).`);
+      setShowToast(true);
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : 'Unable to archive selected products.');
+      setShowToast(true);
+    }
   };
 
   const exportToCSV = () => {

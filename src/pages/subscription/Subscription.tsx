@@ -79,6 +79,7 @@ export default function Subscription() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [monthlyInvoiceUsage, setMonthlyInvoiceUsage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annually'>('monthly');
@@ -87,10 +88,13 @@ export default function Subscription() {
 
   useEffect(() => {
     if (user?.tenantId) {
-      tenantService.getTenant(user.tenantId).then(data => {
-        setTenant(data);
-        setLoading(false);
-      });
+      Promise.all([
+        tenantService.getTenant(user.tenantId),
+        tenantService.getMonthlyInvoiceUsage(user.tenantId),
+      ]).then(([data, invoiceUsage]) => {
+          setTenant(data);
+          setMonthlyInvoiceUsage(invoiceUsage);
+        }).finally(() => setLoading(false));
     }
   }, [user?.tenantId]);
 
@@ -262,7 +266,7 @@ export default function Subscription() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
           <UsageCard 
             label="Monthly Invoices" 
-            current={tenant.usage.invoicesCount} 
+            current={monthlyInvoiceUsage}
             limit={tenant.limits.maxInvoices} 
             icon={FileText}
             color="primary"

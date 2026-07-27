@@ -262,7 +262,7 @@ export default function PurchaseEntry() {
     setItems(updated);
 
     // Pricing defaults can speed up entry, but purchase-specific batch/dates are never copied.
-    if (product.purchasePrice || product.sellingPrice || product.mrp) {
+    if (product.purchasePrice || product.sellingPrice) {
       setAutofillModal({ itemIdx: idx, product });
     } else {
       window.requestAnimationFrame(() => batchInputRefs.current[updated[idx].id]?.focus());
@@ -293,7 +293,6 @@ export default function PurchaseEntry() {
       // Never populate batch, dates, quantity, or stock from master data.
       updated[itemIdx].purchasePrice = product.purchasePrice || 0;
       updated[itemIdx].salePrice = product.sellingPrice || 0;
-      updated[itemIdx].mrp = product.mrp || product.sellingPrice || 0;
       showToast('Saved price defaults applied. Enter the new batch details.', 'success');
     }
 
@@ -305,11 +304,6 @@ export default function PurchaseEntry() {
   const handleItemFieldChange = (idx: number, field: keyof FormItem, val: any) => {
     const updated = [...items];
     (updated[idx] as any)[field] = val;
-
-    // Automatically set MRP equal to Sale Price if MRP isn't entered or is lower
-    if (field === 'salePrice' && (!updated[idx].mrp || updated[idx].mrp < val)) {
-      updated[idx].mrp = val;
-    }
 
     setItems(updated);
   };
@@ -423,10 +417,6 @@ export default function PurchaseEntry() {
         showToast(`Sale Price cannot be less than Purchase Price for row #${rowNum}`, 'warning');
         return;
       }
-      if (item.mrp < item.salePrice) {
-        showToast(`MRP cannot be less than Sale Price for row #${rowNum}`, 'warning');
-        return;
-      }
       if (![0, 5, 12, 18, 28].includes(item.gstPercentage)) {
         showToast(`Select a supported GST rate for row #${rowNum}`, 'warning');
         return;
@@ -461,7 +451,7 @@ export default function PurchaseEntry() {
         expiryDate: Timestamp.fromDate(expDateObj),
         purchasePrice: item.purchasePrice,
         salePrice: item.salePrice,
-        mrp: item.mrp || item.salePrice,
+        mrp: item.mrp || 0,
         gstPercentage: item.gstPercentage,
         discount: item.discount,
         quantity: item.quantity,
@@ -847,7 +837,7 @@ export default function PurchaseEntry() {
                       <input value={item.manufacturer} onChange={(e) => handleItemFieldChange(idx, 'manufacturer', e.target.value)} placeholder="Enter manufacturer" className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">MRP *</label>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">MRP (Optional)</label>
                       <input type="number" min="0" step="0.01" value={item.mrp || ''} onChange={(e) => handleItemFieldChange(idx, 'mrp', Math.max(0, Number(e.target.value) || 0))} className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
                     </div>
                     <div>
@@ -1034,7 +1024,6 @@ export default function PurchaseEntry() {
               <div className="bg-text/[0.02] border border-border rounded-2xl p-4 text-xs space-y-1.5 font-semibold text-text/80">
                 <p><span className="text-text/50">Purchase Price:</span> {formatCurrency(autofillModal.product.purchasePrice || 0)}</p>
                 <p><span className="text-text/50">Sale Price:</span> {formatCurrency(autofillModal.product.sellingPrice || 0)}</p>
-                <p><span className="text-text/50">MRP:</span> {formatCurrency(autofillModal.product.mrp || 0)}</p>
               </div>
 
               <div className="flex gap-2 pt-2">

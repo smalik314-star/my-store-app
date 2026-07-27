@@ -27,7 +27,6 @@ if (isConfigValid) {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     const dbId = firebaseConfig.firestoreDatabaseId;
-    console.log('Firebase initialized successfully. Firestore Database ID:', dbId);
     db = getFirestore(app, dbId);
     storage = getStorage(app);
   } catch (error) {

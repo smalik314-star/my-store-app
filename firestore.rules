@@ -9,6 +9,11 @@ service cloud.firestore {
       return hasUser() && userData().status == 'active' && userData().tenantId == tenantId;
     }
     function roleIs(roles) { return hasUser() && userData().role in roles; }
+    function signedInEmail() {
+      return signedIn() && request.auth.token.email is string
+        ? request.auth.token.email.lower()
+        : '';
+    }
     function validTenantCreate(tenantId) {
       return inTenant(tenantId) && request.resource.data.tenantId == tenantId;
     }
@@ -34,10 +39,23 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.role == 'owner'
         && request.resource.data.status == 'active'
-        && exists(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId))
-        && get(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId)).data.ownerId == request.auth.uid;
+        && (
+          (
+            request.resource.data.role == 'owner'
+            && exists(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId))
+            && get(/databases/$(database)/documents/tenants/$(request.resource.data.tenantId)).data.ownerId == request.auth.uid
+          )
+          ||
+          (
+            request.resource.data.invitationId is string
+            && exists(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId))
+            && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.status == 'pending'
+            && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.email == signedInEmail()
+            && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.tenantId == request.resource.data.tenantId
+            && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.role == request.resource.data.role
+          )
+        );
       allow update: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.uid == resource.data.uid
@@ -54,10 +72,30 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.id == tenantId;
-      allow update: if inTenant(tenantId) && roleIs(['owner','admin'])
+      allow update: if inTenant(tenantId)
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.id == resource.data.id
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','usage','updatedAt']);
+        && (
+          (
+            roleIs(['owner','admin'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['name','usage','updatedAt'])
+          )
+          ||
+          (
+            roleIs(['staff'])
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['usage','updatedAt'])
+            && request.resource.data.usage.productsCount
+              > resource.data.usage.productsCount
+            && request.resource.data.usage.productsCount
+              <= resource.data.usage.productsCount + 50
+            && request.resource.data.usage.invoicesCount
+              == resource.data.usage.invoicesCount
+            && request.resource.data.usage.usersCount
+              == resource.data.usage.usersCount
+          )
+        );
       allow delete: if false;
 
       match /users/{userId} {
@@ -65,8 +103,21 @@ service cloud.firestore {
         allow create: if signedIn() && request.auth.uid == userId
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.tenantId == tenantId
-          && request.resource.data.role == 'owner'
-          && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerId == request.auth.uid;
+          && (
+            (
+              request.resource.data.role == 'owner'
+              && get(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerId == request.auth.uid
+            )
+            ||
+            (
+              request.resource.data.invitationId is string
+              && exists(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId))
+              && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.status == 'pending'
+              && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.email == signedInEmail()
+              && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.tenantId == tenantId
+              && get(/databases/$(database)/documents/invitations/$(request.resource.data.invitationId)).data.role == request.resource.data.role
+            )
+          );
         allow update, delete: if inTenant(tenantId) && roleIs(['owner']);
       }
 
@@ -76,6 +127,62 @@ service cloud.firestore {
           && request.resource.data.userId == request.auth.uid;
         allow update, delete: if false;
       }
+
+      match /usageCounters/{month} {
+        allow read: if inTenant(tenantId);
+        allow create: if inTenant(tenantId)
+          && roleIs(['owner','admin','staff'])
+          && request.resource.data.tenantId == tenantId
+          && request.resource.data.month == month
+          && request.resource.data.invoicesCount == 1;
+        allow update: if inTenant(tenantId)
+          && roleIs(['owner','admin','staff'])
+          && request.resource.data.tenantId == resource.data.tenantId
+          && request.resource.data.month == resource.data.month
+          && request.resource.data.invoicesCount is int
+          && request.resource.data.invoicesCount >= 0
+          && (
+            request.resource.data.invoicesCount == resource.data.invoicesCount + 1
+            || request.resource.data.invoicesCount == resource.data.invoicesCount - 1
+          )
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['invoicesCount','updatedAt']);
+        allow delete: if false;
+      }
+    }
+
+    match /invitations/{invitationId} {
+      allow read: if (
+        inTenant(resource.data.tenantId) && roleIs(['owner','admin'])
+      ) || (
+        signedIn()
+        && resource.data.status == 'pending'
+        && resource.data.email == signedInEmail()
+      );
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.email is string
+        && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.role in ['admin','staff','viewer']
+        && request.resource.data.status == 'pending';
+      allow update: if (
+        inTenant(resource.data.tenantId)
+        && roleIs(['owner','admin'])
+        && request.resource.data.tenantId == resource.data.tenantId
+      ) || (
+        signedIn()
+        && resource.data.status == 'pending'
+        && resource.data.email == signedInEmail()
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.acceptedBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status','acceptedBy','acceptedAt'])
+      );
+      allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
     }
 
     match /products/{productId} {

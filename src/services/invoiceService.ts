@@ -104,6 +104,8 @@ export const invoiceService = {
     const invoiceRef = doc(db, COLLECTION_NAME, `${tenantId}_${requestId}`);
     const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
     const year = new Date().getFullYear();
+    const usageMonth = new Date().toISOString().slice(0, 7);
+    const usageRef = doc(db, 'tenants', tenantId, 'usageCounters', usageMonth);
 
     logFirestoreOperation(OperationType.WRITE, COLLECTION_NAME, 'pending', { requestId });
     try {
@@ -127,6 +129,7 @@ export const invoiceService = {
         const tenantRef = doc(db, 'tenants', tenantId);
         const tenantDoc = await transaction.get(tenantRef);
         const counterDoc = await transaction.get(counterRef);
+        const usageDoc = await transaction.get(usageRef);
         let nextNumber = 1;
         if (counterDoc.exists() && counterDoc.data().year === year) {
           nextNumber = (Number(counterDoc.data().count) || 0) + 1;
@@ -136,7 +139,7 @@ export const invoiceService = {
         // 2. Get all unique Product Docs needed for this invoice
         const productDocsMap = new Map<string, any>();
         for (const item of invoiceData.items) {
-          if (item.productId && !productDocsMap.has(item.productId)) {
+          if (item.productId && item.productId !== 'custom' && !productDocsMap.has(item.productId)) {
             const productRef = doc(db, 'products', item.productId);
             const productDoc = await transaction.get(productRef);
             productDocsMap.set(item.productId, productDoc);
@@ -165,13 +168,23 @@ export const invoiceService = {
           usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
           limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
           
-          if (usage.invoicesCount >= limits.maxInvoices) {
+          const monthlyInvoiceCount = usageDoc.exists()
+            ? Math.max(0, Number(usageDoc.data().invoicesCount) || 0)
+            : 0;
+          if (monthlyInvoiceCount >= limits.maxInvoices) {
             throw new Error('Monthly invoice limit reached. Please upgrade your plan.');
           }
 
           if (!tenant.usage || !tenant.limits) {
             tenantHasUsageAndLimits = false;
           }
+        }
+
+        if (
+          customerRef
+          && (!customerDoc?.exists() || customerDoc.data().tenantId !== tenantId)
+        ) {
+          throw new Error('Selected customer was not found or does not belong to this store.');
         }
 
         // Verify combined quantities, not each duplicate line independently.
@@ -209,6 +222,26 @@ export const invoiceService = {
               throw new Error('Quick bill contains invalid item data.');
             }
           }
+          const requiredByProduct = new Map<string, { quantity: number; name: string }>();
+          for (const item of invoiceData.items) {
+            if (!item.productId || item.productId === 'custom') continue;
+            const current = requiredByProduct.get(item.productId) || { quantity: 0, name: item.name };
+            current.quantity += item.quantity;
+            requiredByProduct.set(item.productId, current);
+          }
+          for (const [productId, required] of requiredByProduct) {
+            const productDoc = productDocsMap.get(productId);
+            if (!productDoc || !productDoc.exists() || productDoc.data().tenantId !== tenantId) {
+              throw new Error(`Product ${required.name} not found or unauthorized.`);
+            }
+            const product = productDoc.data() as Product;
+            const validStock = product.batches?.length
+              ? getValidBatchQuantity(product.batches)
+              : (!isBatchExpired(product.expiryDate) ? Number(product.stockQuantity) || 0 : 0);
+            if ((Number(product.stockQuantity) || 0) < required.quantity || validStock < required.quantity) {
+              throw new Error(`Insufficient valid batch stock for ${required.name}. Available: ${Math.min(Number(product.stockQuantity) || 0, validStock)}`);
+            }
+          }
         }
 
         // --- WRITES SECTION ---
@@ -233,8 +266,11 @@ export const invoiceService = {
 
         // 3. Deduct Stock and Log Stock Movements
         const updatedProducts = new Map<string, Product>();
-        if (!invoiceData.isQuickBill) {
-          for (const item of invoiceData.items) {
+        const inventoryItems = invoiceData.items.filter(
+          item => item.productId && item.productId !== 'custom'
+        );
+        if (inventoryItems.length > 0) {
+          for (const item of inventoryItems) {
             const productDoc = productDocsMap.get(item.productId);
             const product = updatedProducts.get(item.productId) || (productDoc.data() as Product);
             
@@ -267,14 +303,10 @@ export const invoiceService = {
               salePrice: deduction.salePrice || Number(item.price) || 0,
             }));
 
-            const productGstRate = Number(product.gstPercentage) || 0;
+            const productGstRate = invoiceData.isQuickBill ? 0 : Number(product.gstPercentage) || 0;
             const requestedPrice = Number(item.price);
             if (!Number.isFinite(requestedPrice) || requestedPrice < 0) {
               throw new Error(`Invalid sale rate for ${item.name}.`);
-            }
-            const mrp = Number(product.mrp) || 0;
-            if (mrp > 0 && requestedPrice > mrp) {
-              throw new Error(`Sale rate for ${item.name} cannot exceed MRP ${mrp}.`);
             }
             const authoritativePrice = requestedPrice;
             const lineTax = calculateLineTax({
@@ -348,7 +380,11 @@ export const invoiceService = {
           }
         }
 
-        if (invoiceData.isQuickBill) storedItems.push(...invoiceData.items);
+        if (invoiceData.isQuickBill) {
+          storedItems.push(...invoiceData.items.filter(
+            item => !item.productId || item.productId === 'custom'
+          ));
+        }
         const authoritativeSubtotal = addMoney(
           ...storedItems.map(item => Number(item.price) * Number(item.quantity))
         );
@@ -411,10 +447,12 @@ export const invoiceService = {
 
         // 5. Update Tenant Usage
         if (tenantExists) {
-          transaction.update(tenantRef, {
-            'usage.invoicesCount': increment(1),
-            updatedAt: serverTimestamp()
-          });
+          transaction.set(usageRef, {
+            tenantId,
+            month: usageMonth,
+            invoicesCount: increment(1),
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
         }
 
         // 6. Add Audit Log
@@ -490,15 +528,13 @@ export const invoiceService = {
         }
         // Read every dependent document before the first write.
         const productDocs = new Map<string, any>();
-        if (!invoice.isQuickBill) {
-          for (const item of invoice.items) {
-            if (!item.productId || productDocs.has(item.productId)) continue;
+        for (const item of invoice.items) {
+            if (!item.productId || item.productId === 'custom' || !item.batchDeductions?.length || productDocs.has(item.productId)) continue;
             const snap = await transaction.get(doc(db, 'products', item.productId));
             if (!snap.exists() || snap.data().tenantId !== tenantId) {
               throw new Error(`Cannot reverse invoice: product ${item.name} is missing or unauthorized.`);
             }
             productDocs.set(item.productId, snap);
-          }
         }
 
         let customerRef: any = null;
@@ -511,13 +547,14 @@ export const invoiceService = {
             doc(db, 'ledgerEntries', `${tenantId}_sale_${invoiceId}`)
           );
         }
-        const tenantRef = doc(db, 'tenants', tenantId);
-        const tenantDoc = await transaction.get(tenantRef);
+        const invoiceMonth = toJsDate(invoice.createdAt).toISOString().slice(0, 7);
+        const usageRef = doc(db, 'tenants', tenantId, 'usageCounters', invoiceMonth);
+        const usageDoc = await transaction.get(usageRef);
 
         // Restore each exact batch captured during sale. Legacy invoices are
         // intentionally blocked rather than silently corrupting batch history.
         for (const item of invoice.items) {
-          if (invoice.isQuickBill) continue;
+          if (!item.productId || item.productId === 'custom') continue;
           if (!item.batchDeductions?.length) {
             throw new Error(`Legacy invoice ${invoice.invoiceNumber} has no batch provenance and cannot be safely deleted. Use a reviewed stock adjustment.`);
           }
@@ -590,10 +627,10 @@ export const invoiceService = {
           }
         }
 
-        if (tenantDoc.exists()) {
-          transaction.update(tenantRef, {
-            'usage.invoicesCount': increment(-1),
-            updatedAt: serverTimestamp()
+        if (usageDoc.exists() && (Number(usageDoc.data().invoicesCount) || 0) > 0) {
+          transaction.update(usageRef, {
+            invoicesCount: increment(-1),
+            updatedAt: serverTimestamp(),
           });
         }
 

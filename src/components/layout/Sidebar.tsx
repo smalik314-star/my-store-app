@@ -88,9 +88,9 @@ const menuSections: Array<{ title: string; items: MenuItem[] }> = [
     title: 'Reports & Admin',
     items: [
       { icon: BarChart3, label: 'Reports', path: '/reports', active: true },
-      { icon: UserCog, label: 'Users', path: '/users', active: true },
-      { icon: Settings, label: 'Store Settings', path: '/settings', active: true },
-      { icon: CreditCard, label: 'Plan & Subscription', path: '/subscription', active: true },
+      { icon: UserCog, label: 'Users', path: '/users', active: true, roles: ['owner'] },
+      { icon: Settings, label: 'Store Settings', path: '/settings', active: true, roles: ['owner', 'admin'] },
+      { icon: CreditCard, label: 'Plan & Subscription', path: '/subscription', active: true, roles: ['owner'] },
     ]
   }
 ];

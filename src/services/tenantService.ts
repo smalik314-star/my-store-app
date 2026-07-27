@@ -78,6 +78,14 @@ export const tenantService = {
     }
   },
 
+  async getMonthlyInvoiceUsage(tenantId: string): Promise<number> {
+    const month = new Date().toISOString().slice(0, 7);
+    const usageRef = doc(db, 'tenants', tenantId, 'usageCounters', month);
+    const snap = await getDoc(usageRef);
+    if (!snap.exists() || snap.data().tenantId !== tenantId) return 0;
+    return Math.max(0, Number(snap.data().invoicesCount) || 0);
+  },
+
   async updateUsage(tenantId: string, field: 'invoicesCount' | 'productsCount' | 'usersCount', delta: number) {
     const tenantRef = doc(db, 'tenants', tenantId);
     await updateDoc(tenantRef, {

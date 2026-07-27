@@ -201,6 +201,15 @@ export const purchaseService = {
             productDocs.set(item.productId, snap);
           }
         }
+        const tenantRef = doc(db, 'tenants', tenantId);
+        const tenantDoc = await transaction.get(tenantRef);
+        if (!tenantDoc.exists()) throw new Error('Store profile not found.');
+        const newProductCount = Array.from(productDocs.values()).filter(value => value === null).length;
+        const tenantUsage = tenantDoc.data().usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+        const tenantLimits = tenantDoc.data().limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+        if ((Number(tenantUsage.productsCount) || 0) + newProductCount > tenantLimits.maxProducts) {
+          throw new Error('Product limit reached. Please upgrade your plan.');
+        }
         const supplierRef = doc(db, SUPPLIERS_COLL, purchaseData.supplierId);
         const supplierDoc = await transaction.get(supplierRef);
         if (!supplierDoc.exists() || supplierDoc.data().tenantId !== tenantId) {
@@ -265,6 +274,15 @@ export const purchaseService = {
           payableBalance: increment(payableAmount),
           updatedAt: serverTimestamp(),
         });
+        if (newProductCount > 0) {
+          transaction.update(tenantRef, {
+            usage: {
+              ...tenantUsage,
+              productsCount: (Number(tenantUsage.productsCount) || 0) + newProductCount,
+            },
+            updatedAt: serverTimestamp(),
+          });
+        }
 
         const supplierLedgerRef = doc(collection(db, 'ledgerEntries'));
         transaction.set(supplierLedgerRef, {
