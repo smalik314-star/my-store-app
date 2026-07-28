@@ -11,11 +11,18 @@ import {
   where,
   getDocs,
   addDoc,
-  writeBatch
+  writeBatch,
+  runTransaction,
+  Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { Tenant, SubscriptionPlan, UserRole } from '../types';
+import { SubscriptionRequest, Tenant, SubscriptionPlan, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import {
+  type BillingPeriod,
+  getEffectiveLimits,
+  SUBSCRIPTION_PLANS,
+} from '../config/subscription';
 
 export const tenantService = {
   async createTenant(ownerId: string, storeName: string, email?: string): Promise<Tenant> {
@@ -31,6 +38,7 @@ export const tenantService = {
       ownerId: ownerId,
       plan: 'free',
       status: 'active',
+      subscriptionStatus: 'free',
       usage: {
         invoicesCount: 0,
         productsCount: 0,
@@ -94,51 +102,83 @@ export const tenantService = {
     });
   },
 
-  async upgradePlan(tenantId: string, plan: SubscriptionPlan) {
-    const tenantRef = doc(db, 'tenants', tenantId);
-    const limits = {
-      free: { maxInvoices: 50, maxProducts: 100, maxUsers: 1 },
-      pro: { maxInvoices: 1000, maxProducts: 5000, maxUsers: 5 },
-      business: { maxInvoices: 10000, maxProducts: 50000, maxUsers: 20 },
-    };
-
-    await updateDoc(tenantRef, {
-      plan,
-      limits: limits[plan],
-      updatedAt: serverTimestamp(),
-    });
-  },
-
   async startProTrial(tenantId: string) {
     const tenantRef = doc(db, 'tenants', tenantId);
     const now = new Date();
     const trialEnds = new Date();
     trialEnds.setDate(now.getDate() + 30);
-
-    const limits = { maxInvoices: 1000, maxProducts: 5000, maxUsers: 5 };
-
-    await updateDoc(tenantRef, {
-      plan: 'pro',
-      limits: limits,
-      trialStartedAt: now.toISOString(),
-      trialEndsAt: trialEnds.toISOString(),
-      invites: [],
-      isTrialExtended: false,
-      updatedAt: serverTimestamp(),
+    await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(tenantRef);
+      if (!snapshot.exists()) throw new Error('Store profile not found.');
+      const tenant = snapshot.data() as Tenant;
+      if (tenant.ownerId !== auth.currentUser?.uid) {
+        throw new Error('Only the workspace owner can start a trial.');
+      }
+      if (tenant.trialStartedAt) {
+        throw new Error('The free trial has already been used for this workspace.');
+      }
+      if (tenant.plan !== 'free') {
+        throw new Error('A trial is only available from the Free plan.');
+      }
+      transaction.update(tenantRef, {
+        plan: 'pro',
+        limits: SUBSCRIPTION_PLANS.pro.limits,
+        subscriptionStatus: 'trialing',
+        trialStartedAt: serverTimestamp(),
+        trialEndsAt: Timestamp.fromDate(trialEnds),
+        updatedAt: serverTimestamp(),
+      });
     });
   },
 
-  async updateInvites(tenantId: string, invites: string[], isTrialExtended: boolean, newTrialEndsAt?: string) {
-    const tenantRef = doc(db, 'tenants', tenantId);
-    const updates: any = {
-      invites,
-      isTrialExtended,
-      updatedAt: serverTimestamp(),
-    };
-    if (newTrialEndsAt) {
-      updates.trialEndsAt = newTrialEndsAt;
+  async requestPlanUpgrade(
+    tenantId: string,
+    requestedPlan: Exclude<SubscriptionPlan, 'free'>,
+    billingPeriod: BillingPeriod
+  ) {
+    const actorId = auth.currentUser?.uid;
+    if (!actorId) throw new Error('You must be signed in.');
+    const tenant = await this.getTenant(tenantId);
+    if (!tenant || tenant.ownerId !== actorId) {
+      throw new Error('Only the workspace owner can request a plan change.');
     }
-    await updateDoc(tenantRef, updates);
+    const plan = SUBSCRIPTION_PLANS[requestedPlan];
+    const amount = billingPeriod === 'monthly' ? plan.priceMonthly : plan.priceAnnually;
+    return addDoc(collection(db, 'subscriptionRequests'), {
+      tenantId,
+      requestedPlan,
+      billingPeriod,
+      amount,
+      currency: 'INR',
+      status: 'pending',
+      createdBy: actorId,
+      createdAt: serverTimestamp(),
+    });
+  },
+
+  async getSubscriptionRequests(tenantId: string): Promise<SubscriptionRequest[]> {
+    const snapshot = await getDocs(query(
+      collection(db, 'subscriptionRequests'),
+      where('tenantId', '==', tenantId)
+    ));
+    return snapshot.docs.map(item => ({
+      id: item.id,
+      ...item.data(),
+    } as SubscriptionRequest));
+  },
+
+  async switchToFreePlan(tenantId: string) {
+    const tenantRef = doc(db, 'tenants', tenantId);
+    const snapshot = await getDoc(tenantRef);
+    if (!snapshot.exists() || snapshot.data().ownerId !== auth.currentUser?.uid) {
+      throw new Error('Only the workspace owner can change the plan.');
+    }
+    await updateDoc(tenantRef, {
+      plan: 'free',
+      limits: SUBSCRIPTION_PLANS.free.limits,
+      subscriptionStatus: 'cancelled',
+      updatedAt: serverTimestamp(),
+    });
   },
 
   async getTenantUsers(tenantId: string) {
@@ -158,6 +198,12 @@ export const tenantService = {
   async addUserToTenant(tenantId: string, email: string, role: UserRole, name?: string, phone?: string) {
     const normalizedEmail = email.trim().toLowerCase();
     try {
+      const tenant = await this.getTenant(tenantId);
+      if (!tenant) throw new Error('Store profile not found.');
+      const members = await this.getTenantUsers(tenantId);
+      if (members.length >= getEffectiveLimits(tenant).maxUsers) {
+        throw new Error('User limit reached. Upgrade the plan before inviting another team member.');
+      }
       const existing = await getDocs(query(collection(db, 'invitations'), where('tenantId', '==', tenantId), where('email', '==', normalizedEmail), where('status', '==', 'pending')));
       if (!existing.empty) throw new Error('A pending invitation already exists for this email.');
       await addDoc(collection(db, 'invitations'), {
