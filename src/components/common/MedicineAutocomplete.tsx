@@ -34,6 +34,19 @@ export function MedicineAutocomplete({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const focusNextField = () => {
+    window.setTimeout(() => {
+      const input = inputRef.current;
+      const form = input?.form;
+      if (!input || !form) return;
+      const fields = Array.from(form.querySelectorAll<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])'
+      )).filter(field => field.tabIndex !== -1 && field.offsetParent !== null);
+      const currentIndex = fields.indexOf(input);
+      fields[currentIndex + 1]?.focus();
+    }, 0);
+  };
+
   // Debounce the input value changes by 300ms
   useEffect(() => {
     if (value.trim().length >= 2 && value !== debouncedValue) {
@@ -89,11 +102,12 @@ export function MedicineAutocomplete({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex(prev => (prev - 1 + suggestions.length) % suggestions.length);
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
       const selectedIdx = activeIndex >= 0 ? activeIndex : 0;
       if (suggestions[selectedIdx]) {
         handleSelection(suggestions[selectedIdx]);
+        focusNextField();
       }
     } else if (e.key === 'Escape') {
       setShowDropdown(false);
