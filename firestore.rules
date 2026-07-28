@@ -83,6 +83,36 @@ service cloud.firestore {
           )
           ||
           (
+            roleIs(['owner'])
+            && resource.data.plan == 'free'
+            && !('trialStartedAt' in resource.data)
+            && request.resource.data.plan == 'pro'
+            && request.resource.data.subscriptionStatus == 'trialing'
+            && request.resource.data.limits.maxInvoices == 1000
+            && request.resource.data.limits.maxProducts == 5000
+            && request.resource.data.limits.maxUsers == 5
+            && request.resource.data.trialStartedAt == request.time
+            && request.resource.data.trialEndsAt > request.time
+            && request.resource.data.trialEndsAt <= request.time + duration.value(31, 'd')
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly([
+                'plan','limits','subscriptionStatus','trialStartedAt',
+                'trialEndsAt','updatedAt'
+              ])
+          )
+          ||
+          (
+            roleIs(['owner'])
+            && request.resource.data.plan == 'free'
+            && request.resource.data.subscriptionStatus == 'cancelled'
+            && request.resource.data.limits.maxInvoices == 50
+            && request.resource.data.limits.maxProducts == 100
+            && request.resource.data.limits.maxUsers == 1
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['plan','limits','subscriptionStatus','updatedAt'])
+          )
+          ||
+          (
             roleIs(['staff'])
             && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['usage','updatedAt'])
@@ -183,6 +213,36 @@ service cloud.firestore {
           .hasOnly(['status','acceptedBy','acceptedAt'])
       );
       allow delete: if inTenant(resource.data.tenantId) && roleIs(['owner','admin']);
+    }
+
+    match /subscriptionRequests/{requestId} {
+      allow read: if inTenant(resource.data.tenantId) && roleIs(['owner']);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.requestedPlan in ['pro','business']
+        && request.resource.data.billingPeriod in ['monthly','annually']
+        && request.resource.data.amount is number
+        && (
+          (
+            request.resource.data.requestedPlan == 'pro'
+            && (
+              (request.resource.data.billingPeriod == 'monthly' && request.resource.data.amount == 199)
+              || (request.resource.data.billingPeriod == 'annually' && request.resource.data.amount == 1990)
+            )
+          )
+          ||
+          (
+            request.resource.data.requestedPlan == 'business'
+            && (
+              (request.resource.data.billingPeriod == 'monthly' && request.resource.data.amount == 399)
+              || (request.resource.data.billingPeriod == 'annually' && request.resource.data.amount == 3990)
+            )
+          )
+        )
+        && request.resource.data.currency == 'INR'
+        && request.resource.data.status == 'pending';
+      allow update, delete: if false;
     }
 
     match /products/{productId} {
