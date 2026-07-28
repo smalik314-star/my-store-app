@@ -45,6 +45,12 @@ import { handleFirestoreError, OperationType } from '../../utils/firestore-error
 import { toJsDate } from '../../utils/date';
 import { getFefoAvailableBatch, getValidBatchQuantity } from '../../utils/stock';
 import { calculateLossSale } from '../../utils/pricing';
+import { useMedicineSuggestions } from '../../hooks/useMedicineSuggestions';
+import type { MasterMedicine } from '../../services/medicineMasterService';
+
+type BillingSuggestion =
+  | { type: 'inventory'; product: Product }
+  | { type: 'catalogue'; medicine: MasterMedicine };
 
 const WALK_IN_CUSTOMER: Customer = {
   id: 'walk-in',
@@ -101,6 +107,11 @@ export default function Billing() {
   ]);
   const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null);
   const [productActiveIndex, setProductActiveIndex] = useState(-1);
+  const medicineQueries = useMemo(
+    () => Object.fromEntries(cart.map((item, index) => [String(index), item.name])),
+    [cart]
+  );
+  const catalogueSuggestions = useMedicineSuggestions(medicineQueries, 10);
 
   // Collapsible Extra Details
   const [showMoreDetails, setShowMoreDetails] = useState(false);
@@ -317,17 +328,27 @@ export default function Billing() {
   };
 
   // Autocomplete suggestions based on typed input for row index
-  const getProductSuggestions = (rowName: string) => {
+  const getProductSuggestions = (rowName: string, rowIndex: number): BillingSuggestion[] => {
     const term = rowName.trim().toLowerCase();
     if (!term) return [];
-    return products.filter(p => 
+    const inventory = products.filter(p =>
       p.name.toLowerCase().includes(term) || 
       (p.genericName && p.genericName.toLowerCase().includes(term)) ||
       (p.brand && p.brand.toLowerCase().includes(term)) ||
       (p.manufacturer && p.manufacturer.toLowerCase().includes(term)) ||
       p.sku?.toLowerCase().includes(term) ||
       p.barcode?.toLowerCase().includes(term)
-    ).slice(0, 8);
+    ).slice(0, 8).map(product => ({ type: 'inventory' as const, product }));
+    const inventoryKeys = new Set(inventory.map(({ product }) =>
+      `${product.name.trim().toLowerCase()}|${(product.manufacturer || '').trim().toLowerCase()}`
+    ));
+    const catalogue = (catalogueSuggestions[String(rowIndex)] || [])
+      .filter(medicine => !inventoryKeys.has(
+        `${medicine.name.trim().toLowerCase()}|${(medicine.manufacturer || '').trim().toLowerCase()}`
+      ))
+      .slice(0, 8)
+      .map(medicine => ({ type: 'catalogue' as const, medicine }));
+    return [...inventory, ...catalogue];
   };
 
   // Auto-fill row with selected product suggestion
@@ -493,7 +514,7 @@ export default function Billing() {
   const handleProductKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement>,
     index: number,
-    suggestions: Product[]
+    suggestions: BillingSuggestion[]
   ) => {
     if (suggestions.length > 0 && focusedRowIndex === index) {
       if (e.key === 'ArrowDown') {
@@ -509,7 +530,15 @@ export default function Billing() {
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         const activeIndex = productActiveIndex >= 0 ? productActiveIndex : 0;
-        handleSelectProductSuggestion(index, suggestions[activeIndex]);
+        const selected = suggestions[activeIndex];
+        if (selected.type === 'inventory') {
+          handleSelectProductSuggestion(index, selected.product);
+        } else {
+          handleRowInputChange(index, 'name', selected.medicine.name);
+          setFocusedRowIndex(null);
+          setProductActiveIndex(-1);
+          showToast(`${selected.medicine.name} catalogue mein hai, lekin sale ke liye pehle stock add karein.`, 'warning');
+        }
         window.setTimeout(() => {
           document.querySelector<HTMLInputElement>(`[data-billing-quantity="${index}"]`)?.focus();
           document.querySelector<HTMLInputElement>(`[data-billing-quantity="${index}"]`)?.select();
@@ -1042,7 +1071,7 @@ _Powered by PharmaFlow_`;
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {cart.map((item, index) => {
-                      const suggestions = getProductSuggestions(item.name);
+                      const suggestions = getProductSuggestions(item.name, index);
                       const selectedProduct = products.find(candidate => candidate.id === item.productId);
                       const selectedBatch = selectedProduct?.batches?.find(
                         batch => batch.batchNumber === item.batchNumber
@@ -1090,38 +1119,64 @@ _Powered by PharmaFlow_`;
                                   exit={{ opacity: 0, y: 5 }}
                                   className="absolute left-4 right-4 top-full mt-1.5 z-40 bg-surface border border-border rounded-2xl shadow-2xl p-1 space-y-0.5 max-h-60 overflow-y-auto"
                                 >
-                                  {suggestions.map((prod, suggestionIndex) => (
+                                  {suggestions.map((suggestion, suggestionIndex) => {
+                                    const isInventory = suggestion.type === 'inventory';
+                                    const medicine = isInventory ? suggestion.product : suggestion.medicine;
+                                    return (
                                     <button
-                                      key={prod.id}
+                                      key={isInventory
+                                        ? suggestion.product.id
+                                        : `catalogue-${medicine.name}-${medicine.manufacturer || ''}`}
                                       type="button"
                                       role="option"
                                       aria-selected={productActiveIndex === suggestionIndex}
                                       onMouseEnter={() => setProductActiveIndex(suggestionIndex)}
-                                      onClick={() => handleSelectProductSuggestion(index, prod)}
+                                      onClick={() => {
+                                        if (isInventory) {
+                                          handleSelectProductSuggestion(index, suggestion.product);
+                                        } else {
+                                          handleRowInputChange(index, 'name', suggestion.medicine.name);
+                                          setFocusedRowIndex(null);
+                                          setProductActiveIndex(-1);
+                                          showToast('Catalogue medicine selected. Add its stock before making a sale.', 'warning');
+                                        }
+                                      }}
                                       className={cn(
                                         "w-full p-2.5 hover:bg-background rounded-xl text-left flex items-center justify-between transition-colors",
                                         productActiveIndex === suggestionIndex && "bg-primary/10"
                                       )}
                                     >
                                       <div>
-                                        <p className="text-xs font-black text-text">{prod.name}</p>
+                                        <p className="text-xs font-black text-text">{medicine.name}</p>
                                         <div className="flex items-center gap-1.5 mt-0.5 text-[9px] font-bold text-text/30 uppercase">
-                                          <span>Batch: {prod.batchNumber}</span>
-                                          <span>•</span>
-                                          <span>Exp: {prod.expiryDate ? toJsDate(prod.expiryDate).toLocaleDateString() : 'N/A'}</span>
+                                          {isInventory ? (
+                                            <>
+                                              <span>Batch: {suggestion.product.batchNumber}</span>
+                                              <span>•</span>
+                                              <span>Exp: {suggestion.product.expiryDate ? toJsDate(suggestion.product.expiryDate).toLocaleDateString() : 'N/A'}</span>
+                                            </>
+                                          ) : (
+                                            <span>Catalogue · Mfg: {suggestion.medicine.manufacturer || 'Not listed'} · Add stock before sale</span>
+                                          )}
                                         </div>
                                       </div>
                                       <div className="text-right">
-                                        <p className="text-xs font-black text-primary">₹{prod.sellingPrice}</p>
-                                        <p className={cn(
-                                          "text-[9px] font-bold uppercase",
-                                          prod.stockQuantity <= 5 ? "text-danger" : "text-success"
-                                        )}>
-                                          Stock: {prod.stockQuantity}
-                                        </p>
+                                        {isInventory ? (
+                                          <>
+                                            <p className="text-xs font-black text-primary">₹{suggestion.product.sellingPrice}</p>
+                                            <p className={cn(
+                                              "text-[9px] font-bold uppercase",
+                                              suggestion.product.stockQuantity <= 5 ? "text-danger" : "text-success"
+                                            )}>
+                                              Stock: {suggestion.product.stockQuantity}
+                                            </p>
+                                          </>
+                                        ) : (
+                                          <p className="text-[9px] font-black uppercase text-warning">Catalogue only</p>
+                                        )}
                                       </div>
                                     </button>
-                                  ))}
+                                  )})}
                                 </motion.div>
                               )}
                             </AnimatePresence>
