@@ -27,6 +27,8 @@ import { useToast } from '../../context/ToastContext';
 import { formatCurrency, roundMoney, subtractMoney } from '../../utils/currency';
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
+import { useMedicineSuggestions } from '../../hooks/useMedicineSuggestions';
+import type { MasterMedicine } from '../../services/medicineMasterService';
 
 interface QuickBillModalProps {
   isOpen: boolean;
@@ -41,6 +43,10 @@ interface QuickCartItem {
   total: number;
   stockQuantity?: number;
 }
+
+type QuickBillSuggestion =
+  | { type: 'inventory'; product: Product }
+  | { type: 'catalogue'; medicine: MasterMedicine };
 
 export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   const { user } = useAuth();
@@ -62,6 +68,12 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
     { productId: '', name: '', quantity: 1, price: 0, total: 0 }
   ]);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
+  const medicineQueries = useMemo(
+    () => Object.fromEntries(cart.map((item, index) => [String(index), item.name])),
+    [cart]
+  );
+  const catalogueSuggestions = useMedicineSuggestions(medicineQueries, 10);
 
   // Payment configuration
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'due' | 'partial'>('paid');
@@ -103,14 +115,25 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   }, [grandTotal, paymentStatus]);
 
   // Filter products for autocomplete inline
-  const getProductSuggestions = (nameInput: string) => {
+  const getProductSuggestions = (nameInput: string, rowIndex: number): QuickBillSuggestion[] => {
     const term = nameInput.trim().toLowerCase();
     if (!term) return [];
-    return products.filter(p => 
+    const inventory = products.filter(p =>
       p.name.toLowerCase().includes(term) || 
       (p.brand && p.brand.toLowerCase().includes(term)) ||
-      (p.genericName && p.genericName.toLowerCase().includes(term))
-    ).slice(0, 5);
+      (p.genericName && p.genericName.toLowerCase().includes(term)) ||
+      (p.manufacturer && p.manufacturer.toLowerCase().includes(term))
+    ).slice(0, 6).map(product => ({ type: 'inventory' as const, product }));
+    const inventoryKeys = new Set(inventory.map(({ product }) =>
+      `${product.name.trim().toLowerCase()}|${(product.manufacturer || '').trim().toLowerCase()}`
+    ));
+    const catalogue = (catalogueSuggestions[String(rowIndex)] || [])
+      .filter(medicine => !inventoryKeys.has(
+        `${medicine.name.trim().toLowerCase()}|${(medicine.manufacturer || '').trim().toLowerCase()}`
+      ))
+      .slice(0, 8)
+      .map(medicine => ({ type: 'catalogue' as const, medicine }));
+    return [...inventory, ...catalogue];
   };
 
   const handleSelectItem = (index: number, product: Product) => {
@@ -128,6 +151,59 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
       return item;
     }));
     setFocusedIndex(null);
+    setActiveSuggestionIndex(-1);
+  };
+
+  const handleSelectCatalogueItem = (index: number, medicine: MasterMedicine) => {
+    setCart(previous => previous.map((item, itemIndex) => itemIndex === index
+      ? { ...item, productId: '', name: medicine.name, price: 0, total: 0 }
+      : item
+    ));
+    setFocusedIndex(null);
+    setActiveSuggestionIndex(-1);
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>(`[data-quick-quantity="${index}"]`)?.focus();
+    }, 0);
+  };
+
+  const focusQuickInput = (field: 'quantity' | 'price' | 'medicine', index: number) => {
+    window.setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>(`[data-quick-${field}="${index}"]`);
+      input?.focus();
+      input?.select();
+    }, 0);
+  };
+
+  const handleMedicineKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+    index: number,
+    suggestions: QuickBillSuggestion[]
+  ) => {
+    if (event.key === 'Escape') {
+      setFocusedIndex(null);
+      setActiveSuggestionIndex(-1);
+      return;
+    }
+    if (suggestions.length === 0) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        focusQuickInput('quantity', index);
+      }
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveSuggestionIndex(current => (current + 1) % suggestions.length);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveSuggestionIndex(current => current <= 0 ? suggestions.length - 1 : current - 1);
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
+      const selected = suggestions[activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0];
+      if (selected.type === 'inventory') handleSelectItem(index, selected.product);
+      else handleSelectCatalogueItem(index, selected.medicine);
+      focusQuickInput('quantity', index);
+    }
   };
 
   const handleRowInputChange = (index: number, field: keyof QuickCartItem, value: any) => {
@@ -404,7 +480,7 @@ _Powered by PharmaFlow_`;
                   </thead>
                   <tbody className="divide-y divide-border/40">
                     {cart.map((item, index) => {
-                      const suggestions = getProductSuggestions(item.name);
+                      const suggestions = getProductSuggestions(item.name, index);
                       return (
                         <tr key={index} className="hover:bg-background/10 transition-colors relative">
                           {/* Row ID */}
@@ -415,11 +491,20 @@ _Powered by PharmaFlow_`;
                           {/* Searchable input / name */}
                           <td className="px-4 py-3 relative">
                             <input
+                              data-quick-medicine={index}
                               type="text"
                               placeholder="Type item name / medicine..."
                               value={item.name}
-                              onChange={(e) => handleRowInputChange(index, 'name', e.target.value)}
-                              onFocus={() => setFocusedIndex(index)}
+                              onChange={(e) => {
+                                handleRowInputChange(index, 'name', e.target.value);
+                                setFocusedIndex(index);
+                                setActiveSuggestionIndex(-1);
+                              }}
+                              onFocus={() => {
+                                setFocusedIndex(index);
+                                setActiveSuggestionIndex(-1);
+                              }}
+                              onKeyDown={(event) => handleMedicineKeyDown(event, index, suggestions)}
                               className="w-full bg-transparent border-none text-xs font-black text-text focus:outline-none focus:ring-0 placeholder:text-text/20"
                             />
 
@@ -432,26 +517,48 @@ _Powered by PharmaFlow_`;
                                   exit={{ opacity: 0, y: 5 }}
                                   className="absolute left-4 right-4 top-full mt-1.5 z-40 bg-surface border border-border rounded-2xl shadow-xl p-1 max-h-48 overflow-y-auto"
                                 >
-                                  {suggestions.map(p => (
+                                  {suggestions.map((suggestion, suggestionIndex) => {
+                                    const isInventory = suggestion.type === 'inventory';
+                                    const medicine = isInventory ? suggestion.product : suggestion.medicine;
+                                    return (
                                     <button
-                                      key={p.id}
+                                      key={isInventory
+                                        ? suggestion.product.id
+                                        : `catalogue-${medicine.name}-${medicine.manufacturer || ''}`}
                                       type="button"
-                                      onMouseDown={() => handleSelectItem(index, p)}
-                                      className="w-full p-2.5 hover:bg-background rounded-xl text-left flex items-center justify-between transition-colors"
+                                      onMouseEnter={() => setActiveSuggestionIndex(suggestionIndex)}
+                                      onMouseDown={() => {
+                                        if (isInventory) handleSelectItem(index, suggestion.product);
+                                        else handleSelectCatalogueItem(index, suggestion.medicine);
+                                      }}
+                                      className={cn(
+                                        "w-full p-2.5 hover:bg-background rounded-xl text-left flex items-center justify-between transition-colors",
+                                        activeSuggestionIndex === suggestionIndex && "bg-primary/10"
+                                      )}
                                     >
                                       <div>
-                                        <p className="text-xs font-black text-text">{p.name}</p>
-                                        <p className="text-[9px] font-bold text-text/30 uppercase mt-0.5">SKU: {p.sku || 'N/A'}</p>
+                                        <p className="text-xs font-black text-text">{medicine.name}</p>
+                                        <p className="text-[9px] font-bold text-text/30 mt-0.5">
+                                          {isInventory
+                                            ? `Inventory · ${suggestion.product.brand || suggestion.product.manufacturer || 'No brand'}`
+                                            : `Medicine catalogue · Mfg: ${suggestion.medicine.manufacturer || 'Not listed'}`}
+                                        </p>
                                       </div>
                                       <div className="text-right">
-                                        <p className="text-xs font-black text-primary">₹{p.sellingPrice}</p>
-                                        <p className={cn(
-                                          "text-[9px] font-bold",
-                                          p.stockQuantity <= 5 ? "text-danger" : "text-success"
-                                        )}>Stock: {p.stockQuantity}</p>
+                                        {isInventory ? (
+                                          <>
+                                            <p className="text-xs font-black text-primary">₹{suggestion.product.sellingPrice}</p>
+                                            <p className={cn(
+                                              "text-[9px] font-bold",
+                                              suggestion.product.stockQuantity <= 5 ? "text-danger" : "text-success"
+                                            )}>Stock: {suggestion.product.stockQuantity}</p>
+                                          </>
+                                        ) : (
+                                          <p className="text-[9px] font-black text-primary uppercase">Catalogue</p>
+                                        )}
                                       </div>
                                     </button>
-                                  ))}
+                                  )})}
                                 </motion.div>
                               )}
                             </AnimatePresence>
@@ -468,10 +575,17 @@ _Powered by PharmaFlow_`;
                                 -
                               </button>
                               <input
+                                data-quick-quantity={index}
                                 type="number"
                                 min={1}
                                 value={item.quantity}
                                 onChange={(e) => handleRowInputChange(index, 'quantity', e.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    focusQuickInput('price', index);
+                                  }
+                                }}
                                 className="w-6 bg-transparent text-center text-xs font-black focus:outline-none focus:ring-0 border-none p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
                               <button
@@ -487,11 +601,22 @@ _Powered by PharmaFlow_`;
                           {/* Price */}
                           <td className="px-4 py-3">
                             <input
+                              data-quick-price={index}
                               type="number"
                               min={0}
                               placeholder="0"
                               value={item.price || ''}
                               onChange={(e) => handleRowInputChange(index, 'price', e.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'Enter') return;
+                                event.preventDefault();
+                                if (index < cart.length - 1) {
+                                  focusQuickInput('medicine', index + 1);
+                                } else {
+                                  handleAddRow();
+                                  focusQuickInput('medicine', index + 1);
+                                }
+                              }}
                               className="w-full bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none"
                             />
                           </td>
