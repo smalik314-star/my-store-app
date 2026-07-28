@@ -1,6 +1,8 @@
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Tenant } from '../types';
+import { getEffectiveLimits } from '../config/subscription';
+import { tenantService } from './tenantService';
 
 export const subscriptionService = {
   async checkLimit(tenantId: string, type: 'invoicesCount' | 'productsCount' | 'usersCount'): Promise<{ allowed: boolean; message?: string }> {
@@ -11,10 +13,17 @@ export const subscriptionService = {
     
     const tenant = snap.data() as Tenant;
     const usage = tenant?.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
-    const limits = tenant?.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+    const limits = getEffectiveLimits(tenant);
     
-    const current = usage[type] || 0;
-    const limit = limits[type] || (type === 'invoicesCount' ? 50 : type === 'productsCount' ? 100 : 1);
+    const current = type === 'invoicesCount'
+      ? await tenantService.getMonthlyInvoiceUsage(tenantId)
+      : (usage[type] || 0);
+    const limitKey = type === 'invoicesCount'
+      ? 'maxInvoices'
+      : type === 'productsCount'
+        ? 'maxProducts'
+        : 'maxUsers';
+    const limit = limits[limitKey];
     
     if (current >= limit) {
       return { 
