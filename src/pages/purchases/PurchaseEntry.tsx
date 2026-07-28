@@ -105,6 +105,7 @@ export default function PurchaseEntry() {
   // Form Items State
   const [items, setItems] = useState<FormItem[]>([createEmptyItem()]);
   const [catalogSuggestions, setCatalogSuggestions] = useState<Record<string, MasterMedicine[]>>({});
+  const [activeSuggestionByRow, setActiveSuggestionByRow] = useState<Record<string, number>>({});
   const searchRequestRef = useRef<Record<string, number>>({});
 
   // Inline Supplier Add Modal State
@@ -226,6 +227,7 @@ export default function PurchaseEntry() {
       updated[idx].isNewProduct = false;
     }
     setItems(updated);
+    setActiveSuggestionByRow(current => ({ ...current, [updated[idx].id]: -1 }));
 
     const rowId = updated[idx].id;
     const requestId = (searchRequestRef.current[rowId] || 0) + 1;
@@ -655,11 +657,24 @@ export default function PurchaseEntry() {
                           }
                         }}
                         onKeyDown={(event) => {
-                          if (event.key === 'Enter' && suggestions.length > 0) {
+                          const activeIndex = activeSuggestionByRow[item.id] ?? -1;
+                          if (event.key === 'ArrowDown' && suggestions.length > 0) {
                             event.preventDefault();
-                            const first = suggestions[0];
-                            if (first.type === 'inventory') handleSelectProduct(idx, first.product);
-                            else handleSelectCatalogueMedicine(idx, first.medicine);
+                            setActiveSuggestionByRow(current => ({
+                              ...current,
+                              [item.id]: (activeIndex + 1) % suggestions.length,
+                            }));
+                          } else if (event.key === 'ArrowUp' && suggestions.length > 0) {
+                            event.preventDefault();
+                            setActiveSuggestionByRow(current => ({
+                              ...current,
+                              [item.id]: activeIndex <= 0 ? suggestions.length - 1 : activeIndex - 1,
+                            }));
+                          } else if ((event.key === 'Enter' || event.key === 'Tab') && suggestions.length > 0) {
+                            event.preventDefault();
+                            const selected = suggestions[activeIndex >= 0 ? activeIndex : 0];
+                            if (selected.type === 'inventory') handleSelectProduct(idx, selected.product);
+                            else handleSelectCatalogueMedicine(idx, selected.medicine);
                           } else if (event.key === 'Escape') {
                             const updated = [...items];
                             updated[idx].showSuggestions = false;
@@ -675,7 +690,7 @@ export default function PurchaseEntry() {
                     {/* Autocomplete Suggestions Panel */}
                     {item.showSuggestions && suggestions.length > 0 && (
                       <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-surface border border-border rounded-xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-border">
-                        {suggestions.map((suggestion) => {
+                        {suggestions.map((suggestion, suggestionIndex) => {
                           const isInventory = suggestion.type === 'inventory';
                           const medicine = isInventory ? suggestion.product : suggestion.medicine;
                           return (
@@ -686,7 +701,13 @@ export default function PurchaseEntry() {
                               if (isInventory) handleSelectProduct(idx, suggestion.product);
                               else handleSelectCatalogueMedicine(idx, suggestion.medicine);
                             }}
-                            className="w-full text-left px-4 py-2.5 hover:bg-text/[0.03] transition-all text-xs"
+                            onMouseEnter={() => setActiveSuggestionByRow(current => ({
+                              ...current,
+                              [item.id]: suggestionIndex,
+                            }))}
+                            className={`w-full text-left px-4 py-2.5 hover:bg-text/[0.03] transition-all text-xs ${
+                              (activeSuggestionByRow[item.id] ?? -1) === suggestionIndex ? 'bg-primary/10' : ''
+                            }`}
                           >
                             <p className="font-bold text-text">{medicine.name}</p>
                             <p className="text-text/50 font-medium">
