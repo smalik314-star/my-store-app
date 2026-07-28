@@ -19,6 +19,7 @@ export interface Tenant {
   status: 'active' | 'cancelled' | 'past_due';
   subscriptionId?: string;
   customerId?: string; // Payment gateway customer ID
+  subscriptionStatus?: 'free' | 'trialing' | 'active' | 'past_due' | 'cancelled';
   usage: {
     invoicesCount: number;
     productsCount: number;
@@ -31,10 +32,20 @@ export interface Tenant {
   };
   createdAt: any;
   updatedAt: any;
-  trialStartedAt?: string;
-  trialEndsAt?: string;
-  invites?: string[];
-  isTrialExtended?: boolean;
+  trialStartedAt?: any;
+  trialEndsAt?: any;
+}
+
+export interface SubscriptionRequest {
+  id: string;
+  tenantId: string;
+  requestedPlan: Exclude<SubscriptionPlan, 'free'>;
+  billingPeriod: 'monthly' | 'annually';
+  amount: number;
+  currency: 'INR';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  createdBy: string;
+  createdAt: any;
 }
 
 export interface TenantUser {
