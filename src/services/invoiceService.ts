@@ -22,6 +22,7 @@ import { tenantService } from './tenantService';
 import { toJsDate } from '../utils/date';
 import { allocateFefo, getValidBatchQuantity, isBatchExpired } from '../utils/stock';
 import { addMoney, calculateLineTax, roundMoney, subtractMoney } from '../utils/currency';
+import { getEffectiveLimits } from '../config/subscription';
 
 const COLLECTION_NAME = 'invoices';
 
@@ -166,7 +167,7 @@ export const invoiceService = {
           tenantExists = true;
           const tenant = tenantDoc.data() as Tenant;
           usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
-          limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+          limits = getEffectiveLimits(tenant);
           
           const monthlyInvoiceCount = usageDoc.exists()
             ? Math.max(0, Number(usageDoc.data().invoicesCount) || 0)
