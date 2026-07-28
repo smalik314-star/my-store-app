@@ -17,6 +17,7 @@ import {
 import { db, auth } from '../firebase/config';
 import { Product, Tenant, StockMovement } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { getEffectiveLimits } from '../config/subscription';
 
 const COLLECTION_NAME = 'products';
 
@@ -76,7 +77,7 @@ export const productService = {
         if (!tenantDoc.exists()) throw new Error('Store profile not found.');
         const tenant = tenantDoc.data() as Tenant;
         const usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
-        const limits = tenant.limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+        const limits = getEffectiveLimits(tenant);
         if (usage.productsCount >= limits.maxProducts) {
           throw new Error('Product limit reached. Please upgrade your plan.');
         }
@@ -92,7 +93,6 @@ export const productService = {
 
         transaction.update(tenantRef, {
           usage: { ...usage, productsCount: usage.productsCount + 1 },
-          limits,
           updatedAt: serverTimestamp()
         });
 
