@@ -15,8 +15,9 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { Purchase, PurchaseItem, Supplier, StockMovement, Product, ProductBatch } from '../types';
+import { Purchase, PurchaseItem, Supplier, StockMovement, Product, ProductBatch, Tenant } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { getEffectiveLimits } from '../config/subscription';
 import { toJsDate } from '../utils/date';
 import { roundMoney } from '../utils/currency';
 
@@ -206,7 +207,7 @@ export const purchaseService = {
         if (!tenantDoc.exists()) throw new Error('Store profile not found.');
         const newProductCount = Array.from(productDocs.values()).filter(value => value === null).length;
         const tenantUsage = tenantDoc.data().usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
-        const tenantLimits = tenantDoc.data().limits || { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
+        const tenantLimits = getEffectiveLimits(tenantDoc.data() as Tenant);
         if ((Number(tenantUsage.productsCount) || 0) + newProductCount > tenantLimits.maxProducts) {
           throw new Error('Product limit reached. Please upgrade your plan.');
         }
