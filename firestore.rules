@@ -207,7 +207,15 @@ service cloud.firestore {
     }
 
     match /invoices/{invoiceId} {
-      allow read: if inTenant(resource.data.tenantId);
+      // saveInvoice performs an idempotency get before creating a deterministic
+      // tenant-prefixed invoice document. For a new document resource.data does
+      // not exist, so authorize that single-document get from the caller's own
+      // tenant prefix. Existing invoice reads remain tenant-data protected.
+      allow get: if (
+        hasUser()
+        && invoiceId.matches('^' + userData().tenantId + '_.*')
+      ) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']) && validInvoice();
       allow update: if inTenant(resource.data.tenantId) && sameTenant() && resource.data.status != 'cancelled'
         && (
