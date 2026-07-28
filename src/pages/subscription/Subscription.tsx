@@ -1,527 +1,258 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { 
-  Check, 
-  Zap, 
-  ShieldCheck, 
-  CreditCard, 
-  ArrowRight,
-  TrendingUp,
-  Package,
-  FileText,
-  Users as UsersIcon,
-  Mail,
-  Share2,
-  Gift,
-  AlertCircle,
-  Sparkles,
-  Clock
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Clock, FileText, Package, ShieldCheck, Users } from 'lucide-react';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
-import { tenantService } from '../../services/tenantService';
-import { Tenant, SubscriptionPlan } from '../../types';
 import { useToast } from '../../context/ToastContext';
-
-// Updated plans pricing
-const plans = [
-  {
-    id: 'free',
-    name: 'Free',
-    priceMonthly: 0,
-    priceAnnually: 0,
-    description: 'Perfect for small pharmacies starting out',
-    features: [
-      'Up to 50 invoices/mo',
-      'Up to 100 products',
-      'Basic reports',
-      'Single user access',
-      'Community support'
-    ],
-    limits: { invoices: 50, products: 100, users: 1 }
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    priceMonthly: 199,
-    priceAnnually: 1990,
-    description: 'Grow your business with advanced tools',
-    features: [
-      'Up to 1000 invoices/mo',
-      'Up to 5000 products',
-      'AI Inventory Insights',
-      'Up to 5 users',
-      'Priority email support'
-    ],
-    limits: { invoices: 1000, products: 5000, users: 5 },
-    recommended: true,
-    hasTrial: true
-  },
-  {
-    id: 'business',
-    name: 'Business',
-    priceMonthly: 399,
-    priceAnnually: 3990,
-    description: 'Full ERP power for large operations',
-    features: [
-      'Unlimited invoices*',
-      'Up to 50000 products',
-      'Multi-store management',
-      'Up to 20 users',
-      '24/7 dedicated support'
-    ],
-    limits: { invoices: 10000, products: 50000, users: 20 }
-  }
-];
+import {
+  type BillingPeriod,
+  getEffectiveLimits,
+  getEffectivePlan,
+  isTrialActive,
+  SUBSCRIPTION_PLANS,
+} from '../../config/subscription';
+import { tenantService } from '../../services/tenantService';
+import type { SubscriptionPlan, SubscriptionRequest, Tenant } from '../../types';
+import { toJsDate } from '../../utils/date';
 
 export default function Subscription() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [requests, setRequests] = useState<SubscriptionRequest[]>([]);
   const [monthlyInvoiceUsage, setMonthlyInvoiceUsage] = useState(0);
+  const [teamUserCount, setTeamUserCount] = useState(1);
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>('monthly');
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
-  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annually'>('monthly');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviting, setInviting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (user?.tenantId) {
-      Promise.all([
+  const loadSubscription = async () => {
+    if (!user?.tenantId) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [tenantData, invoiceUsage, requestData, teamUsers] = await Promise.all([
         tenantService.getTenant(user.tenantId),
         tenantService.getMonthlyInvoiceUsage(user.tenantId),
-      ]).then(([data, invoiceUsage]) => {
-          setTenant(data);
-          setMonthlyInvoiceUsage(invoiceUsage);
-        }).finally(() => setLoading(false));
+        tenantService.getSubscriptionRequests(user.tenantId),
+        tenantService.getTenantUsers(user.tenantId),
+      ]);
+      if (!tenantData) throw new Error('Store subscription profile was not found.');
+      setTenant(tenantData);
+      setMonthlyInvoiceUsage(invoiceUsage);
+      setRequests(requestData);
+      setTeamUserCount(Math.max(1, teamUsers.length));
+    } catch (error: any) {
+      setLoadError(error?.message || 'Unable to load subscription details.');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    void loadSubscription();
   }, [user?.tenantId]);
 
-  const handleUpgrade = async (planId: SubscriptionPlan) => {
-    if (!user?.tenantId) return;
-    
-    setUpgradingPlan(planId);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      await tenantService.upgradePlan(user.tenantId, planId);
-      
-      const updatedTenant = await tenantService.getTenant(user.tenantId);
-      setTenant(updatedTenant);
-      showToast(`Successfully upgraded to ${planId.toUpperCase()} plan!`, 'success');
-    } catch (error) {
-      showToast('Upgrade failed. Please try again.', 'danger');
-    } finally {
-      setUpgradingPlan(null);
-    }
-  };
+  const effectivePlan = tenant ? getEffectivePlan(tenant) : 'free';
+  const limits = tenant ? getEffectiveLimits(tenant) : SUBSCRIPTION_PLANS.free.limits;
+  const pendingRequest = useMemo(
+    () => requests.find(request => request.status === 'pending'),
+    [requests]
+  );
 
-  const handleStartProTrial = async () => {
-    if (!user?.tenantId) return;
-    setUpgradingPlan('pro');
+  const trialDaysRemaining = tenant?.trialEndsAt && isTrialActive(tenant)
+    ? Math.max(1, Math.ceil(
+      (toJsDate(tenant.trialEndsAt).getTime() - Date.now()) / 86_400_000
+    ))
+    : 0;
+
+  const handleStartTrial = async () => {
+    if (!user?.tenantId || user.role !== 'owner') return;
+    setBusyAction('trial');
     try {
       await tenantService.startProTrial(user.tenantId);
-      const updatedTenant = await tenantService.getTenant(user.tenantId);
-      setTenant(updatedTenant);
-      showToast("Your 30-Day Free Trial of PharmaFlow Pro has started!", "success");
-    } catch (error) {
-      showToast("Failed to start trial. Please try again.", "danger");
+      await loadSubscription();
+      showToast('30-day Pro trial started successfully.', 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'Unable to start the trial.', 'danger');
     } finally {
-      setUpgradingPlan(null);
+      setBusyAction(null);
     }
   };
 
-  const handleSendInvite = async () => {
-    if (!user?.tenantId || !tenant) return;
-    const trimmedEmail = inviteEmail.trim().toLowerCase();
-    if (!trimmedEmail) {
-      showToast("Please enter an email address.", "warning");
+  const handlePlanRequest = async (plan: Exclude<SubscriptionPlan, 'free'>) => {
+    if (!user?.tenantId || user.role !== 'owner') return;
+    if (pendingRequest) {
+      showToast('A plan-change request is already pending.', 'warning');
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) {
-      showToast("Please enter a valid email address.", "warning");
-      return;
-    }
-
-    const currentInvites = tenant.invites || [];
-    if (currentInvites.includes(trimmedEmail)) {
-      showToast("This email has already been invited!", "warning");
-      return;
-    }
-
-    setInviting(true);
+    setBusyAction(plan);
     try {
-      const updatedInvites = [...currentInvites, trimmedEmail];
-      const willBeExtended = updatedInvites.length >= 5;
-      
-      let newTrialEndsAt = tenant.trialEndsAt;
-      if (willBeExtended && !tenant.isTrialExtended) {
-        const currentEnds = tenant.trialEndsAt ? new Date(tenant.trialEndsAt) : new Date();
-        currentEnds.setDate(currentEnds.getDate() + 30);
-        newTrialEndsAt = currentEnds.toISOString();
-      }
-
-      await tenantService.updateInvites(
-        user.tenantId, 
-        updatedInvites, 
-        willBeExtended || (tenant.isTrialExtended || false),
-        newTrialEndsAt
-      );
-
-      const updatedTenant = await tenantService.getTenant(user.tenantId);
-      setTenant(updatedTenant);
-      setInviteEmail('');
-      
-      if (willBeExtended && !tenant.isTrialExtended) {
-        showToast("🎉 Success! You've invited 5 people and unlocked your Pro trial extension!", "success");
-      } else {
-        showToast(`Invite sent to ${trimmedEmail} successfully!`, "success");
-      }
-    } catch (error) {
-      showToast("Failed to send invite. Please try again.", "danger");
+      await tenantService.requestPlanUpgrade(user.tenantId, plan, billingPeriod);
+      await loadSubscription();
+      showToast('Upgrade request submitted. Your plan will change only after payment verification.', 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'Unable to submit the upgrade request.', 'danger');
     } finally {
-      setInviting(false);
+      setBusyAction(null);
     }
   };
 
-  const handleWhatsAppInvite = async () => {
-    if (!user?.tenantId || !tenant) return;
-    
-    const currentInvites = tenant.invites || [];
-    const placeholderEmail = `whatsapp_invite_${Math.random().toString(36).substr(2, 5)}@pharmaflow.app`;
-    
-    const updatedInvites = [...currentInvites, placeholderEmail];
-    const willBeExtended = updatedInvites.length >= 5;
-    
-    let newTrialEndsAt = tenant.trialEndsAt;
-    if (willBeExtended && !tenant.isTrialExtended) {
-      const currentEnds = tenant.trialEndsAt ? new Date(tenant.trialEndsAt) : new Date();
-      currentEnds.setDate(currentEnds.getDate() + 30);
-      newTrialEndsAt = currentEnds.toISOString();
-    }
-
+  const handleDowngrade = async () => {
+    if (!user?.tenantId || user.role !== 'owner') return;
+    if (!window.confirm('Switch to Free plan limits now? Existing data will remain safe.')) return;
+    setBusyAction('free');
     try {
-      await tenantService.updateInvites(
-        user.tenantId,
-        updatedInvites,
-        willBeExtended || (tenant.isTrialExtended || false),
-        newTrialEndsAt
-      );
-      
-      const updatedTenant = await tenantService.getTenant(user.tenantId);
-      setTenant(updatedTenant);
-
-      const inviteMessage = `Hey! I'm using PharmaFlow to manage my pharmacy billing and inventory. It is incredibly easy to use. Check it out and sign up here: https://pharmaflow.app/invite?ref=${user.tenantId}`;
-      const encodedMessage = encodeURIComponent(inviteMessage);
-      const whatsappUrl = `https://api.whatsapp.com/send?text=${encodedMessage}`;
-      
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      
-      if (willBeExtended && !tenant.isTrialExtended) {
-        showToast("🎉 Success! Shared via WhatsApp and unlocked your Pro trial extension!", "success");
-      } else {
-        showToast("WhatsApp invite link generated and referral progress updated!", "success");
-      }
-    } catch (error) {
-      showToast("Failed to register WhatsApp share. Please try again.", "danger");
+      await tenantService.switchToFreePlan(user.tenantId);
+      await loadSubscription();
+      showToast('Workspace switched to the Free plan. Existing data was preserved.', 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'Unable to change the plan.', 'danger');
+    } finally {
+      setBusyAction(null);
     }
   };
 
-  const getTrialDetails = () => {
-    if (!tenant || tenant.plan !== 'pro' || !tenant.trialStartedAt || !tenant.trialEndsAt) {
-      return null;
-    }
-    const trialEnds = new Date(tenant.trialEndsAt);
-    const now = new Date();
-    const diffTime = trialEnds.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const isTrialExpired = diffDays <= 0;
-    const invites = tenant.invites || [];
-    const inviteCount = Math.min(invites.length, 5);
-    const isTrialExtended = tenant.isTrialExtended || invites.length >= 5;
+  if (user?.role !== 'owner') {
+    return (
+      <div className="max-w-2xl mx-auto p-6">
+        <Card className="p-8 text-center">
+          <ShieldCheck className="h-10 w-10 text-primary mx-auto mb-3" />
+          <h1 className="text-xl font-black text-text">Owner access required</h1>
+          <p className="mt-2 text-sm text-text/60">
+            Subscription and billing settings can only be managed by the workspace owner.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
-    return {
-      diffDays: Math.max(diffDays, 0),
-      isTrialExpired,
-      invites,
-      inviteCount,
-      isTrialExtended
-    };
-  };
+  if (loading) {
+    return <div className="h-96 flex items-center justify-center text-sm font-bold text-text/50">Loading subscription…</div>;
+  }
 
-  const trialInfo = getTrialDetails();
-
-  if (loading) return <div className="h-96 flex items-center justify-center">Loading plan details...</div>;
+  if (loadError || !tenant) {
+    return (
+      <div className="max-w-xl mx-auto p-6">
+        <Card className="p-8 text-center">
+          <p className="text-danger font-bold">{loadError || 'Subscription profile unavailable.'}</p>
+          <Button className="mt-5" onClick={() => void loadSubscription()}>Retry</Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4">
-      <div className="text-center mb-12">
-        <h1 className="text-4xl font-black text-text tracking-tighter mb-4">Subscription & Billing</h1>
-        <p className="text-text/60 font-medium">Manage your plan, limits, and unlock premium features</p>
+    <div className="max-w-6xl mx-auto py-8 px-4 space-y-10">
+      <div>
+        <h1 className="text-3xl md:text-4xl font-black text-text tracking-tight">Plan & Subscription</h1>
+        <p className="mt-2 text-text/60 font-medium">
+          Current effective plan: <span className="font-black text-primary">{SUBSCRIPTION_PLANS[effectivePlan].name}</span>
+        </p>
+        {tenant.subscriptionStatus === 'trialing' && trialDaysRemaining > 0 && (
+          <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-4 py-2 text-sm font-bold text-primary">
+            <Clock className="h-4 w-4" /> Pro trial · {trialDaysRemaining} day{trialDaysRemaining === 1 ? '' : 's'} remaining
+          </div>
+        )}
+        {tenant.subscriptionStatus === 'trialing' && trialDaysRemaining === 0 && (
+          <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm font-bold text-warning">
+            Pro trial has expired. Free-plan limits now apply automatically; your existing data remains safe.
+          </div>
+        )}
+        {pendingRequest && (
+          <div className="mt-4 rounded-xl border border-info/30 bg-info/10 px-4 py-3 text-sm font-bold text-info">
+            {SUBSCRIPTION_PLANS[pendingRequest.requestedPlan].name} {pendingRequest.billingPeriod} upgrade request is pending verification.
+          </div>
+        )}
       </div>
 
-      {/* Current Usage Stats */}
-      {tenant && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <UsageCard 
-            label="Monthly Invoices" 
-            current={monthlyInvoiceUsage}
-            limit={tenant.limits.maxInvoices} 
-            icon={FileText}
-            color="primary"
-          />
-          <UsageCard 
-            label="Total Products" 
-            current={tenant.usage.productsCount} 
-            limit={tenant.limits.maxProducts} 
-            icon={Package}
-            color="success"
-          />
-          <UsageCard 
-            label="Team Users" 
-            current={tenant.usage.usersCount} 
-            limit={tenant.limits.maxUsers} 
-            icon={UsersIcon}
-            color="info"
-          />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <UsageCard label="Monthly invoices" current={monthlyInvoiceUsage} limit={limits.maxInvoices} icon={FileText} />
+        <UsageCard label="Products" current={tenant.usage?.productsCount || 0} limit={limits.maxProducts} icon={Package} />
+        <UsageCard label="Team users" current={teamUserCount} limit={limits.maxUsers} icon={Users} />
+      </div>
+
+      <div className="flex justify-center">
+        <div className="flex rounded-2xl border border-border bg-background p-1">
+          {(['monthly', 'annually'] as const).map(period => (
+            <button
+              key={period}
+              type="button"
+              onClick={() => setBillingPeriod(period)}
+              className={`rounded-xl px-5 py-2.5 text-xs font-black uppercase ${
+                billingPeriod === period ? 'bg-primary text-white' : 'text-text/50'
+              }`}
+            >
+              {period === 'monthly' ? 'Monthly' : 'Annual · 2 months free'}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      {/* Refer & Extend Section (Active for users on Pro plan) */}
-      {tenant && tenant.plan === 'pro' && trialInfo && (
-        <Card className="p-8 border-2 border-primary/20 bg-primary/5 rounded-[40px] mb-12 overflow-hidden relative">
-          <div className="absolute -right-12 -bottom-12 w-64 h-64 rounded-full bg-primary/10 blur-3xl" />
-          <div className="absolute -left-12 -top-12 w-64 h-64 rounded-full bg-secondary/10 blur-3xl" />
-
-          <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
-            <div className="flex-1 space-y-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="bg-primary/20 text-primary text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1.5">
-                  <Gift className="h-3.5 w-3.5" /> Referral Program
-                </span>
-                {trialInfo.isTrialExtended ? (
-                  <span className="bg-success/20 text-success text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1">
-                    <Sparkles className="h-3.5 w-3.5" /> Extension Unlocked
-                  </span>
-                ) : trialInfo.isTrialExpired ? (
-                  <span className="bg-danger/20 text-danger text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1">
-                    <AlertCircle className="h-3.5 w-3.5" /> Trial Expired
-                  </span>
-                ) : (
-                  <span className="bg-secondary/20 text-secondary text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5" /> {trialInfo.diffDays} Days Remaining
-                  </span>
-                )}
-              </div>
-
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {Object.values(SUBSCRIPTION_PLANS).map(plan => {
+          const displayedPrice = billingPeriod === 'monthly' ? plan.priceMonthly : plan.priceAnnually;
+          const isEffective = effectivePlan === plan.id;
+          const canStartTrial = plan.id === 'pro'
+            && tenant.plan === 'free'
+            && !tenant.trialStartedAt;
+          return (
+            <Card
+              key={plan.id}
+              className={`p-7 flex flex-col border-2 ${plan.recommended ? 'border-primary' : 'border-border'} ${
+                isEffective ? 'ring-4 ring-success/10 border-success' : ''
+              }`}
+            >
               <div>
-                <h3 className="text-2xl font-black text-text tracking-tighter">Refer & Extend Trial</h3>
-                <p className="text-sm text-text/70 mt-1 max-w-2xl font-medium">
-                  Enjoying PharmaFlow Pro? Invite 5 friends to the platform. Once completed, your free trial will automatically extend for an additional 30 days!
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-black text-text">{plan.name}</h2>
+                  {isEffective && <span className="text-[10px] font-black text-success uppercase">Current</span>}
+                </div>
+                <p className="mt-2 min-h-10 text-sm text-text/60">{plan.description}</p>
+                <p className="mt-5 text-3xl font-black text-text">
+                  ₹{displayedPrice.toLocaleString('en-IN')}
+                  <span className="text-xs text-text/40">/{billingPeriod === 'monthly' ? 'month' : 'year'}</span>
                 </p>
               </div>
-
-              {/* Progress visualizer */}
-              <div className="space-y-2 max-w-md">
-                <div className="flex items-center justify-between text-xs font-bold text-text/60">
-                  <span>Invite Progress</span>
-                  <span className="font-black text-primary">{trialInfo.inviteCount} of 5 invited</span>
-                </div>
-                <div className="h-4 bg-text/5 rounded-full p-1 overflow-hidden flex items-center gap-1 border border-text/10">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(trialInfo.inviteCount / 5) * 100}%` }}
-                    className="h-full bg-gradient-to-r from-primary to-secondary rounded-full"
-                    transition={{ duration: 0.8, ease: "easeOut" }}
-                  />
-                </div>
-                <div className="flex justify-between items-center gap-1 pt-1">
-                  {[1, 2, 3, 4, 5].map((step) => {
-                    const active = trialInfo.inviteCount >= step;
-                    return (
-                      <div 
-                        key={step} 
-                        className={`flex items-center justify-center h-7 w-7 rounded-full text-xs font-black transition-all ${
-                          active 
-                            ? 'bg-success text-white scale-110 shadow-md' 
-                            : 'bg-text/5 text-text/40 border border-text/10'
-                        }`}
-                      >
-                        {active ? '✓' : step}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="w-full md:w-80 space-y-4">
-              {trialInfo.isTrialExtended ? (
-                <div className="bg-success/10 border border-success/20 p-6 rounded-2xl text-center space-y-3">
-                  <div className="h-12 w-12 bg-success/20 rounded-full flex items-center justify-center mx-auto text-success">
-                    <Sparkles className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h4 className="text-lg font-black text-text tracking-tight">30-Day Extension Unlocked!</h4>
-                    <p className="text-xs text-text/60 font-medium mt-1">Thank you for sharing PharmaFlow. Your trial has been successfully extended.</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex gap-2">
-                    <input
-                      type="email"
-                      placeholder="Enter friend's email"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      disabled={inviting}
-                      className="flex-1 px-4 py-3 bg-white border border-border rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder-text/30"
-                    />
-                    <Button 
-                      onClick={handleSendInvite}
-                      isLoading={inviting}
-                      disabled={inviting}
-                      className="px-4 py-3 rounded-xl flex items-center justify-center shrink-0"
-                    >
-                      <Mail className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <button
-                    onClick={handleWhatsAppInvite}
-                    className="w-full py-3 px-4 bg-[#25D366] hover:bg-[#20ba5a] text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-[#25D366]/10"
-                  >
-                    <Share2 className="h-4 w-4" /> Share via WhatsApp
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Billing toggle */}
-      <div className="flex flex-col items-center justify-center mb-12 space-y-2">
-        <div className="relative flex p-1.5 bg-text/5 border border-text/5 rounded-2xl w-fit">
-          <button
-            onClick={() => setBillingPeriod('monthly')}
-            className={`relative px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-              billingPeriod === 'monthly' ? 'text-primary font-black animate-none' : 'text-text/50 hover:text-text'
-            }`}
-          >
-            {billingPeriod === 'monthly' && (
-              <motion.div
-                layoutId="billing-period-bg"
-                className="absolute inset-0 bg-white shadow-md rounded-xl border border-text/5"
-                transition={{ type: "spring", stiffness: 350, damping: 30 }}
-              />
-            )}
-            <span className="relative z-10">Monthly</span>
-          </button>
-          <button
-            onClick={() => setBillingPeriod('annually')}
-            className={`relative px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-              billingPeriod === 'annually' ? 'text-primary font-black animate-none' : 'text-text/50 hover:text-text'
-            }`}
-          >
-            {billingPeriod === 'annually' && (
-              <motion.div
-                layoutId="billing-period-bg"
-                className="absolute inset-0 bg-white shadow-md rounded-xl border border-text/5"
-                transition={{ type: "spring", stiffness: 350, damping: 30 }}
-              />
-            )}
-            <span className="relative z-10 flex items-center gap-2">
-              Annually
-              <span className="bg-success/15 text-success text-[9px] px-2 py-0.5 rounded-full font-black">
-                2 Mos Free
-              </span>
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Pricing Plans Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {plans.map((plan) => {
-          const isCurrent = tenant?.plan === plan.id;
-          const price = billingPeriod === 'monthly' ? plan.priceMonthly : plan.priceAnnually;
-          const billingLabel = billingPeriod === 'monthly' ? '/month' : '/year';
-          
-          return (
-            <Card 
-              key={plan.id}
-              className={`p-8 border-2 transition-all flex flex-col h-full relative ${
-                plan.recommended 
-                  ? 'border-primary ring-4 ring-primary/5 shadow-2xl md:scale-105 z-10' 
-                  : 'border-border hover:border-text/15 shadow-sm'
-              } ${isCurrent ? 'border-success ring-4 ring-success/5' : ''}`}
-            >
-              {plan.recommended && (
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 rounded-full shadow-lg">
-                  Most Popular
-                </div>
-              )}
-
-              {isCurrent && (
-                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-success text-white text-[10px] font-black uppercase tracking-widest px-4 py-1.5 rounded-full shadow-lg">
-                  Current Plan
-                </div>
-              )}
-
-              <div className="mb-8">
-                <h3 className="text-2xl font-black text-text tracking-tighter mb-2">{plan.name}</h3>
-                <p className="text-sm text-text/60 font-medium h-10">{plan.description}</p>
-                <div className="mt-6 flex flex-col gap-1">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-black text-text tracking-tighter">₹{price.toLocaleString()}</span>
-                    <span className="text-text/40 font-bold">{billingLabel}</span>
-                  </div>
-                  
-                  {billingPeriod === 'annually' && price > 0 && (
-                    <span className="text-[10px] text-success font-black uppercase tracking-wider">
-                      Save ₹{(plan.priceMonthly * 2).toLocaleString()} / year (2 months free)
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4 mb-10 flex-1">
-                {plan.features.map((feature, idx) => (
-                  <div key={idx} className="flex items-center gap-3">
-                    <div className="h-5 w-5 rounded-full bg-success/10 flex items-center justify-center shrink-0">
-                      <Check className="h-3 w-3 text-success" />
-                    </div>
-                    <span className="text-sm font-bold text-text/70">{feature}</span>
+              <div className="my-7 flex-1 space-y-3">
+                {plan.features.map(feature => (
+                  <div key={feature} className="flex gap-2 text-sm font-bold text-text/70">
+                    <Check className="h-4 w-4 mt-0.5 shrink-0 text-success" /> {feature}
                   </div>
                 ))}
               </div>
 
-              {isCurrent ? (
-                <Button
-                  variant="outline"
-                  className="w-full h-14 rounded-2xl font-black uppercase tracking-widest"
-                  disabled={true}
-                >
-                  Current Plan
-                </Button>
-              ) : plan.hasTrial ? (
-                <Button
-                  variant={plan.recommended ? 'primary' : 'secondary'}
-                  className="w-full h-14 rounded-2xl font-black uppercase tracking-widest bg-gradient-to-r from-primary to-primary/90 hover:from-primary/95 hover:to-primary"
-                  onClick={handleStartProTrial}
-                  isLoading={upgradingPlan === plan.id}
-                >
-                  Start 30-Day Free Trial
+              {isEffective ? (
+                plan.id !== 'free' ? (
+                  <Button variant="outline" onClick={handleDowngrade} isLoading={busyAction === 'free'}>
+                    Switch to Free
+                  </Button>
+                ) : (
+                  <Button variant="outline" disabled>Current Plan</Button>
+                )
+              ) : canStartTrial ? (
+                <div className="space-y-2">
+                  <Button onClick={handleStartTrial} isLoading={busyAction === 'trial'}>Start 30-Day Trial</Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handlePlanRequest('pro')}
+                    disabled={Boolean(pendingRequest)}
+                  >
+                    Request Paid Pro
+                  </Button>
+                </div>
+              ) : plan.id === 'free' ? (
+                <Button variant="outline" onClick={handleDowngrade} isLoading={busyAction === 'free'}>
+                  Switch to Free
                 </Button>
               ) : (
                 <Button
-                  variant={plan.recommended ? 'primary' : 'secondary'}
-                  className="w-full h-14 rounded-2xl font-black uppercase tracking-widest"
-                  onClick={() => handleUpgrade(plan.id as SubscriptionPlan)}
-                  isLoading={upgradingPlan === plan.id}
+                  onClick={() => void handlePlanRequest(plan.id as Exclude<SubscriptionPlan, 'free'>)}
+                  isLoading={busyAction === plan.id}
+                  disabled={Boolean(pendingRequest)}
                 >
-                  {plan.priceMonthly === 0 ? 'Downgrade' : 'Upgrade Now'}
+                  {pendingRequest ? 'Request Pending' : `Request ${plan.name}`}
                 </Button>
               )}
             </Card>
@@ -529,60 +260,42 @@ export default function Subscription() {
         })}
       </div>
 
-      <div className="mt-16 bg-surface border border-border p-8 rounded-[40px] flex flex-col md:flex-row items-center justify-between gap-8">
-        <div className="flex items-center gap-6">
-          <div className="h-16 w-16 rounded-[24px] bg-accent/10 flex items-center justify-center">
-            <ShieldCheck className="h-8 w-8 text-accent" />
-          </div>
-          <div>
-            <h4 className="text-xl font-black text-text tracking-tighter">Secure Payments via Razorpay</h4>
-            <p className="text-sm text-text/60 font-medium">Cancel or switch plans anytime. No hidden charges.</p>
-          </div>
+      <Card className="p-6 flex gap-4 border-border">
+        <ShieldCheck className="h-7 w-7 text-primary shrink-0" />
+        <div>
+          <h3 className="font-black text-text">Secure plan activation</h3>
+          <p className="mt-1 text-sm text-text/60">
+            Paid plans are activated only after verified payment. PharmaFlow never marks an unpaid client-side request as successful.
+          </p>
         </div>
-        <div className="flex gap-4">
-          <div className="h-12 w-20 bg-white border border-border rounded-xl flex items-center justify-center">
-            <CreditCard className="h-6 w-6 text-text/20" />
-          </div>
-          <div className="h-12 w-20 bg-white border border-border rounded-xl flex items-center justify-center font-bold text-text/40 italic">
-            UPI
-          </div>
-        </div>
-      </div>
+      </Card>
     </div>
   );
 }
 
-function UsageCard({ label, current, limit, icon: Icon, color }: any) {
-  const percentage = Math.min((current / limit) * 100, 100);
-  
+function UsageCard({
+  label,
+  current,
+  limit,
+  icon: Icon,
+}: {
+  label: string;
+  current: number;
+  limit: number;
+  icon: typeof FileText;
+}) {
+  const safeLimit = Math.max(1, limit);
+  const percentage = Math.min(100, Math.max(0, (current / safeLimit) * 100));
   return (
-    <Card className="p-6 border-border group">
-      <div className="flex items-center justify-between mb-6">
-        <div className={`p-3 rounded-2xl bg-${color}/10`}>
-          <Icon className={`h-6 w-6 text-${color}`} />
-        </div>
-        <div className="text-right">
-          <span className="text-[10px] font-black text-text/20 uppercase tracking-widest">{label}</span>
-          <div className="flex items-baseline justify-end gap-1">
-            <span className="text-2xl font-black text-text tracking-tighter">{current}</span>
-            <span className="text-sm text-text/20 font-bold">/ {limit}</span>
-          </div>
-        </div>
+    <Card className="p-5 border-border">
+      <div className="flex items-center justify-between">
+        <Icon className="h-6 w-6 text-primary" />
+        <span className="text-lg font-black text-text">{current.toLocaleString('en-IN')} / {limit.toLocaleString('en-IN')}</span>
       </div>
-      
-      <div className="h-2 w-full bg-text/5 rounded-full overflow-hidden">
-        <motion.div 
-          initial={{ width: 0 }}
-          animate={{ width: `${percentage}%` }}
-          className={`h-full bg-${color} rounded-full`}
-          transition={{ duration: 1, ease: "easeOut" }}
-        />
+      <p className="mt-3 text-xs font-black uppercase tracking-wider text-text/50">{label}</p>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-text/5">
+        <div className="h-full rounded-full bg-primary" style={{ width: `${percentage}%` }} />
       </div>
-      {percentage >= 90 && (
-        <p className="text-[10px] font-black text-danger uppercase tracking-widest mt-2 flex items-center gap-1">
-          <Zap className="h-3 w-3 fill-current" /> Near Limit!
-        </p>
-      )}
     </Card>
   );
 }
