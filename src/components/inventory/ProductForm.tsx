@@ -487,6 +487,10 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       setError('Product Name is required');
       return;
     }
+    if (!formData.brand.trim()) {
+      setError('Brand Name is required');
+      return;
+    }
     if (!formData.manufacturer.trim()) {
       setError('Manufacturer is required');
       return;
@@ -503,8 +507,12 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       setError('Expiry Date is required');
       return;
     }
-    if (formData.purchasePrice < 0) {
-      setError('Purchase Price cannot be negative');
+    if (!Number.isFinite(Number(formData.purchasePrice)) || Number(formData.purchasePrice) <= 0) {
+      setError('Purchase Price must be greater than ₹0');
+      return;
+    }
+    if (!Number.isFinite(Number(formData.sellingPrice)) || Number(formData.sellingPrice) <= 0) {
+      setError('Sale Price must be greater than ₹0');
       return;
     }
     if (formData.sellingPrice < formData.purchasePrice) {
@@ -803,6 +811,24 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 )}
               </div>
 
+              {/* Brand Name */}
+              <div className="flex flex-col gap-1.5 relative">
+                <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
+                  Brand Name *
+                </label>
+                <MedicineAutocomplete
+                  type="brand"
+                  value={brandNameInput}
+                  onChange={setBrandNameInput}
+                  onSelect={(brand) => {
+                    setBrandNameInput(brand as string);
+                  }}
+                  placeholder="e.g. Dolo"
+                  name="brand"
+                  required
+                />
+              </div>
+
               {/* Manufacturer */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
@@ -854,7 +880,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     onChange={handleChange}
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. 150"
-                    min="0"
+                    min="0.01"
                     required
                   />
                 </div>
@@ -959,7 +985,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. 12.50"
                     step="0.01"
-                    min="0"
+                    min="0.01"
                     required
                   />
                 </div>
@@ -1057,21 +1083,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                             placeholder="e.g. Paracetamol"
                           />
                         </div>
-                      </div>
-
-                      {/* Brand Name */}
-                      <div className="flex flex-col gap-1.5 relative">
-                        <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">Brand Name (Optional)</label>
-                        <MedicineAutocomplete
-                          type="brand"
-                          value={brandNameInput}
-                          onChange={setBrandNameInput}
-                          onSelect={(brand) => {
-                            setBrandNameInput(brand as string);
-                          }}
-                          placeholder="e.g. Dolo"
-                          name="brand"
-                        />
                       </div>
 
                       {/* Category */}

@@ -147,10 +147,6 @@ export default function PurchaseEntry() {
   }, [user]);
 
   function createEmptyItem(): FormItem {
-    const currentMonthStr = String(new Date().getMonth() + 1).padStart(2, '0');
-    const currentYearStr = String(new Date().getFullYear());
-    const expiryYearStr = String(new Date().getFullYear() + 2); // default expiry 2 years out
-
     return {
       id: Math.random().toString(36).substring(2, 9),
       productId: '',
@@ -164,10 +160,10 @@ export default function PurchaseEntry() {
       isNewProduct: false,
       
       batchNumber: '',
-      mfgMonth: currentMonthStr,
-      mfgYear: currentYearStr,
-      expMonth: currentMonthStr,
-      expYear: expiryYearStr,
+      mfgMonth: '',
+      mfgYear: '',
+      expMonth: '',
+      expYear: '',
       purchasePrice: 0,
       salePrice: 0,
       mrp: 0,
@@ -403,16 +399,36 @@ export default function PurchaseEntry() {
         showToast(`Please select a valid product for row #${rowNum}`, 'warning');
         return;
       }
+      if (!item.productName.trim()) {
+        showToast(`Product Name is required for row #${rowNum}`, 'warning');
+        return;
+      }
+      if (!item.brand.trim()) {
+        showToast(`Brand Name is required for row #${rowNum}`, 'warning');
+        return;
+      }
       if (!item.batchNumber.trim()) {
         showToast(`Batch Number is required for row #${rowNum}`, 'warning');
+        return;
+      }
+      if (!item.mfgMonth || !item.mfgYear) {
+        showToast(`Manufacturing Date is required for row #${rowNum}`, 'warning');
+        return;
+      }
+      if (!item.expMonth || !item.expYear) {
+        showToast(`Expiry Date is required for row #${rowNum}`, 'warning');
         return;
       }
       if (item.quantity <= 0) {
         showToast(`Quantity must be greater than 0 for row #${rowNum}`, 'warning');
         return;
       }
-      if (item.purchasePrice < 0) {
-        showToast(`Purchase Price cannot be negative for row #${rowNum}`, 'warning');
+      if (!Number.isFinite(item.purchasePrice) || item.purchasePrice <= 0) {
+        showToast(`Purchase Price must be greater than ₹0 for row #${rowNum}`, 'warning');
+        return;
+      }
+      if (!Number.isFinite(item.salePrice) || item.salePrice <= 0) {
+        showToast(`Sale Price must be greater than ₹0 for row #${rowNum}`, 'warning');
         return;
       }
       if (item.salePrice < item.purchasePrice) {
@@ -731,6 +747,7 @@ export default function PurchaseEntry() {
                       placeholder="e.g. B-99"
                       value={item.batchNumber}
                       onChange={(e) => handleItemFieldChange(idx, 'batchNumber', e.target.value.toUpperCase())}
+                      required
                       className="w-full min-h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-mono font-bold transition-all placeholder:text-text/30"
                     />
                   </div>
@@ -742,6 +759,7 @@ export default function PurchaseEntry() {
                       <select
                         value={item.mfgMonth}
                         onChange={(e) => handleItemFieldChange(idx, 'mfgMonth', e.target.value)}
+                        required
                         className={`w-1/2 h-10 px-2.5 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
                           !item.mfgMonth ? 'text-text/30' : 'text-text'
                         }`}
@@ -754,6 +772,7 @@ export default function PurchaseEntry() {
                       <select
                         value={item.mfgYear}
                         onChange={(e) => handleItemFieldChange(idx, 'mfgYear', e.target.value)}
+                        required
                         className={`w-1/2 h-10 px-2 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
                           !item.mfgYear ? 'text-text/30' : 'text-text'
                         }`}
@@ -773,6 +792,7 @@ export default function PurchaseEntry() {
                       <select
                         value={item.expMonth}
                         onChange={(e) => handleItemFieldChange(idx, 'expMonth', e.target.value)}
+                        required
                         className={`w-1/2 h-10 px-2.5 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
                           !item.expMonth ? 'text-text/30' : 'text-text'
                         }`}
@@ -785,6 +805,7 @@ export default function PurchaseEntry() {
                       <select
                         value={item.expYear}
                         onChange={(e) => handleItemFieldChange(idx, 'expYear', e.target.value)}
+                        required
                         className={`w-1/2 h-10 px-2 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
                           !item.expYear ? 'text-text/30' : 'text-text'
                         }`}
@@ -817,6 +838,9 @@ export default function PurchaseEntry() {
                       placeholder="0.00"
                       value={item.purchasePrice || ''}
                       onChange={(e) => handleItemFieldChange(idx, 'purchasePrice', Math.max(0, parseFloat(e.target.value) || 0))}
+                      min="0.01"
+                      step="0.01"
+                      required
                       className="w-full h-10 px-2 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-xs font-bold transition-all"
                     />
                   </div>
@@ -829,6 +853,9 @@ export default function PurchaseEntry() {
                       placeholder="0.00"
                       value={item.salePrice || ''}
                       onChange={(e) => handleItemFieldChange(idx, 'salePrice', Math.max(0, parseFloat(e.target.value) || 0))}
+                      min="0.01"
+                      step="0.01"
+                      required
                       className="w-full h-10 px-2 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-xs font-bold transition-all"
                     />
                   </div>
@@ -850,8 +877,8 @@ export default function PurchaseEntry() {
 
                   <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-7 gap-3 pt-3 border-t border-border/70">
                     <div>
-                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand</label>
-                      <input value={item.brand} onChange={(e) => handleItemFieldChange(idx, 'brand', e.target.value)} placeholder="Enter brand (optional)" className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand *</label>
+                      <input value={item.brand} onChange={(e) => handleItemFieldChange(idx, 'brand', e.target.value)} placeholder="Enter brand" required className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Manufacturer</label>
