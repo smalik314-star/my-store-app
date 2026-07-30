@@ -29,6 +29,7 @@ import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 import { useMedicineSuggestions } from '../../hooks/useMedicineSuggestions';
 import type { MasterMedicine } from '../../services/medicineMasterService';
+import { calculateLossSale } from '../../utils/pricing';
 
 interface QuickBillModalProps {
   isOpen: boolean;
@@ -42,6 +43,7 @@ interface QuickCartItem {
   price: number;
   total: number;
   stockQuantity?: number;
+  purchaseRate?: number;
 }
 
 type QuickBillSuggestion =
@@ -145,7 +147,8 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
           quantity: 1,
           price: product.sellingPrice,
           total: product.sellingPrice,
-          stockQuantity: product.stockQuantity
+          stockQuantity: product.stockQuantity,
+          purchaseRate: Number(product.purchasePrice) || 0,
         };
       }
       return item;
@@ -210,6 +213,12 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
         const updated = { ...item, [field]: value };
+
+        if (field === 'name' && value !== item.name) {
+          updated.productId = '';
+          updated.stockQuantity = undefined;
+          updated.purchaseRate = undefined;
+        }
         
         // Recalculate line total instantly
         if (field === 'price' || field === 'quantity') {
@@ -481,6 +490,11 @@ _Powered by PharmaFlow_`;
                   <tbody className="divide-y divide-border/40">
                     {cart.map((item, index) => {
                       const suggestions = getProductSuggestions(item.name, index);
+                      const lossSale = calculateLossSale(
+                        item.price,
+                        item.purchaseRate || 0,
+                        item.quantity
+                      );
                       return (
                         <tr key={index} className="hover:bg-background/10 transition-colors relative">
                           {/* Row ID */}
@@ -617,8 +631,23 @@ _Powered by PharmaFlow_`;
                                   focusQuickInput('medicine', index + 1);
                                 }
                               }}
-                              className="w-full bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none"
+                              aria-invalid={lossSale.isLoss}
+                              className={cn(
+                                "w-full bg-transparent text-right text-xs font-black focus:outline-none border-none p-0 outline-none",
+                                lossSale.isLoss && "text-danger"
+                              )}
                             />
+                            {lossSale.isLoss && (
+                              <div
+                                role="alert"
+                                className="mt-1 ml-auto w-max max-w-40 rounded-md border border-danger/30 bg-danger/10 px-2 py-1 text-right text-[9px] font-black leading-tight text-danger"
+                              >
+                                LOSS {formatCurrency(lossSale.lossPerUnit)}/unit
+                                <span className="block">
+                                  {formatCurrency(lossSale.totalLoss)} total
+                                </span>
+                              </div>
+                            )}
                           </td>
 
                           {/* Total Line Amount */}
