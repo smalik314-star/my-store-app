@@ -9,6 +9,33 @@ service cloud.firestore {
       return hasUser() && userData().status == 'active' && userData().tenantId == tenantId;
     }
     function roleIs(roles) { return hasUser() && userData().role in roles; }
+    function hasTenantPrefixedId(documentId) {
+      return hasUser()
+        && userData().status == 'active'
+        && documentId.matches('^' + userData().tenantId + '_.*');
+    }
+    function isOwnCounter(counterId) {
+      return hasUser()
+        && userData().status == 'active'
+        && (
+          counterId == 'invoices_' + userData().tenantId
+          || counterId == userData().tenantId + '_purchase'
+        );
+    }
+    function ownsInvoice(invoiceId) {
+      return hasUser()
+        && userData().status == 'active'
+        && exists(/databases/$(database)/documents/invoices/$(invoiceId))
+        && get(/databases/$(database)/documents/invoices/$(invoiceId)).data.tenantId
+          == userData().tenantId;
+    }
+    function ownsPurchase(purchaseId) {
+      return hasUser()
+        && userData().status == 'active'
+        && exists(/databases/$(database)/documents/purchases/$(purchaseId))
+        && get(/databases/$(database)/documents/purchases/$(purchaseId)).data.tenantId
+          == userData().tenantId;
+    }
     function signedInEmail() {
       return signedIn() && request.auth.token.email is string
         ? request.auth.token.email.lower()
@@ -31,7 +58,11 @@ service cloud.firestore {
         && request.resource.data.outstandingAmount is number && request.resource.data.outstandingAmount >= 0
         && request.resource.data.amountReceived <= request.resource.data.grandTotal
         && request.resource.data.outstandingAmount <= request.resource.data.grandTotal
-        && request.resource.data.paymentStatus in ['paid','due','partial'];
+        && request.resource.data.paymentStatus in ['paid','due','partial']
+        && (
+          !('saleMode' in request.resource.data)
+          || request.resource.data.saleMode in ['retail','wholesale']
+        );
     }
 
     match /users/{userId} {
@@ -84,6 +115,14 @@ service cloud.firestore {
           ||
           (
             roleIs(['owner'])
+            && request.resource.data.businessMode in ['retail','wholesale','hybrid']
+            && request.resource.data.businessModeConfigured == true
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['businessMode','businessModeConfigured','updatedAt'])
+          )
+          ||
+          (
+            roleIs(['owner'])
             && resource.data.plan == 'free'
             && !('trialStartedAt' in resource.data)
             && request.resource.data.plan == 'pro'
@@ -114,6 +153,19 @@ service cloud.firestore {
           ||
           (
             roleIs(['staff'])
+            && !('usage' in resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['usage','updatedAt'])
+            && request.resource.data.usage.productsCount is int
+            && request.resource.data.usage.productsCount > 0
+            && request.resource.data.usage.productsCount <= 50
+            && request.resource.data.usage.invoicesCount == 0
+            && request.resource.data.usage.usersCount == 1
+          )
+          ||
+          (
+            roleIs(['staff'])
+            && ('usage' in resource.data)
             && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['usage','updatedAt'])
             && request.resource.data.usage.productsCount
@@ -311,10 +363,40 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
-      allow read: if inTenant(resource.data.tenantId);
-      allow create: if hasUser() && request.resource.data.tenantId == userData().tenantId;
-      allow update: if inTenant(resource.data.tenantId)
-        && request.resource.data.tenantId == resource.data.tenantId;
+      // Transactions must read a counter before its first create. Restrict that
+      // missing-document read to the signed-in user's own deterministic IDs.
+      allow get: if isOwnCounter(counterId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
+      allow create: if isOwnCounter(counterId)
+        && validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && (
+          (counterId == 'invoices_' + userData().tenantId
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.year is int)
+          ||
+          (counterId == userData().tenantId + '_purchase'
+            && request.resource.data.value is int
+            && request.resource.data.value >= 1)
+        );
+      // Older counters may not contain tenantId. Their deterministic document
+      // ID still proves ownership; the next valid write backfills tenantId.
+      allow update: if isOwnCounter(counterId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.tenantId == userData().tenantId
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['count','year','value','tenantId'])
+        && (
+          (counterId == 'invoices_' + userData().tenantId
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.year is int)
+          ||
+          (counterId == userData().tenantId + '_purchase'
+            && request.resource.data.value is int
+            && request.resource.data.value >= 1)
+        );
       allow delete: if false;
     }
 
@@ -370,7 +452,8 @@ service cloud.firestore {
     }
 
     match /purchaseKeys/{keyId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if hasTenantPrefixedId(keyId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.createdBy == request.auth.uid;
@@ -384,7 +467,8 @@ service cloud.firestore {
     }
 
     match /stockAdjustments/{adjustmentId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if hasTenantPrefixedId(adjustmentId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin'])
         && request.resource.data.createdBy == request.auth.uid
@@ -409,7 +493,8 @@ service cloud.firestore {
     }
 
     match /receipts/{receiptId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if hasTenantPrefixedId(receiptId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.createdBy == request.auth.uid
@@ -419,7 +504,8 @@ service cloud.firestore {
     }
 
     match /supplierPayments/{paymentId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if hasTenantPrefixedId(paymentId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.createdBy == request.auth.uid
@@ -437,7 +523,8 @@ service cloud.firestore {
     }
 
     match /saleReturns/{returnId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if hasTenantPrefixedId(returnId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.createdBy == request.auth.uid
@@ -448,7 +535,8 @@ service cloud.firestore {
     }
 
     match /saleReturnSummaries/{invoiceId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if ownsInvoice(invoiceId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create, update: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.invoiceId == invoiceId;
@@ -456,7 +544,8 @@ service cloud.firestore {
     }
 
     match /purchaseReturns/{returnId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if hasTenantPrefixedId(returnId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.createdBy == request.auth.uid
@@ -467,7 +556,8 @@ service cloud.firestore {
     }
 
     match /purchaseReturnSummaries/{purchaseId} {
-      allow read: if inTenant(resource.data.tenantId);
+      allow get: if ownsPurchase(purchaseId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId)
         && roleIs(['owner','admin','staff'])
         && request.resource.data.purchaseId == purchaseId;

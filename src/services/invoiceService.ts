@@ -158,15 +158,10 @@ export const invoiceService = {
         // --- VALIDATION AND IN-MEMORY PREPARATION ---
 
         // Verify Tenant Limits
-        let tenantExists = false;
-        let tenantHasUsageAndLimits = true;
-        let usage = { invoicesCount: 0, productsCount: 0, usersCount: 1 };
         let limits = { maxInvoices: 50, maxProducts: 100, maxUsers: 1 };
 
         if (tenantDoc.exists()) {
-          tenantExists = true;
           const tenant = tenantDoc.data() as Tenant;
-          usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
           limits = getEffectiveLimits(tenant);
           
           const monthlyInvoiceCount = usageDoc.exists()
@@ -174,10 +169,6 @@ export const invoiceService = {
             : 0;
           if (monthlyInvoiceCount >= limits.maxInvoices) {
             throw new Error('Monthly invoice limit reached. Please upgrade your plan.');
-          }
-
-          if (!tenant.usage || !tenant.limits) {
-            tenantHasUsageAndLimits = false;
           }
         }
 
@@ -247,12 +238,8 @@ export const invoiceService = {
 
         // --- WRITES SECTION ---
 
-        // 1. Initialize Tenant Usage & Limits if they didn't exist
-        if (!tenantHasUsageAndLimits && tenantExists) {
-          transaction.set(tenantRef, sanitizeForFirestore({ usage, limits }), { merge: true });
-        }
-
-        // 2. Create Invoice
+        // 1. Create Invoice. Legacy tenants do not need a metadata migration in
+        // the sale transaction; effective limits are derived above.
         const storedItems: any[] = [];
         const invoice = {
           ...invoiceData,
@@ -265,7 +252,7 @@ export const invoiceService = {
           updatedAt: serverTimestamp(),
         };
 
-        // 3. Deduct Stock and Log Stock Movements
+        // 2. Deduct Stock and Log Stock Movements
         const updatedProducts = new Map<string, Product>();
         const inventoryItems = invoiceData.items.filter(
           item => item.productId && item.productId !== 'custom'
@@ -447,7 +434,7 @@ export const invoiceService = {
         }
 
         // 5. Update Tenant Usage
-        if (tenantExists) {
+        if (tenantDoc.exists()) {
           transaction.set(usageRef, {
             tenantId,
             month: usageMonth,
