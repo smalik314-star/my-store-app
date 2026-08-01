@@ -173,7 +173,7 @@ export default function Billing() {
     setHasHeldBill(Boolean(sessionStorage.getItem('pharmaflow-held-bill')));
   }, []);
 
-  // Load products, customers, and recent bills subscriptions
+  // Load products and recent bills. Customer lookup is now on-demand.
   useEffect(() => {
     if (!user?.tenantId) return;
 
@@ -186,18 +186,6 @@ export default function Billing() {
       const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
       setProducts(items);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
-
-    // Sub to Customers
-    const qCustomers = query(
-      collection(db, 'customers'),
-      where('tenantId', '==', user.tenantId)
-    );
-    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
-      const items = snapshot.docs
-        .map(doc => ({ ...doc.data(), id: doc.id } as Customer))
-        .filter(customer => customer.recordStatus !== 'inactive');
-      setCustomers(items);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'customers'));
 
     // Sub to Invoices for local history
     const qInvoices = query(
@@ -213,19 +201,63 @@ export default function Billing() {
 
     return () => {
       unsubProducts();
-      unsubCustomers();
       unsubInvoices();
     };
   }, [user?.tenantId]);
 
   useEffect(() => {
-    const recentCustomerIds = new Set(
+    if (!user?.tenantId) return;
+    const recentCustomerIds = Array.from(new Set(
       recentInvoices
         .filter(invoice => invoice.customerId && invoice.customerId !== 'walk-in')
         .map(invoice => invoice.customerId)
-    );
-    setRecentCustomers(customers.filter(customer => recentCustomerIds.has(customer.id)).slice(0, 4));
-  }, [customers, recentInvoices]);
+    ));
+    if (recentCustomerIds.length === 0) {
+      setRecentCustomers([]);
+      return;
+    }
+    let active = true;
+    void customerService.getCustomersByIds(user.tenantId, recentCustomerIds)
+      .then(rows => {
+        if (active) setRecentCustomers(rows.slice(0, 4));
+      })
+      .catch(error => {
+        console.error('Unable to load recent customers:', error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [recentInvoices, user?.tenantId]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    const term = customerSearch.trim();
+    if (term.length < 2) {
+      setCustomers([]);
+      setCustomerActiveIndex(-1);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void customerService.searchCustomers(user.tenantId!, term, 5)
+        .then(rows => {
+          if (active) {
+            setCustomers(rows);
+            setCustomerActiveIndex(rows.length > 0 ? 0 : -1);
+          }
+        })
+        .catch(error => {
+          console.error('Unable to search customers:', error);
+          if (active) setCustomers([]);
+        });
+    }, 200);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [customerSearch, user?.tenantId]);
 
   // Cart Calculations
   const totals = useMemo(() => {
@@ -247,13 +279,8 @@ export default function Billing() {
 
   // Handle customer search suggestion filtering
   const filteredCustomers = useMemo(() => {
-    const term = customerSearch.trim().toLowerCase();
-    if (!term) return [];
-    return customers.filter(c => 
-      c.name.toLowerCase().includes(term) || 
-      c.phone.includes(term)
-    ).slice(0, 5);
-  }, [customers, customerSearch]);
+    return customers.slice(0, 5);
+  }, [customers]);
 
   const changeSaleMode = (nextMode: 'retail' | 'wholesale') => {
     navigate(`/billing/${nextMode}`, { replace: true });

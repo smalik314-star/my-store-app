@@ -10,7 +10,9 @@ import {
   orderBy,
   getDoc,
   limit,
-  startAfter
+  startAfter,
+  startAt,
+  endAt
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Customer } from '../types';
@@ -76,6 +78,69 @@ export const customerService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
       return null;
+    }
+  },
+
+  async searchCustomers(tenantId: string, searchTerm: string, pageSize: number = 5) {
+    if (!tenantId) return [];
+    const term = searchTerm.trim();
+    if (term.length < 2) return [];
+
+    try {
+      const nameQuery = query(
+        collection(db, COLLECTION_NAME),
+        where('tenantId', '==', tenantId),
+        orderBy('name'),
+        startAt(term),
+        endAt(`${term}\uf8ff`),
+        limit(pageSize)
+      );
+
+      const queries = [getDocs(nameQuery)];
+      if (/^\d+$/.test(term)) {
+        const phoneQuery = query(
+          collection(db, COLLECTION_NAME),
+          where('tenantId', '==', tenantId),
+          orderBy('phone'),
+          startAt(term),
+          endAt(`${term}\uf8ff`),
+          limit(pageSize)
+        );
+        queries.push(getDocs(phoneQuery));
+      }
+
+      const snapshots = await Promise.all(queries);
+      const deduped = new Map<string, Customer>();
+      snapshots.forEach(snapshot => {
+        snapshot.docs.forEach(row => {
+          const customer = { id: row.id, ...row.data() } as Customer;
+          if (customer.recordStatus !== 'inactive') {
+            deduped.set(customer.id, customer);
+          }
+        });
+      });
+
+      return Array.from(deduped.values()).slice(0, pageSize);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, `${COLLECTION_NAME}:search`);
+      return [];
+    }
+  },
+
+  async getCustomersByIds(tenantId: string, customerIds: string[]) {
+    if (!tenantId || customerIds.length === 0) return [];
+
+    try {
+      const docs = await Promise.all(
+        Array.from(new Set(customerIds)).map(id => getDoc(doc(db, COLLECTION_NAME, id)))
+      );
+      return docs
+        .filter(snapshot => snapshot.exists() && snapshot.data().tenantId === tenantId)
+        .map(snapshot => ({ id: snapshot.id, ...snapshot.data() } as Customer))
+        .filter(customer => customer.recordStatus !== 'inactive');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, `${COLLECTION_NAME}:recent`);
+      return [];
     }
   },
 
