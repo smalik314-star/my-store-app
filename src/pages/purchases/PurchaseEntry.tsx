@@ -73,7 +73,7 @@ export default function PurchaseEntry() {
 
   // Master Data State
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [inventorySuggestions, setInventorySuggestions] = useState<Record<string, Product[]>>({});
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -119,19 +119,15 @@ export default function PurchaseEntry() {
     void purchaseService.getSuppliers(user.tenantId)
       .then(supps => {
         if (active) setSuppliers(supps);
+        if (active) setLoading(false);
       })
       .catch(error => {
         console.error('Error loading suppliers:', error);
         if (active) showToast('Unable to load suppliers. Please retry.', 'danger');
+        if (active) setLoading(false);
       });
-    const unsubscribe = productService.subscribeToProducts(user.tenantId, loadedProducts => {
-      if (!active) return;
-      setProducts(loadedProducts);
-      setLoading(false);
-    });
     return () => {
       active = false;
-      unsubscribe();
     };
   }, [user]);
 
@@ -207,12 +203,9 @@ export default function PurchaseEntry() {
   const getProductSuggestions = (item: FormItem) => {
     const query = item.searchQuery;
     if (!query.trim()) return [];
-    const q = query.toLowerCase();
-    const inventory = products.filter(p =>
-      p.name.toLowerCase().includes(q) || 
-      (p.brand && p.brand.toLowerCase().includes(q)) ||
-      p.sku.toLowerCase().includes(q)
-    ).slice(0, 8).map(product => ({ type: 'inventory' as const, product }));
+    const inventory = (inventorySuggestions[item.id] || [])
+      .slice(0, 8)
+      .map(product => ({ type: 'inventory' as const, product }));
     const existingNames = new Set(inventory.map(({ product }) =>
       `${product.name.trim().toLowerCase()}|${(product.manufacturer || '').trim().toLowerCase()}`
     ));
@@ -244,7 +237,17 @@ export default function PurchaseEntry() {
     searchRequestRef.current[rowId] = requestId;
     if (queryStr.trim().length < 2) {
       setCatalogSuggestions(current => ({ ...current, [rowId]: [] }));
+      setInventorySuggestions(current => ({ ...current, [rowId]: [] }));
       return;
+    }
+    if (user?.tenantId) {
+      void productService.searchProducts(user.tenantId, queryStr, { pageSize: 8, mode: 'name' }).then(result => {
+        if (searchRequestRef.current[rowId] !== requestId) return;
+        setInventorySuggestions(current => ({ ...current, [rowId]: result.products }));
+      }).catch(() => {
+        if (searchRequestRef.current[rowId] !== requestId) return;
+        setInventorySuggestions(current => ({ ...current, [rowId]: [] }));
+      });
     }
     void medicineMasterService.search(queryStr, 20).then(results => {
       if (searchRequestRef.current[rowId] !== requestId) return;

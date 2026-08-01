@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, where } from 'firebase/firestore';
-import { db } from '../../firebase/config';
 import { Product } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
@@ -26,7 +24,6 @@ import { useNavigate } from 'react-router-dom';
 import { productService } from '../../services/productService';
 
 import { useAuth } from '../../context/AuthContext';
-import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 
 type StockStatus = 'IN_STOCK' | 'LOW_STOCK' | 'CRITICAL' | 'OUT_OF_STOCK';
 
@@ -40,10 +37,13 @@ export default function LowStock() {
   const [products, setProducts] = useState<LowStockItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
   const [activeTab, setActiveTab] = useState<StockStatus | 'ALL'>('ALL');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [cursorId, setCursorId] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: keyof LowStockItem; direction: 'asc' | 'desc' }>({
     key: 'stockQuantity',
     direction: 'asc'
@@ -51,46 +51,58 @@ export default function LowStock() {
 
   const navigate = useNavigate();
 
-  // Fetch products and classify in real-time
+  const classifyProduct = (product: Product): LowStockItem => {
+    let status: StockStatus = 'IN_STOCK';
+    if (product.stockQuantity === 0) status = 'OUT_OF_STOCK';
+    else if (product.stockQuantity <= 2) status = 'CRITICAL';
+    else if (product.stockQuantity <= product.minimumStock) status = 'LOW_STOCK';
+
+    return {
+      ...product,
+      status,
+      suggestedReorder: Math.max(0, (product.reorderTarget || product.minimumStock * 2) - product.stockQuantity)
+    };
+  };
+
   useEffect(() => {
+    const timer = window.setTimeout(() => setSearchTerm(searchDraft.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
+
+  const loadPage = async (reset = false) => {
     if (!user?.tenantId) return;
-    
-    const q = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId)
-    );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const items: LowStockItem[] = snapshot.docs.map(doc => {
-        const data = doc.data() as Product;
-        
-        let status: StockStatus = 'IN_STOCK';
-        if (data.stockQuantity === 0) status = 'OUT_OF_STOCK';
-        else if (data.stockQuantity <= 2) status = 'CRITICAL';
-        else if (data.stockQuantity <= data.minimumStock) status = 'LOW_STOCK';
-
-        return {
-          ...data,
-          id: doc.id,
-          status,
-          suggestedReorder: Math.max(0, (data.reorderTarget || data.minimumStock * 2) - data.stockQuantity)
-        };
-      });
-
-      const outOfStockCount = items.filter(i => i.status === 'OUT_OF_STOCK').length;
-      const criticalCount = items.filter(i => i.status === 'CRITICAL').length;
-
+    setLoading(true);
+    try {
+      const result = searchTerm.length >= 2
+        ? await productService.searchProducts(user.tenantId, searchTerm, { pageSize: 50, mode: 'name' })
+        : await productService.getLowStockProductsPage(user.tenantId, 40, reset ? null : cursorId);
+      const nextItems = (result?.products || []).map(classifyProduct).filter(item => item.status !== 'IN_STOCK');
+      const outOfStockCount = nextItems.filter(item => item.status === 'OUT_OF_STOCK').length;
+      const criticalCount = nextItems.filter(item => item.status === 'CRITICAL').length;
       if ((outOfStockCount > 0 || criticalCount > 0) && !showToast) {
         setToastMessage(`Inventory Alert: ${outOfStockCount} items out of stock and ${criticalCount} in critical level!`);
         setShowToast(true);
       }
-
-      setProducts(items);
+      setProducts(current => reset || searchTerm.length >= 2
+        ? nextItems
+        : Array.from(new Map([...current, ...nextItems].map(item => [item.id, item])).values())
+      );
+      setCursorId(result?.nextCursor || null);
+      setHasMore(searchTerm.length < 2 && Boolean(result?.hasMore));
+    } catch (error) {
+      console.error('Unable to load low-stock products:', error);
+      setToastMessage('Low-stock items could not be loaded. Please retry.');
+      setShowToast(true);
+    } finally {
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubscribe();
-  }, []);
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    setCursorId(null);
+    void loadPage(true);
+  }, [searchTerm, user?.tenantId]);
 
   // Summary Stats
   const stats = useMemo(() => {
@@ -109,8 +121,9 @@ export default function LowStock() {
         // By default, this page only shows items that are NOT 'IN_STOCK' 
         // unless 'ALL' is selected (but even 'ALL' usually implies 'ALL AT RISK' in this context)
         const isAtRisk = p.status !== 'IN_STOCK';
-        const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                             p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = searchTerm.length < 2 ||
+          p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+          p.sku.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesTab = activeTab === 'ALL' ? isAtRisk : p.status === activeTab;
         
         return matchesSearch && matchesTab;
@@ -318,12 +331,12 @@ export default function LowStock() {
           </div>
 
           <div className="relative w-full md:w-80 group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20 group-focus-within:text-primary transition-colors" />
             <input
               type="text"
               placeholder="Search product or SKU..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
               className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
             />
           </div>
@@ -506,6 +519,14 @@ export default function LowStock() {
             <p className="text-[10px] font-black text-text/40 uppercase tracking-[0.2em] mt-2 max-w-xs">
               All products are above minimum stock levels. No restocking required.
             </p>
+          </div>
+        )}
+
+        {hasMore && searchTerm.length < 2 && filteredProducts.length > 0 && (
+          <div className="border-t border-border p-4 text-center">
+            <Button variant="outline" onClick={() => void loadPage(false)} disabled={loading}>
+              Load more low-stock items
+            </Button>
           </div>
         )}
       </Card>

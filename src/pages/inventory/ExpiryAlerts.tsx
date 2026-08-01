@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, Timestamp, where } from 'firebase/firestore';
-import { db } from '../../firebase/config';
 import { Product } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
@@ -27,7 +25,6 @@ import { Toast } from '../../components/common/Toast';
 import { toJsDate } from '../../utils/date';
 
 import { useAuth } from '../../context/AuthContext';
-import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 import { productService } from '../../services/productService';
 
 type ExpiryStatus = 'SAFE' | 'EXPIRING_SOON' | 'VERY_CLOSE' | 'EXPIRED';
@@ -42,62 +39,78 @@ export default function ExpiryAlerts() {
   const [products, setProducts] = useState<ExpiryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
   const [activeTab, setActiveTab] = useState<ExpiryStatus | 'ALL'>('ALL');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [cursorId, setCursorId] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: keyof ExpiryItem; direction: 'asc' | 'desc' }>({
     key: 'daysLeft',
     direction: 'asc'
   });
 
-  // Fetch products and classify in real-time
+  const classifyProduct = (product: Product): ExpiryItem => {
+    const expiryDate = toJsDate(product.expiryDate);
+    expiryDate.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffTime = expiryDate.getTime() - today.getTime();
+    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    let status: ExpiryStatus = 'SAFE';
+    if (daysLeft < 0) status = 'EXPIRED';
+    else if (daysLeft <= 30) status = 'VERY_CLOSE';
+    else if (daysLeft <= 60) status = 'EXPIRING_SOON';
+
+    return {
+      ...product,
+      daysLeft,
+      status
+    };
+  };
+
   useEffect(() => {
+    const timer = window.setTimeout(() => setSearchTerm(searchDraft.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
+
+  const loadPage = async (reset = false) => {
     if (!user?.tenantId) return;
-    
-    const q = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId)
-    );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-
-      const items: ExpiryItem[] = snapshot.docs.map(doc => {
-        const data = doc.data() as Product;
-        const expiryDate = toJsDate(data.expiryDate);
-        
-        expiryDate.setHours(0, 0, 0, 0);
-        
-        const diffTime = expiryDate.getTime() - now.getTime();
-        const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        let status: ExpiryStatus = 'SAFE';
-        if (daysLeft < 0) status = 'EXPIRED';
-        else if (daysLeft <= 30) status = 'VERY_CLOSE';
-        else if (daysLeft <= 60) status = 'EXPIRING_SOON';
-
-        return {
-          ...data,
-          id: doc.id,
-          daysLeft,
-          status
-        };
-      });
-
-      const expiredCount = items.filter(i => i.status === 'EXPIRED').length;
+    setLoading(true);
+    try {
+      const result = searchTerm.length >= 2
+        ? await productService.searchProducts(user.tenantId, searchTerm, { pageSize: 50, mode: 'name' })
+        : await productService.getExpiryProductsPage(user.tenantId, 40, reset ? null : cursorId);
+      const nextItems = (result?.products || [])
+        .filter(product => product.expiryDate)
+        .map(classifyProduct);
+      const expiredCount = nextItems.filter(item => item.status === 'EXPIRED').length;
       if (expiredCount > 0 && !showToast) {
         setToastMessage(`Safety Alert: ${expiredCount} products have already expired! Please review immediately.`);
         setShowToast(true);
       }
-
-      setProducts(items);
+      setProducts(current => reset || searchTerm.length >= 2
+        ? nextItems
+        : Array.from(new Map([...current, ...nextItems].map(item => [item.id, item])).values())
+      );
+      setCursorId(result?.nextCursor || null);
+      setHasMore(searchTerm.length < 2 && Boolean(result?.hasMore));
+    } catch (error) {
+      console.error('Unable to load expiry products:', error);
+      setToastMessage('Expiry items could not be loaded. Please retry.');
+      setShowToast(true);
+    } finally {
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubscribe();
-  }, []);
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    setCursorId(null);
+    void loadPage(true);
+  }, [searchTerm, user?.tenantId]);
 
   // Summary Stats
   const stats = useMemo(() => {
@@ -114,9 +127,10 @@ export default function ExpiryAlerts() {
   const filteredProducts = useMemo(() => {
     return products
       .filter(p => {
-        const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                             p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             p.batchNumber.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesSearch = searchTerm.length < 2 ||
+          p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+          p.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          p.batchNumber.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesTab = activeTab === 'ALL' || p.status === activeTab;
         return matchesSearch && matchesTab;
       })
@@ -338,8 +352,8 @@ export default function ExpiryAlerts() {
             <input
               type="text"
               placeholder="Search product, SKU or batch..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
               className="w-full pl-11 pr-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
             />
           </div>
@@ -518,6 +532,14 @@ export default function ExpiryAlerts() {
             <p className="text-[10px] font-black text-text/40 uppercase tracking-[0.2em] mt-2 max-w-xs">
               All products in this category are safe or no matching items found.
             </p>
+          </div>
+        )}
+
+        {hasMore && searchTerm.length < 2 && filteredProducts.length > 0 && (
+          <div className="border-t border-border p-4 text-center">
+            <Button variant="outline" onClick={() => void loadPage(false)} disabled={loading}>
+              Load more expiry items
+            </Button>
           </div>
         )}
       </Card>

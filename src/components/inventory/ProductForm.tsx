@@ -16,6 +16,7 @@ import { formatCurrency } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { brandService } from '../../services/brandService';
+import { productService } from '../../services/productService';
 import { db } from '../../firebase/config';
 import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 import { MedicineAutocomplete } from '../common/MedicineAutocomplete';
@@ -198,13 +199,21 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   // Search local IndexedDB Master Medicine database when name input changes
   useEffect(() => {
     if (debouncedProductName.trim().length >= 2) {
-      medicineMasterService.search(debouncedProductName).then(results => {
+      void medicineMasterService.search(debouncedProductName).then(results => {
         setMasterSuggestions(results);
       });
+      if (user?.tenantId) {
+        void productService.searchInventoryProducts(user.tenantId, debouncedProductName, 12).then(results => {
+          setAllProducts(results);
+        }).catch(() => {
+          setAllProducts([]);
+        });
+      }
     } else {
       setMasterSuggestions([]);
+      setAllProducts([]);
     }
-  }, [debouncedProductName]);
+  }, [debouncedProductName, user?.tenantId]);
 
   // Search local IndexedDB Master Medicine database for brands when brand input changes
   useEffect(() => {
@@ -272,30 +281,13 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
     const loadData = async () => {
       try {
-        const productsQuery = query(
-          collection(db, 'products'),
-          where('tenantId', '==', user.tenantId)
-        );
-        const productsSnap = await getDocs(productsQuery);
-        const productsList = productsSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Product[];
-        setAllProducts(productsList);
-
         const brandsQuery = query(
           collection(db, 'brands'),
           where('tenantId', '==', user.tenantId)
         );
         const brandsSnap = await getDocs(brandsQuery);
         const brandsList = brandsSnap.docs.map(doc => doc.data().name) as string[];
-
-        const productBrands = productsList
-          .map(p => p.brand)
-          .filter((b): b is string => !!b);
-        
-        const uniqueBrands = Array.from(new Set([...brandsList, ...productBrands]));
-        setAllBrands(uniqueBrands);
+        setAllBrands(Array.from(new Set(brandsList)));
       } catch (err) {
         console.error('Error fetching autocomplete data:', err);
       }

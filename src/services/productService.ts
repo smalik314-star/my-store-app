@@ -10,7 +10,8 @@ import {
   orderBy,
   limit,
   startAfter,
-  QueryConstraint,
+  startAt,
+  endAt,
   getDoc,
   runTransaction
 } from 'firebase/firestore';
@@ -20,6 +21,21 @@ import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { getEffectiveLimits } from '../config/subscription';
 
 const COLLECTION_NAME = 'products';
+const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const resolveApiPath = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
+const mapProductDoc = (snapshot: any) => ({ ...snapshot.data(), id: snapshot.id } as Product);
+const dedupeProducts = (products: Product[]) => Array.from(new Map(products.map(product => [product.id, product])).values());
+const getSearchVariants = (term: string) => {
+  const trimmed = String(term || '').trim();
+  if (!trimmed) return [];
+  const titleCase = trimmed.replace(/\b\w/g, char => char.toUpperCase());
+  return Array.from(new Set([
+    trimmed,
+    trimmed.toLowerCase(),
+    trimmed.toUpperCase(),
+    titleCase,
+  ]));
+};
 
 // Helper to sanitize product data
 const sanitizeProduct = (data: any) => {
@@ -207,26 +223,247 @@ export const productService = {
     }
   },
 
-  async getProductsPaginated(tenantId: string, pageSize: number = 15, lastVisibleDoc: any = null) {
+  async getProductsPaginated(tenantId: string, pageSize: number = 15, cursorId: string | null = null, category?: string) {
     if (!tenantId) return null;
 
     try {
-      let q = query(
+      const constraints = [where('tenantId', '==', tenantId)];
+      if (category && category !== 'All') {
+        constraints.push(where('category', '==', category));
+      }
+
+      let baseQuery = query(
         collection(db, COLLECTION_NAME),
-        where('tenantId', '==', tenantId),
+        ...constraints,
         orderBy('name', 'asc'),
         limit(pageSize)
       );
 
-      if (lastVisibleDoc) {
-        q = query(q, startAfter(lastVisibleDoc));
+      if (cursorId) {
+        const cursorSnap = await getDoc(doc(db, COLLECTION_NAME, cursorId));
+        if (cursorSnap.exists() && cursorSnap.data().tenantId === tenantId) {
+          baseQuery = query(
+            collection(db, COLLECTION_NAME),
+            ...constraints,
+            orderBy('name', 'asc'),
+            startAfter(cursorSnap),
+            limit(pageSize)
+          );
+        }
       }
 
-      const snapshot = await getDocs(q);
-      const lastDoc = snapshot.docs[snapshot.docs.length - 1];
-      const products = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
+      const snapshot = await getDocs(baseQuery);
+      const products = snapshot.docs
+        .map(mapProductDoc)
+        .filter(product => product.recordStatus !== 'inactive');
 
-      return { products, lastDoc, hasMore: snapshot.docs.length === pageSize };
+      return {
+        products,
+        nextCursor: snapshot.docs.length === pageSize ? snapshot.docs[snapshot.docs.length - 1]?.id || null : null,
+        hasMore: snapshot.docs.length === pageSize,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+      return null;
+    }
+  },
+
+  async searchProducts(
+    tenantId: string,
+    searchTerm: string,
+    options: { pageSize?: number; cursorId?: string | null; mode?: 'auto' | 'name' | 'sku' | 'barcode' } = {}
+  ) {
+    if (!tenantId) return { products: [], nextCursor: null, hasMore: false };
+    const trimmed = searchTerm.trim();
+    if (trimmed.length < 2) return { products: [], nextCursor: null, hasMore: false };
+
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken) {
+      throw new Error('Please sign in again to search products.');
+    }
+
+    const params = new URLSearchParams({
+      q: trimmed,
+      pageSize: String(options.pageSize || 10),
+      mode: options.mode || 'auto',
+    });
+    if (options.cursorId) params.set('cursorId', options.cursorId);
+
+    const response = await fetch(`${resolveApiPath('/api/products/search')}?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || 'Product search could not be completed.');
+    }
+
+    return {
+      products: (payload.products || []) as Product[],
+      nextCursor: payload.nextCursor || null,
+      hasMore: Boolean(payload.hasMore),
+    };
+  },
+
+  async searchInventoryProducts(tenantId: string, searchTerm: string, pageSize: number = 10) {
+    if (!tenantId) return [];
+    const trimmed = searchTerm.trim();
+    if (trimmed.length < 2) return [];
+
+    const variants = getSearchVariants(trimmed);
+    const numericOrCodeQuery = /^[A-Za-z0-9\-_/]+$/.test(trimmed);
+    const fields = numericOrCodeQuery ? ['barcode', 'sku', 'name'] : ['name', 'sku', 'barcode'];
+
+    try {
+      const snapshots = await Promise.all(
+        fields.flatMap(field =>
+          variants.map(variant =>
+            getDocs(query(
+              collection(db, COLLECTION_NAME),
+              where('tenantId', '==', tenantId),
+              orderBy(field),
+              startAt(variant),
+              endAt(`${variant}\uf8ff`),
+              limit(pageSize)
+            ))
+          )
+        )
+      );
+
+      return dedupeProducts(
+        snapshots.flatMap(snapshot => snapshot.docs.map(mapProductDoc))
+      )
+        .filter(product => product.recordStatus !== 'inactive')
+        .slice(0, pageSize);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+      return [];
+    }
+  },
+
+  async findProductByCode(tenantId: string, code: string) {
+    if (!tenantId) return null;
+    const trimmed = code.trim();
+    if (!trimmed) return null;
+
+    const exactQueries = [
+      query(
+        collection(db, COLLECTION_NAME),
+        where('tenantId', '==', tenantId),
+        where('barcode', '==', trimmed),
+        limit(1)
+      ),
+      query(
+        collection(db, COLLECTION_NAME),
+        where('tenantId', '==', tenantId),
+        where('sku', '==', trimmed),
+        limit(1)
+      ),
+    ];
+
+    for (const currentQuery of exactQueries) {
+      const snapshot = await getDocs(currentQuery);
+      const found = snapshot.docs[0];
+      if (!found) continue;
+      const product = mapProductDoc(found);
+      if (product.recordStatus !== 'inactive') return product;
+    }
+
+    return null;
+  },
+
+  async getProductById(tenantId: string, id: string) {
+    if (!tenantId || !id) return null;
+    const snapshot = await getDoc(doc(db, COLLECTION_NAME, id));
+    if (!snapshot.exists()) return null;
+    if (snapshot.data().tenantId !== tenantId) return null;
+    const product = mapProductDoc(snapshot);
+    return product.recordStatus === 'inactive' ? null : product;
+  },
+
+  async getProductsByIds(tenantId: string, ids: string[]) {
+    if (!tenantId || ids.length === 0) return [];
+    const rows = await Promise.all(ids.map(id => this.getProductById(tenantId, id)));
+    return rows.filter((row): row is Product => Boolean(row));
+  },
+
+  async getLowStockProductsPage(tenantId: string, pageSize: number = 25, cursorId: string | null = null) {
+    if (!tenantId) return null;
+
+    try {
+      let baseQuery = query(
+        collection(db, COLLECTION_NAME),
+        where('tenantId', '==', tenantId),
+        orderBy('stockQuantity', 'asc'),
+        limit(pageSize * 3)
+      );
+
+      if (cursorId) {
+        const cursorSnap = await getDoc(doc(db, COLLECTION_NAME, cursorId));
+        if (cursorSnap.exists() && cursorSnap.data().tenantId === tenantId) {
+          baseQuery = query(
+            collection(db, COLLECTION_NAME),
+            where('tenantId', '==', tenantId),
+            orderBy('stockQuantity', 'asc'),
+            startAfter(cursorSnap),
+            limit(pageSize * 3)
+          );
+        }
+      }
+
+      const snapshot = await getDocs(baseQuery);
+      const products = snapshot.docs
+        .map(mapProductDoc)
+        .filter(product => product.recordStatus !== 'inactive')
+        .filter(product => Number(product.stockQuantity) <= Number(product.minimumStock))
+        .slice(0, pageSize);
+
+      return {
+        products,
+        nextCursor: snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1]?.id || null : null,
+        hasMore: snapshot.docs.length === pageSize * 3,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+      return null;
+    }
+  },
+
+  async getExpiryProductsPage(tenantId: string, pageSize: number = 25, cursorId: string | null = null) {
+    if (!tenantId) return null;
+
+    try {
+      let baseQuery = query(
+        collection(db, COLLECTION_NAME),
+        where('tenantId', '==', tenantId),
+        orderBy('expiryDate', 'asc'),
+        limit(pageSize)
+      );
+
+      if (cursorId) {
+        const cursorSnap = await getDoc(doc(db, COLLECTION_NAME, cursorId));
+        if (cursorSnap.exists() && cursorSnap.data().tenantId === tenantId) {
+          baseQuery = query(
+            collection(db, COLLECTION_NAME),
+            where('tenantId', '==', tenantId),
+            orderBy('expiryDate', 'asc'),
+            startAfter(cursorSnap),
+            limit(pageSize)
+          );
+        }
+      }
+
+      const snapshot = await getDocs(baseQuery);
+      const products = snapshot.docs
+        .map(mapProductDoc)
+        .filter(product => product.recordStatus !== 'inactive' && product.expiryDate);
+
+      return {
+        products,
+        nextCursor: snapshot.docs.length === pageSize ? snapshot.docs[snapshot.docs.length - 1]?.id || null : null,
+        hasMore: snapshot.docs.length === pageSize,
+      };
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
       return null;
@@ -235,59 +472,46 @@ export const productService = {
 
   subscribeToProducts(
     tenantId: string,
-    callback: (products: Product[]) => void, 
-    filters: { category?: string, searchQuery?: string, stockStatus?: string } = {}
+    callback: (products: Product[]) => void,
+    filters: { category?: string; searchQuery?: string; stockStatus?: string } = {}
   ) {
     if (!tenantId) return () => {};
-    
-    let constraints: QueryConstraint[] = [
-      where('tenantId', '==', tenantId)
-    ];
-    
-    return onSnapshot(query(collection(db, COLLECTION_NAME), ...constraints), (snapshot) => {
+
+    let cancelled = false;
+    void (async () => {
       try {
-        let products = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Product[];
-        products = products.filter(product => product.recordStatus !== 'inactive');
+        let products: Product[] = [];
+        const trimmedSearch = filters.searchQuery?.trim() || '';
 
-        // Client-side filtering: Category
+        if (trimmedSearch.length >= 2) {
+          products = await this.searchInventoryProducts(tenantId, trimmedSearch, 100);
+        } else if (filters.stockStatus === 'low' || filters.stockStatus === 'out') {
+          products = (await this.getLowStockProductsPage(tenantId, 100, null))?.products || [];
+        } else {
+          products = (await this.getProductsPaginated(tenantId, 100, null, filters.category))?.products || [];
+        }
+
         if (filters.category && filters.category !== 'All') {
-          products = products.filter(p => p.category === filters.category);
+          products = products.filter(product => product.category === filters.category);
+        }
+        if (filters.stockStatus === 'low') {
+          products = products.filter(product => product.stockQuantity <= product.minimumStock && product.stockQuantity > 0);
+        } else if (filters.stockStatus === 'out') {
+          products = products.filter(product => product.stockQuantity === 0);
+        } else if (filters.stockStatus === 'in') {
+          products = products.filter(product => product.stockQuantity > product.minimumStock);
         }
 
-        // Client-side filtering: Search
-        if (filters.searchQuery) {
-          const queryStr = filters.searchQuery.toLowerCase();
-          products = products.filter(p => 
-            p.name.toLowerCase().includes(queryStr) || 
-            p.sku.toLowerCase().includes(queryStr) || 
-            (p.barcode && p.barcode.toLowerCase().includes(queryStr))
-          );
-        }
-
-        // Client-side filtering: Stock Status
-        if (filters.stockStatus) {
-          if (filters.stockStatus === 'low') {
-            products = products.filter(p => p.stockQuantity <= p.minimumStock && p.stockQuantity > 0);
-          } else if (filters.stockStatus === 'out') {
-            products = products.filter(p => p.stockQuantity === 0);
-          } else if (filters.stockStatus === 'in') {
-            products = products.filter(p => p.stockQuantity > p.minimumStock);
-          }
-        }
-
-        // Client-side sorting: Name ASC
-        products.sort((a, b) => a.name.localeCompare(b.name));
-
-        callback(products);
-      } catch (err) {
-        console.error('Products Subscription Processing Error:', err);
+        if (!cancelled) callback(products);
+      } catch (error) {
+        console.error('Bounded product loader failed:', error);
+        if (!cancelled) callback([]);
       }
-    }, (error) => {
-      console.error('Products Subscription Error:', error);
-    });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   },
 
   subscribeToStockMovements(

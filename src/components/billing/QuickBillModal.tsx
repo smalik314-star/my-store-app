@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, onSnapshot, where, Timestamp } from 'firebase/firestore';
-import { db } from '../../firebase/config';
-import { Product, Customer, InvoiceItem, Invoice } from '../../types';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Timestamp } from 'firebase/firestore';
+import { Product, InvoiceItem } from '../../types';
 import { Card } from '../common/Card';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
@@ -22,11 +21,11 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { invoiceService } from '../../services/invoiceService';
+import { productService } from '../../services/productService';
 import { useSettings } from '../../context/SettingsContext';
 import { useToast } from '../../context/ToastContext';
 import { formatCurrency, roundMoney, subtractMoney } from '../../utils/currency';
 import { useAuth } from '../../context/AuthContext';
-import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
 import { useMedicineSuggestions } from '../../hooks/useMedicineSuggestions';
 import type { MasterMedicine } from '../../services/medicineMasterService';
 import { calculateLossSale } from '../../utils/pricing';
@@ -59,7 +58,8 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   const [loading, setLoading] = useState(false);
   const saveInProgressRef = useRef(false);
   const invoiceRequestIdRef = useRef<string | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [productCache, setProductCache] = useState<Record<string, Product>>({});
+  const [inventorySuggestions, setInventorySuggestions] = useState<Record<number, Product[]>>({});
   
   // Custom metadata
   const [customerName, setCustomerName] = useState('');
@@ -85,24 +85,71 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   // Success Confirmation modal
   const [showSuccess, setShowSuccess] = useState(false);
   const [savedInvoice, setSavedInvoice] = useState<any>(null);
+  const cacheProducts = useCallback((rows: Product[]) => {
+    if (rows.length === 0) return;
+    setProductCache(current => {
+      const next = { ...current };
+      rows.forEach(product => {
+        next[product.id] = product;
+      });
+      return next;
+    });
+  }, []);
 
-  // Load products subscription
   useEffect(() => {
     if (!isOpen || !user?.tenantId) return;
+    const missingIds = Array.from(new Set(
+      cart
+        .map(item => item.productId)
+        .filter((id): id is string => Boolean(id) && !productCache[id])
+    ));
+    if (missingIds.length === 0) return;
+    let active = true;
+    void productService.getProductsByIds(user.tenantId, missingIds)
+      .then(rows => {
+        if (active) cacheProducts(rows);
+      })
+      .catch(error => {
+        console.error('Unable to hydrate quick-bill products:', error);
+      });
+    return () => {
+      active = false;
+    };
+  }, [cacheProducts, cart, isOpen, productCache, user?.tenantId]);
 
-    const qProducts = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId)
-    );
-    const unsub = onSnapshot(qProducts, (snapshot) => {
-      const items = snapshot.docs
-        .map(doc => ({ ...doc.data(), id: doc.id } as Product))
-        .filter(product => product.recordStatus !== 'inactive');
-      setProducts(items);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
+  useEffect(() => {
+    if (!isOpen || !user?.tenantId) return;
+    const timers: number[] = [];
+    const activeRows = new Map<number, boolean>();
 
-    return () => unsub();
-  }, [isOpen, user?.tenantId]);
+    cart.forEach((item, index) => {
+      const term = item.name.trim();
+      if (focusedIndex !== index || term.length < 2 || item.productId) {
+        setInventorySuggestions(current => current[index] ? { ...current, [index]: [] } : current);
+        return;
+      }
+      activeRows.set(index, true);
+      const timer = window.setTimeout(() => {
+        void productService.searchProducts(user.tenantId!, term, { pageSize: 6, mode: 'name' })
+          .then(result => {
+            if (!activeRows.get(index)) return;
+            cacheProducts(result.products);
+            setInventorySuggestions(current => ({ ...current, [index]: result.products }));
+          })
+          .catch(error => {
+            console.error('Unable to search quick-bill products:', error);
+            if (!activeRows.get(index)) return;
+            setInventorySuggestions(current => ({ ...current, [index]: [] }));
+          });
+      }, 180);
+      timers.push(timer);
+    });
+
+    return () => {
+      activeRows.forEach((_, key) => activeRows.set(key, false));
+      timers.forEach(timer => window.clearTimeout(timer));
+    };
+  }, [cacheProducts, cart, focusedIndex, isOpen, user?.tenantId]);
 
   // Grand Total Calculation
   const grandTotal = useMemo(() => {
@@ -122,12 +169,9 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   const getProductSuggestions = (nameInput: string, rowIndex: number): QuickBillSuggestion[] => {
     const term = nameInput.trim().toLowerCase();
     if (!term) return [];
-    const inventory = products.filter(p =>
-      p.name.toLowerCase().includes(term) || 
-      (p.brand && p.brand.toLowerCase().includes(term)) ||
-      (p.genericName && p.genericName.toLowerCase().includes(term)) ||
-      (p.manufacturer && p.manufacturer.toLowerCase().includes(term))
-    ).slice(0, 6).map(product => ({ type: 'inventory' as const, product }));
+    const inventory = (inventorySuggestions[rowIndex] || [])
+      .slice(0, 6)
+      .map(product => ({ type: 'inventory' as const, product }));
     const inventoryKeys = new Set(inventory.map(({ product }) =>
       `${product.name.trim().toLowerCase()}|${(product.manufacturer || '').trim().toLowerCase()}`
     ));
@@ -141,6 +185,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
   };
 
   const handleSelectItem = (index: number, product: Product) => {
+    cacheProducts([product]);
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
         return {

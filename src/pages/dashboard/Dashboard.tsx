@@ -53,6 +53,7 @@ export default function Dashboard() {
     outOfStockItems: 0,
     criticalStockItems: 0,
     expiryAlerts: 0,
+    inventorySummaryReady: false,
   });
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
   const [dashboardInvoices, setDashboardInvoices] = useState<Invoice[]>([]);
@@ -243,7 +244,7 @@ export default function Dashboard() {
         />
         <KpiCard 
           label="Stock Value" 
-          value={formatCurrency(stats.stockValue)} 
+          value={stats.inventorySummaryReady ? formatCurrency(stats.stockValue) : 'Summary needed'} 
           icon={Package} 
           loading={loading}
           colorClass="bg-info/10 text-info"
@@ -252,11 +253,11 @@ export default function Dashboard() {
         />
         <KpiCard 
           label="Low Stock" 
-          value={stats.lowStockItems} 
+          value={stats.inventorySummaryReady ? stats.lowStockItems : 'Review'} 
           icon={AlertTriangle} 
           loading={loading}
-          isUp={stats.lowStockItems === 0}
-          colorClass={stats.lowStockItems > 0 ? "bg-danger/10 text-danger" : "bg-success/10 text-success"}
+          isUp={stats.inventorySummaryReady && stats.lowStockItems === 0}
+          colorClass={stats.inventorySummaryReady && stats.lowStockItems > 0 ? "bg-danger/10 text-danger" : "bg-success/10 text-success"}
           isHoverable
           onClick={() => navigate('/low-stock')}
         />

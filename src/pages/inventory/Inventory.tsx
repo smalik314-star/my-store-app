@@ -28,12 +28,14 @@ export default function Inventory() {
   const [searchParams, setSearchParams] = useSearchParams();
   const editId = searchParams.get('edit');
   const viewId = searchParams.get('view');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger'>('ledger');
 
   const [products, setProducts] = useState<Product[]>([]);
   const [intelligence, setIntelligence] = useState<Record<string, ProductIntelligence>>({});
   const [intelligenceLoading, setIntelligenceLoading] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [cursorId, setCursorId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | undefined>();
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -44,25 +46,23 @@ export default function Inventory() {
 
   // Handle direct edit/view links
   useEffect(() => {
-    if (products.length > 0) {
+    if (!user?.tenantId) return;
+    const loadLinkedProduct = async () => {
+      const targetId = editId || viewId;
+      if (!targetId) return;
+      const fromList = products.find(product => product.id === targetId);
+      const product = fromList || await productService.getProductById(user.tenantId!, targetId);
+      if (!product) return;
       if (editId) {
-        const product = products.find(p => p.id === editId);
-        if (product) {
-          setEditingProduct(product);
-          setShowForm(true);
-          // Clear params after opening
-          setSearchParams({});
-        }
-      } else if (viewId) {
-        const product = products.find(p => p.id === viewId);
-        if (product) {
-          setSelectedProduct(product);
-          // Clear params after opening
-          setSearchParams({});
-        }
+        setEditingProduct(product);
+        setShowForm(true);
+      } else {
+        setSelectedProduct(product);
       }
-    }
-  }, [editId, viewId, products, setSearchParams]);
+      setSearchParams({});
+    };
+    void loadLinkedProduct();
+  }, [editId, viewId, products, setSearchParams, user?.tenantId]);
   
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -83,55 +83,60 @@ export default function Inventory() {
     return () => clearTimeout(handler);
   }, [searchQuery]);
 
-  useEffect(() => {
-    if (!user) return;
+  const loadProducts = useCallback(async (reset = false) => {
+    if (!user?.tenantId) return;
+    setLoading(true);
+    try {
+      const result = debouncedSearch.trim().length >= 2
+        ? await productService.searchProducts(user.tenantId, debouncedSearch.trim(), { pageSize: 40, mode: 'name' })
+        : await productService.getProductsPaginated(user.tenantId, 40, reset ? null : cursorId, selectedCategory);
 
-    if (!user.tenantId) {
-      console.warn('Inventory: No tenantId found for user');
+      let filtered = [...(result?.products || [])];
+      if (selectedExpiryStatus !== 'all') {
+        const now = new Date();
+        const soonThreshold = new Date();
+        soonThreshold.setDate(soonThreshold.getDate() + 60);
+        filtered = filtered.filter(product => {
+          if (!product.expiryDate) return false;
+          const expiry = toJsDate(product.expiryDate);
+          if (selectedExpiryStatus === 'expired') return expiry < now;
+          if (selectedExpiryStatus === 'soon') return expiry >= now && expiry <= soonThreshold;
+          if (selectedExpiryStatus === 'safe') return expiry > soonThreshold;
+          return true;
+        });
+      }
+      if (selectedStatus === 'low') {
+        filtered = filtered.filter(product => product.stockQuantity <= product.minimumStock && product.stockQuantity > 0);
+      } else if (selectedStatus === 'out') {
+        filtered = filtered.filter(product => product.stockQuantity === 0);
+      } else if (selectedStatus === 'in') {
+        filtered = filtered.filter(product => product.stockQuantity > product.minimumStock);
+      }
+      if (priceRange.max > 0) {
+        filtered = filtered.filter(product => product.sellingPrice >= priceRange.min && product.sellingPrice <= priceRange.max);
+      } else if (priceRange.min > 0) {
+        filtered = filtered.filter(product => product.sellingPrice >= priceRange.min);
+      }
+
+      setProducts(current => reset || debouncedSearch.trim().length >= 2
+        ? filtered
+        : Array.from(new Map([...current, ...filtered].map(product => [product.id, product])).values())
+      );
+      setCursorId(result?.nextCursor || null);
+      setHasMore(debouncedSearch.trim().length < 2 && Boolean(result?.hasMore));
+    } finally {
+      setLoading(false);
+    }
+  }, [cursorId, debouncedSearch, priceRange.max, priceRange.min, selectedCategory, selectedExpiryStatus, selectedStatus, user?.tenantId]);
+
+  useEffect(() => {
+    if (!user?.tenantId) {
       setLoading(false);
       return;
     }
-
-    setLoading(true);
-    const unsub = productService.subscribeToProducts(
-      user.tenantId,
-      (newProducts) => {
-        let filtered = [...newProducts];
-
-        // Client-side advanced filtering
-        if (selectedExpiryStatus !== 'all') {
-          const now = new Date();
-          const soonThreshold = new Date();
-          soonThreshold.setDate(soonThreshold.getDate() + 60);
-
-          filtered = filtered.filter(p => {
-            if (!p.expiryDate) return false;
-            const expiry = toJsDate(p.expiryDate);
-            if (selectedExpiryStatus === 'expired') return expiry < now;
-            if (selectedExpiryStatus === 'soon') return expiry >= now && expiry <= soonThreshold;
-            if (selectedExpiryStatus === 'safe') return expiry > soonThreshold;
-            return true;
-          });
-        }
-
-        if (priceRange.max > 0) {
-          filtered = filtered.filter(p => p.sellingPrice >= priceRange.min && p.sellingPrice <= priceRange.max);
-        } else if (priceRange.min > 0) {
-          filtered = filtered.filter(p => p.sellingPrice >= priceRange.min);
-        }
-
-        setProducts(filtered);
-        setLoading(false);
-      },
-      { 
-        category: selectedCategory, 
-        searchQuery: debouncedSearch, 
-        stockStatus: selectedStatus 
-      }
-    );
-
-    return () => unsub();
-  }, [user, selectedCategory, debouncedSearch, selectedStatus, selectedExpiryStatus, priceRange]);
+    setCursorId(null);
+    void loadProducts(true);
+  }, [loadProducts, user?.tenantId]);
 
   // Analyze products for intelligence
   useEffect(() => {
@@ -147,14 +152,11 @@ export default function Inventory() {
   }, [products.length, user?.tenantId]);
 
   const handleBarcodeScan = (barcode: string) => {
-    const found = products.find(p => p.barcode === barcode);
-    if (found) {
-      setSelectedProduct(found);
+    if (!user?.tenantId) return;
+    void productService.findProductByCode(user.tenantId, barcode).then(found => {
+      if (found) setSelectedProduct(found);
       setBarcodeInput('');
-    } else {
-      // Could show a toast here: "Product not found"
-      setBarcodeInput('');
-    }
+    });
   };
 
   const handleSaveProduct = async (data: any, saveAndAddAnother = false) => {
@@ -419,6 +421,13 @@ export default function Inventory() {
                 </Button>
               }
             />
+            {hasMore && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => void loadProducts(false)} disabled={loading}>
+                  Load more inventory
+                </Button>
+              </div>
+            )}
           </div>
         </>
       )}

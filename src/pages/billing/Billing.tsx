@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, onSnapshot, getDocs, where, limit, addDoc, Timestamp, orderBy } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { collection, query, onSnapshot, where, limit, Timestamp, orderBy } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { Product, Customer, InvoiceItem, Invoice } from '../../types';
 import { Card } from '../../components/common/Card';
@@ -35,6 +35,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { invoiceService } from '../../services/invoiceService';
 import { customerService } from '../../services/customerService';
+import { productService } from '../../services/productService';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { PageTransition } from '../../components/common/PageTransition';
@@ -95,7 +96,8 @@ export default function Billing() {
   const [loading, setLoading] = useState(false);
   const saveInProgressRef = useRef(false);
   const invoiceRequestIdRef = useRef<string | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [productCache, setProductCache] = useState<Record<string, Product>>({});
+  const [inventorySuggestions, setInventorySuggestions] = useState<Record<number, Product[]>>({});
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
   const [saleMode, setSaleMode] = useState<'retail' | 'wholesale'>(
@@ -168,26 +170,25 @@ export default function Billing() {
   // Focus references
   const customerInputRef = useRef<HTMLInputElement>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const cacheProducts = useCallback((rows: Product[]) => {
+    if (rows.length === 0) return;
+    setProductCache(current => {
+      const next = { ...current };
+      rows.forEach(product => {
+        next[product.id] = product;
+      });
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     setHasHeldBill(Boolean(sessionStorage.getItem('pharmaflow-held-bill')));
   }, []);
 
-  // Load products and recent bills. Customer lookup is now on-demand.
+  // Load recent bills. Customer and product lookup stay on-demand for large catalogs.
   useEffect(() => {
     if (!user?.tenantId) return;
 
-    // Sub to Products
-    const qProducts = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId)
-    );
-    const unsubProducts = onSnapshot(qProducts, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
-      setProducts(items);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
-
-    // Sub to Invoices for local history
     const qInvoices = query(
       collection(db, 'invoices'),
       where('tenantId', '==', user.tenantId),
@@ -200,10 +201,67 @@ export default function Billing() {
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'invoices'));
 
     return () => {
-      unsubProducts();
       unsubInvoices();
     };
   }, [user?.tenantId]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    const missingIds = Array.from(new Set(
+      cart
+        .map(item => item.productId)
+        .filter((id): id is string => Boolean(id) && !productCache[id])
+    ));
+    if (missingIds.length === 0) return;
+
+    let active = true;
+    void productService.getProductsByIds(user.tenantId, missingIds)
+      .then(rows => {
+        if (active) cacheProducts(rows);
+      })
+      .catch(error => {
+        console.error('Unable to hydrate billing products:', error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [cacheProducts, cart, productCache, user?.tenantId]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    const activeRequests = new Map<number, boolean>();
+    const timers: number[] = [];
+
+    cart.forEach((item, index) => {
+      const term = item.name.trim();
+      if (focusedRowIndex !== index || term.length < 2 || item.productId) {
+        setInventorySuggestions(current => current[index] ? { ...current, [index]: [] } : current);
+        return;
+      }
+
+      activeRequests.set(index, true);
+      const timer = window.setTimeout(() => {
+        void productService.searchProducts(user.tenantId!, term, { pageSize: 8, mode: 'name' })
+          .then(result => {
+            if (!activeRequests.get(index)) return;
+            cacheProducts(result.products);
+            setInventorySuggestions(current => ({ ...current, [index]: result.products }));
+          })
+          .catch(error => {
+            console.error('Unable to search inventory products:', error);
+            if (!activeRequests.get(index)) return;
+            setInventorySuggestions(current => ({ ...current, [index]: [] }));
+          });
+      }, 180);
+      timers.push(timer);
+    });
+
+    return () => {
+      activeRequests.forEach((_, key) => activeRequests.set(key, false));
+      timers.forEach(timer => window.clearTimeout(timer));
+    };
+  }, [cacheProducts, cart, focusedRowIndex, user?.tenantId]);
 
   useEffect(() => {
     if (!user?.tenantId) return;
@@ -286,7 +344,7 @@ export default function Billing() {
     navigate(`/billing/${nextMode}`, { replace: true });
     setSaleMode(nextMode);
     setCart(current => current.map(item => {
-      const product = products.find(candidate => candidate.id === item.productId);
+      const product = item.productId ? productCache[item.productId] : null;
       if (!product) return item;
       const price = resolveSalePrice(product, nextMode, selectedCustomer);
       const gstRate = canCollectGst ? product.gstPercentage : 0;
@@ -417,14 +475,9 @@ export default function Billing() {
   const getProductSuggestions = (rowName: string, rowIndex: number): BillingSuggestion[] => {
     const term = rowName.trim().toLowerCase();
     if (!term) return [];
-    const inventory = products.filter(p =>
-      p.name.toLowerCase().includes(term) || 
-      (p.genericName && p.genericName.toLowerCase().includes(term)) ||
-      (p.brand && p.brand.toLowerCase().includes(term)) ||
-      (p.manufacturer && p.manufacturer.toLowerCase().includes(term)) ||
-      p.sku?.toLowerCase().includes(term) ||
-      p.barcode?.toLowerCase().includes(term)
-    ).slice(0, 8).map(product => ({ type: 'inventory' as const, product }));
+    const inventory = (inventorySuggestions[rowIndex] || [])
+      .slice(0, 8)
+      .map(product => ({ type: 'inventory' as const, product }));
     const inventoryKeys = new Set(inventory.map(({ product }) =>
       `${product.name.trim().toLowerCase()}|${(product.manufacturer || '').trim().toLowerCase()}`
     ));
@@ -451,6 +504,7 @@ export default function Billing() {
 
   // Auto-fill row with selected product suggestion
   const handleSelectProductSuggestion = (index: number, product: Product) => {
+    cacheProducts([product]);
     const { fefoBatch, validStock } = getSaleableProductContext(product);
     if (product.stockQuantity <= 0 || validStock <= 0 || (product.batches?.length && !fefoBatch)) {
       showToast(`${product.name} has no saleable, non-expired batch stock.`, 'danger');
@@ -551,20 +605,26 @@ export default function Billing() {
 
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const code = barcodeSearch.trim().toLowerCase();
+    if (!user?.tenantId) return;
+    const code = barcodeSearch.trim();
     if (!code) return;
-    const product = products.find(item =>
-      item.barcode?.trim().toLowerCase() === code ||
-      item.sku?.trim().toLowerCase() === code
-    );
-    if (!product) {
-      showToast(`No product found for barcode/SKU: ${barcodeSearch}`, 'danger');
-      barcodeInputRef.current?.select();
-      return;
-    }
-    const added = addScannedProduct(product);
-    if (added) setBarcodeSearch('');
-    barcodeInputRef.current?.focus();
+
+    void productService.findProductByCode(user.tenantId, code)
+      .then(product => {
+        if (!product) {
+          showToast(`No product found for barcode/SKU: ${barcodeSearch}`, 'danger');
+          barcodeInputRef.current?.select();
+          return;
+        }
+        cacheProducts([product]);
+        const added = addScannedProduct(product);
+        if (added) setBarcodeSearch('');
+        barcodeInputRef.current?.focus();
+      })
+      .catch(error => {
+        console.error('Barcode lookup failed:', error);
+        showToast('Barcode lookup failed. Please retry.', 'danger');
+      });
   };
 
   const resetBill = () => {
@@ -698,7 +758,7 @@ export default function Billing() {
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
         const updated = { ...item, [field]: value };
-        const matchedProd = products.find(p => p.id === item.productId);
+        const matchedProd = item.productId ? productCache[item.productId] : null;
 
         if ((field === 'saleQuantity' || field === 'saleUnit') && matchedProd) {
           const saleUnit = (field === 'saleUnit' ? value : item.saleUnit || 'unit') as SaleUnit;
@@ -758,8 +818,14 @@ export default function Billing() {
       showToast('Please add at least one valid item from inventory autocomplete.', 'danger');
       return;
     }
+    const latestProducts = await productService.getProductsByIds(
+      user.tenantId,
+      Array.from(new Set(validItems.map(item => item.productId)))
+    );
+    cacheProducts(latestProducts);
+    const latestProductMap = new Map(latestProducts.map(product => [product.id, product]));
     for (const item of validItems) {
-      const product = products.find(candidate => candidate.id === item.productId);
+      const product = latestProductMap.get(item.productId) || productCache[item.productId];
       if (!product) {
         showToast(`Select ${item.name} again from inventory.`, 'danger');
         return;
@@ -1238,7 +1304,7 @@ _Powered by PharmaFlow_`;
                   <tbody className="divide-y divide-border/40">
                     {cart.map((item, index) => {
                       const suggestions = getProductSuggestions(item.name, index);
-                      const selectedProduct = products.find(candidate => candidate.id === item.productId);
+                      const selectedProduct = item.productId ? productCache[item.productId] : null;
                       const selectedBatch = selectedProduct?.batches?.find(
                         batch => batch.batchNumber === item.batchNumber
                       );

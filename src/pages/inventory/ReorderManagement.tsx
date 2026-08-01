@@ -47,18 +47,35 @@ export default function ReorderManagement() {
   const [supplierId, setSupplierId] = useState('');
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [currentOrder, setCurrentOrder] = useState<ReorderOrder | null>(null);
+  const [cursorId, setCursorId] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const reloadOrders = async () => {
     if (user?.tenantId) setOrders(await reorderService.list(user.tenantId));
   };
-  useEffect(() => {
+  const loadProducts = async (reset = false) => {
     if (!user?.tenantId) return;
-    void purchaseService.getSuppliers(user.tenantId).then(setSuppliers);
-    void reloadOrders();
-    return productService.subscribeToProducts(user.tenantId, rows => {
-      setProducts(rows);
+    setLoadingProducts(true);
+    try {
+      const trimmedSearch = debouncedSearch.trim();
+      const result = trimmedSearch.length >= 2
+        ? await productService.searchProducts(user.tenantId, trimmedSearch, { pageSize: 50, mode: 'name' })
+        : await productService.getLowStockProductsPage(user.tenantId, 40, reset ? null : cursorId);
+      const rows = (result?.products || []).filter(product => Number(product.minimumStock) > 0 && Number(product.stockQuantity) <= Number(product.minimumStock));
+      setProducts(current => reset || trimmedSearch.length >= 2
+        ? rows
+        : Array.from(new Map([...current, ...rows].map(product => [product.id, product])).values()));
+      setCursorId(result?.nextCursor || null);
+      setHasMore(trimmedSearch.length < 2 && Boolean(result?.hasMore));
       setQuantities(current => {
         const next = { ...current };
         rows.forEach(product => {
@@ -66,10 +83,19 @@ export default function ReorderManagement() {
         });
         return next;
       });
-    });
-  }, [user?.tenantId]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    void purchaseService.getSuppliers(user.tenantId).then(setSuppliers);
+    void reloadOrders();
+    setCursorId(null);
+    void loadProducts(true);
+  }, [debouncedSearch, user?.tenantId]);
 
-  const lowProducts = useMemo(() => products.filter(product => Number(product.minimumStock) > 0 && Number(product.stockQuantity) <= Number(product.minimumStock) && product.name.toLowerCase().includes(search.toLowerCase())), [products, search]);
+  const lowProducts = useMemo(() => products, [products]);
   const draftLines: ReorderLine[] = lowProducts.filter(product => selected[product.id]).map(product => ({
     productId: product.id, productName: product.name, brand: product.brand, manufacturer: product.manufacturer,
     unit: product.unit, currentStock: product.stockQuantity, minimumStock: product.minimumStock,
@@ -100,6 +126,7 @@ export default function ReorderManagement() {
     <section className="rounded-2xl border bg-white p-4 space-y-4">
       <div className="grid gap-3 md:grid-cols-3"><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search low-stock product" className="rounded-lg border p-3" /><select value={supplierId} onChange={e => setSupplierId(e.target.value)} className="rounded-lg border p-3"><option value="">Select supplier *</option>{suppliers.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select><input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Order notes (optional)" className="rounded-lg border p-3" /></div>
       <div className="overflow-x-auto"><table className="w-full min-w-[760px]"><thead><tr className="border-y bg-background text-left text-xs"><th className="p-3">Select</th><th>Product</th><th>Company</th><th>Current</th><th>Low at</th><th>Target</th><th>Order Qty</th></tr></thead><tbody>{lowProducts.map(product => <tr key={product.id} className="border-b"><td className="p-3"><input type="checkbox" checked={Boolean(selected[product.id])} onChange={e => setSelected(current => ({ ...current, [product.id]: e.target.checked }))} /></td><td className="font-bold">{product.name}<span className="block text-xs text-text/45">{product.unit}</span></td><td>{product.manufacturer || product.brand || '—'}</td><td>{product.stockQuantity}</td><td>{product.minimumStock}</td><td>{Math.max(product.minimumStock, product.reorderTarget || product.minimumStock * 2)}</td><td><input type="number" min="1" value={quantities[product.id] || ''} onChange={e => setQuantities(current => ({ ...current, [product.id]: Math.max(0, Number(e.target.value) || 0) }))} className="w-24 rounded-lg border p-2 font-bold" /></td></tr>)}</tbody></table>{lowProducts.length === 0 && <p className="p-8 text-center text-text/50">No products are currently below their configured low-stock level.</p>}</div>
+      {hasMore && debouncedSearch.trim().length < 2 && <div className="flex justify-center"><Button variant="outline" onClick={() => void loadProducts(false)} disabled={loadingProducts}>{loadingProducts ? 'Loading…' : 'Load more low-stock products'}</Button></div>}
       <Button onClick={saveOrder} isLoading={saving} leftIcon={<Save className="h-4 w-4" />}>Save Reorder</Button>
     </section>
     {currentOrder && <section className="rounded-2xl border border-primary/30 bg-primary/5 p-4"><p className="font-black">{currentOrder.reorderNumber} ready to share</p><div className="mt-3 flex flex-wrap gap-2"><Button variant="outline" onClick={() => downloadPdf(currentOrder)} leftIcon={<Download className="h-4 w-4" />}>PDF</Button><Button variant="outline" onClick={() => shareWhatsApp(currentOrder)} leftIcon={<MessageCircle className="h-4 w-4" />}>WhatsApp</Button><Button variant="outline" onClick={() => shareEmail(currentOrder)} leftIcon={<Mail className="h-4 w-4" />}>Email</Button></div></section>}

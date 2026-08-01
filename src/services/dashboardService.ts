@@ -1,15 +1,14 @@
 import { 
   collection, 
   query, 
-  orderBy, 
-  limit, 
   onSnapshot,
-  Timestamp,
-  where
+  where,
+  getCountFromServer
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Product, Invoice, Purchase, Supplier } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { productService } from './productService';
 
 export interface DashboardStats {
   totalProducts: number;
@@ -27,6 +26,7 @@ export interface DashboardStats {
   outOfStockItems: number;
   criticalStockItems: number;
   expiryAlerts: number;
+  inventorySummaryReady: boolean;
 }
 
 export const dashboardService = {
@@ -56,54 +56,38 @@ export const dashboardService = {
       outOfStockItems: 0,
       criticalStockItems: 0,
       expiryAlerts: 0,
+      inventorySummaryReady: false,
     };
 
-    // Products Stats
-    const unsubProducts = onSnapshot(
-      query(collection(db, 'products'), where('tenantId', '==', tenantId)), 
-      (snapshot) => {
-        try {
-          const products = snapshot.docs
-            .map(doc => doc.data() as Product)
-            .filter(product => product.recordStatus !== 'inactive');
-          stats.totalProducts = products.length;
-          stats.stockValue = products.reduce((total, product) => {
-            const batchValue = (product.batches || []).reduce(
-              (sum, batch) => sum + Math.max(0, Number(batch.quantity) || 0) * Math.max(0, Number(batch.purchasePrice) || 0),
-              0
-            );
-            return total + (product.batches?.length
-              ? batchValue
-              : Math.max(0, Number(product.stockQuantity) || 0) * Math.max(0, Number(product.purchasePrice) || 0));
-          }, 0);
-          stats.lowStockItems = products.filter(p => p.stockQuantity <= p.minimumStock && p.stockQuantity > 0).length;
-          stats.outOfStockItems = products.filter(p => p.stockQuantity === 0).length;
-          stats.criticalStockItems = products.filter(p => p.stockQuantity > 0 && p.stockQuantity <= 2).length;
-          
-          const twoMonthsFromNow = new Date();
-          twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
-          
-          stats.expiryAlerts = products.filter(p => {
-            if (!p.expiryDate) return false;
-            try {
-              const expiry = typeof p.expiryDate.toDate === 'function' ? p.expiryDate.toDate() : new Date(p.expiryDate);
-              return expiry <= twoMonthsFromNow && expiry >= now;
-            } catch (e) {
-              return false;
-            }
-          }).length;
-          
-          callback({ ...stats });
-        } catch (error) {
-          console.error('Stats Products Processing Error:', error);
-          if (onError) onError(error);
-        }
-      },
-      (error) => {
+    const refreshInventoryStats = async () => {
+      try {
+        const twoMonthsFromNow = new Date();
+        twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
+        const [totalProductsCount, outOfStockCount, criticalCount, expiryCount] = await Promise.all([
+          getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId))),
+          getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId), where('stockQuantity', '==', 0))),
+          getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId), where('stockQuantity', '>', 0), where('stockQuantity', '<=', 2))),
+          getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId), where('expiryDate', '>=', now), where('expiryDate', '<=', twoMonthsFromNow))),
+        ]);
+
+        stats.totalProducts = Number(totalProductsCount.data().count) || 0;
+        stats.outOfStockItems = Number(outOfStockCount.data().count) || 0;
+        stats.criticalStockItems = Number(criticalCount.data().count) || 0;
+        stats.expiryAlerts = Number(expiryCount.data().count) || 0;
+        stats.lowStockItems = stats.criticalStockItems + stats.outOfStockItems;
+        stats.stockValue = 0;
+        stats.inventorySummaryReady = false;
+        callback({ ...stats });
+      } catch (error) {
         console.error('Stats Products Error:', error);
-        if (onError) onError(error);
+        onError?.(error);
       }
-    );
+    };
+
+    void refreshInventoryStats();
+    const inventoryStatsInterval = window.setInterval(() => {
+      void refreshInventoryStats();
+    }, 60_000);
 
     // Customers Stats
     const unsubCustomers = onSnapshot(
@@ -215,7 +199,7 @@ export const dashboardService = {
     );
 
     return () => {
-      unsubProducts();
+      window.clearInterval(inventoryStatsInterval);
       unsubCustomers();
       unsubInvoices();
       unsubPurchases();
@@ -258,37 +242,38 @@ export const dashboardService = {
     const twoMonthsFromNow = new Date();
     twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
 
-    return onSnapshot(
-      query(collection(db, 'products'), where('tenantId', '==', tenantId)), 
-      (snapshot) => {
-        try {
-          const products = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Product[];
-          const activeProducts = products.filter(product => product.recordStatus !== 'inactive');
-
-          const lowStock = activeProducts.filter(p => p.stockQuantity <= p.minimumStock);
-          const expiring = activeProducts.filter(p => {
-            if (!p.expiryDate) return false;
-            try {
-              const expiry = typeof p.expiryDate.toDate === 'function' ? p.expiryDate.toDate() : new Date(p.expiryDate);
-              return expiry <= twoMonthsFromNow && expiry >= now;
-            } catch (e) {
-              return false;
-            }
-          });
-
-          callback({ lowStock, expiring, allProducts: activeProducts });
-        } catch (err) {
-          console.error('Alerts Processing Error:', err);
-          if (onError) onError(err);
-        }
-      }, 
-      (error) => {
-        console.error('Alerts Subscription Error:', error);
-        if (onError) onError(error);
+    let cancelled = false;
+    const refreshAlerts = async () => {
+      try {
+        const [lowStockResult, expiryResult] = await Promise.all([
+          productService.getLowStockProductsPage(tenantId, 20, null),
+          productService.getExpiryProductsPage(tenantId, 20, null),
+        ]);
+        if (cancelled) return;
+        const expiring = (expiryResult?.products || []).filter(product => {
+          if (!product.expiryDate) return false;
+          const expiry = typeof product.expiryDate.toDate === 'function' ? product.expiryDate.toDate() : new Date(product.expiryDate);
+          return expiry <= twoMonthsFromNow && expiry >= now;
+        });
+        callback({
+          lowStock: (lowStockResult?.products || []),
+          expiring,
+          allProducts: [],
+        });
+      } catch (error) {
+        console.error('Alerts Processing Error:', error);
+        onError?.(error);
       }
-    );
+    };
+
+    void refreshAlerts();
+    const alertsInterval = window.setInterval(() => {
+      void refreshAlerts();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(alertsInterval);
+    };
   }
 };

@@ -281,6 +281,66 @@ async function startServer() {
     }
   });
 
+  app.get('/api/products/search', async (req: any, res: any) => {
+    const session = await authenticateRequest(req, res);
+    if (!session) return;
+    const { tenantId } = session;
+    const searchTerm = normalizeSearchTerm(req.query.q);
+    const pageSize = Math.min(50, Math.max(5, Number(req.query.pageSize) || 10));
+    const cursorId = normalizeSearchTerm(req.query.cursorId);
+    const requestedMode = normalizeSearchTerm(req.query.mode).toLowerCase();
+    const mode = ['name', 'sku', 'barcode'].includes(requestedMode)
+      ? requestedMode
+      : (/^\d+$/.test(searchTerm) ? 'barcode' : /^[A-Za-z0-9\-_/.]+$/.test(searchTerm) ? 'sku' : 'name');
+
+    if (searchTerm.length < 2) {
+      return res.status(400).json({ error: 'Search term must contain at least 2 characters.' });
+    }
+
+    try {
+      let productQuery = adminDb
+        .collection('products')
+        .where('tenantId', '==', tenantId)
+        .orderBy(mode)
+        .startAt(searchTerm)
+        .endAt(`${searchTerm}\uf8ff`)
+        .limit(pageSize);
+
+      if (cursorId) {
+        const cursorSnap = await adminDb.doc(`products/${cursorId}`).get();
+        if (cursorSnap.exists && cursorSnap.data()?.tenantId === tenantId) {
+          productQuery = adminDb
+            .collection('products')
+            .where('tenantId', '==', tenantId)
+            .orderBy(mode)
+            .startAfter(cursorSnap)
+            .endAt(`${searchTerm}\uf8ff`)
+            .limit(pageSize);
+        }
+      }
+
+      const snapshot = await productQuery.get();
+      const products = snapshot.docs
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+        .filter(row => (row as Record<string, any>).recordStatus !== 'inactive');
+      const nextCursor = snapshot.docs.length === pageSize
+        ? snapshot.docs[snapshot.docs.length - 1]?.id || null
+        : null;
+
+      return res.json({
+        products,
+        nextCursor,
+        hasMore: snapshot.docs.length === pageSize,
+      });
+    } catch (error) {
+      console.error('[Products Search] Failed to search tenant products:', error);
+      return res.status(500).json({ error: 'Product search could not be completed.' });
+    }
+  });
+
   // Vite integration
   if (process.env.NODE_ENV !== 'production') {
     console.log('[Server] Mounting Vite middleware in development mode...');

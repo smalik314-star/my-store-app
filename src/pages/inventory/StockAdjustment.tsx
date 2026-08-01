@@ -54,6 +54,9 @@ export default function StockAdjustment() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [cursorId, setCursorId] = useState<string | null>(null);
+  const [hasMoreProducts, setHasMoreProducts] = useState(false);
   const [productId, setProductId] = useState('');
   const [batchNumber, setBatchNumber] = useState('');
   const [targetQuantity, setTargetQuantity] = useState('');
@@ -73,6 +76,11 @@ export default function StockAdjustment() {
   const difference =
     nextQuantity !== null && Number.isFinite(nextQuantity) ? nextQuantity - currentQuantity : 0;
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
   const loadHistory = async () => {
     if (!user?.tenantId) return;
     setHistoryLoading(true);
@@ -89,17 +97,23 @@ export default function StockAdjustment() {
   useEffect(() => {
     if (!user?.tenantId) return;
     setLoading(true);
-    const unsubscribe = productService.subscribeToProducts(user.tenantId, rows => {
-      setProducts(rows);
-      setLoading(false);
-    });
     loadHistory();
-    return unsubscribe;
-  }, [user?.tenantId]);
+    const loadProducts = async () => {
+      const trimmed = debouncedSearch.trim();
+      const result = trimmed.length >= 2
+        ? await productService.searchProducts(user.tenantId!, trimmed, { pageSize: 50, mode: 'name' })
+        : await productService.getProductsPaginated(user.tenantId!, 50, null);
+      setProducts(result?.products || []);
+      setCursorId(result?.nextCursor || null);
+      setHasMoreProducts(trimmed.length < 2 && Boolean(result?.hasMore));
+      setLoading(false);
+    };
+    void loadProducts();
+  }, [debouncedSearch, user?.tenantId]);
 
   const filteredProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return products.slice(0, 50);
+    if (!term) return products;
     return products
       .filter(product =>
         [product.name, product.brand, product.sku, product.barcode, product.manufacturer]
@@ -108,6 +122,20 @@ export default function StockAdjustment() {
       )
       .slice(0, 50);
   }, [products, search]);
+
+  const loadMoreProducts = async () => {
+    if (!user?.tenantId || !cursorId) return;
+    setLoading(true);
+    try {
+      const result = await productService.getProductsPaginated(user.tenantId, 50, cursorId);
+      const nextRows = result?.products || [];
+      setProducts(current => Array.from(new Map([...current, ...nextRows].map(product => [product.id, product])).values()));
+      setCursorId(result?.nextCursor || null);
+      setHasMoreProducts(Boolean(result?.hasMore));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const resetRequest = () => {
     requestIdRef.current = null;
@@ -281,6 +309,13 @@ export default function StockAdjustment() {
                     </div>
                   </button>
                 ))}
+                {hasMoreProducts && search.trim().length < 2 && (
+                  <div className="p-4 text-center">
+                    <Button variant="outline" onClick={loadMoreProducts} disabled={loading}>
+                      Load more products
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </Card>

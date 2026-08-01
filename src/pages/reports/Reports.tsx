@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, orderBy, where, limit, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { Invoice, Product, Customer, Purchase, SaleReturnRecord } from '../../types';
+import { Invoice, Customer, Purchase, SaleReturnRecord } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
@@ -58,7 +58,6 @@ export default function Reports() {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [saleReturns, setSaleReturns] = useState<SaleReturnRecord[]>([]);
@@ -99,14 +98,6 @@ export default function Reports() {
       console.error('Reports Invoices Error:', error);
     });
 
-    const qProducts = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId)
-    );
-    const unsubProducts = onSnapshot(qProducts, (snapshot) => {
-      setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
-
     const qCustomers = query(
       collection(db, 'customers'),
       where('tenantId', '==', user.tenantId)
@@ -132,7 +123,6 @@ export default function Reports() {
 
     return () => {
       unsubInvoices();
-      unsubProducts();
       unsubCustomers();
       unsubPurchases();
       unsubReturns();
@@ -193,8 +183,6 @@ export default function Reports() {
   )), [saleReturns, activeWindow]);
 
   const stats = useMemo(() => {
-    const productMap = new Map(products.map(p => [p.id, p]));
-    
     let totalRevenue = 0;
     let totalProfit = 0;
     let totalGst = 0;
@@ -303,7 +291,7 @@ export default function Reports() {
       topCustomers,
       topDueCustomers
     };
-  }, [filteredInvoices, filteredPurchases, filteredSaleReturns, products]);
+  }, [filteredInvoices, filteredPurchases, filteredSaleReturns]);
 
   const salesTrendData = useMemo(() => {
     const dailyData: Record<string, { date: string; revenue: number; profit: number }> = {};
@@ -326,7 +314,7 @@ export default function Reports() {
     });
 
     return Object.values(dailyData);
-  }, [filteredInvoices, products]);
+  }, [filteredInvoices]);
 
   const gstBreakdownData = useMemo(() => {
     return [
