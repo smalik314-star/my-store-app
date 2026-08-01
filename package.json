@@ -11,8 +11,8 @@
     "build:staging": "vite build --mode staging && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "vitest run",
-    "test:rules": "firebase emulators:exec --only firestore --project pharmaflow-rules-test \"vitest run tests/firestore.rules.emulator.ts\"",
+    "test": "vitest run --exclude tests/firestore.rules.test.ts",
+    "test:rules": "firebase emulators:exec --only firestore --project pharmaflow-rules-test \"vitest run tests/firestore.rules.test.ts\"",
     "catalog:build": "node --import tsx scripts/build-medicine-catalog.ts"
   },
   "dependencies": {
