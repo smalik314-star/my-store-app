@@ -78,6 +78,11 @@ service cloud.firestore {
         && request.resource.data.grandTotal >= 0
         && request.resource.data.status in ['draft','sent','accepted','expired','converted','cancelled'];
     }
+    function validProductStock() {
+      return request.resource.data.stockQuantity is number
+        && request.resource.data.stockQuantity >= 0
+        && (!('batches' in request.resource.data) || request.resource.data.batches is list);
+    }
 
     match /users/{userId} {
       allow get: if signedIn() && request.auth.uid == userId;
@@ -312,9 +317,15 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if inTenant(resource.data.tenantId);
-      allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
-      allow update: if inTenant(resource.data.tenantId) && roleIs(['owner','admin','staff']) && sameTenant();
+      // A purchase transaction must read a catalogue product before creating it.
+      // Tenant-prefixed IDs safely authorize that missing-document read while
+      // keeping existing products isolated by their stored tenantId.
+      allow get: if hasTenantPrefixedId(productId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff']) && validProductStock();
+      allow update: if inTenant(resource.data.tenantId)
+        && roleIs(['owner','admin','staff']) && sameTenant() && validProductStock();
       allow delete: if false;
     }
 
@@ -328,7 +339,8 @@ service cloud.firestore {
       allow update: if inTenant(tenantId) && roleIs(['owner','admin','staff'])
         && request.resource.data.tenantId == resource.data.tenantId
         && request.resource.data.productsCount is int
-        && request.resource.data.productsCount == resource.data.productsCount + 1
+        && request.resource.data.productsCount > resource.data.productsCount
+        && request.resource.data.productsCount <= resource.data.productsCount + 50
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['productsCount','updatedAt']);
       allow delete: if false;

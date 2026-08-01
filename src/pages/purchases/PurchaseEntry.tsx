@@ -271,7 +271,10 @@ export default function PurchaseEntry() {
 
   const handleSelectCatalogueMedicine = (idx: number, medicine: MasterMedicine) => {
     const updated = [...items];
-    updated[idx].productId = `catalog_${crypto.randomUUID()}`;
+    // New catalogue-backed products use a tenant-prefixed deterministic scope.
+    // Firestore rules can then safely authorize the transaction's initial
+    // missing-document read without exposing another tenant's product.
+    updated[idx].productId = `${user.tenantId}_catalog_${crypto.randomUUID()}`;
     updated[idx].productName = medicine.name;
     updated[idx].searchQuery = medicine.name;
     updated[idx].brand = medicine.brand || '';

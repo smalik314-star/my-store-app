@@ -205,10 +205,15 @@ export const purchaseService = {
         const tenantRef = doc(db, 'tenants', tenantId);
         const tenantDoc = await transaction.get(tenantRef);
         if (!tenantDoc.exists()) throw new Error('Store profile not found.');
+        const productUsageRef = doc(db, 'productUsageCounters', tenantId);
+        const productUsageDoc = await transaction.get(productUsageRef);
         const newProductCount = Array.from(productDocs.values()).filter(value => value === null).length;
         const tenantUsage = tenantDoc.data().usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+        const currentProductCount = productUsageDoc.exists()
+          ? Math.max(0, Number(productUsageDoc.data().productsCount) || 0)
+          : Math.max(0, Number(tenantUsage.productsCount) || 0);
         const tenantLimits = getEffectiveLimits(tenantDoc.data() as Tenant);
-        if ((Number(tenantUsage.productsCount) || 0) + newProductCount > tenantLimits.maxProducts) {
+        if (currentProductCount + newProductCount > tenantLimits.maxProducts) {
           throw new Error('Product limit reached. Please upgrade your plan.');
         }
         const supplierRef = doc(db, SUPPLIERS_COLL, purchaseData.supplierId);
@@ -276,13 +281,11 @@ export const purchaseService = {
           updatedAt: serverTimestamp(),
         });
         if (newProductCount > 0) {
-          transaction.update(tenantRef, {
-            usage: {
-              ...tenantUsage,
-              productsCount: (Number(tenantUsage.productsCount) || 0) + newProductCount,
-            },
+          transaction.set(productUsageRef, {
+            tenantId,
+            productsCount: currentProductCount + newProductCount,
             updatedAt: serverTimestamp(),
-          });
+          }, { merge: true });
         }
 
         const supplierLedgerRef = doc(collection(db, 'ledgerEntries'));
