@@ -348,9 +348,11 @@ class MedicineMasterService {
   }
 
   /**
-   * Loads high-quality sample data if the IndexedDB is empty
+   * Optional manual import of the bundled reference catalogue.
+   * This is never auto-loaded into a live store and should only be used when
+   * an operator explicitly chooses to import the bundled medicine reference.
    */
-  async loadDefaultSamples(): Promise<void> {
+  async importBuiltInReferenceCatalog(): Promise<void> {
     const count = await this.countMedicines();
     if (count > 0) return; // Already has data
 

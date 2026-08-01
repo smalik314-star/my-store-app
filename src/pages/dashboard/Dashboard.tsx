@@ -10,7 +10,9 @@ import {
   ArrowRight,
   Zap,
   CalendarDays,
-  Activity
+  Activity,
+  Wallet,
+  AlertTriangle
 } from 'lucide-react';
 import { PageContainer } from '../../components/common/PageContainer';
 import { Card } from '../../components/common/Card';
@@ -133,7 +135,7 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="mt-1 text-sm text-text/55">
-              Welcome, {user?.displayName?.split(' ')[0] || 'Administrator'} — sales, stock and alerts in one operational view.
+              Welcome, {user?.displayName?.split(' ')[0] || 'Administrator'} - sales, stock and alerts in one operational view.
             </p>
           </div>
         </div>
@@ -184,34 +186,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-        <KpiCard 
-          label="Products" 
-          value={stats.totalProducts} 
-          icon={Package} 
-          loading={loading}
-          colorClass="bg-primary/10 text-primary"
-          isHoverable
-          onClick={() => navigate('/inventory')}
-        />
-        <KpiCard 
-          label="Customers" 
-          value={stats.totalCustomers} 
-          icon={Users} 
-          loading={loading}
-          colorClass="bg-secondary/10 text-secondary"
-          isHoverable
-          onClick={() => navigate('/customers')}
-        />
-        <KpiCard 
-          label="Invoices" 
-          value={stats.totalInvoices} 
-          icon={ReceiptText} 
-          loading={loading}
-          colorClass="bg-accent/10 text-accent"
-          isHoverable
-          onClick={() => navigate('/reports')}
-        />
+      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
         <KpiCard 
           label="Today's Sales" 
           value={formatCurrencyCompact(stats.todaySales)} 
@@ -222,21 +197,85 @@ export default function Dashboard() {
           onClick={() => navigate('/reports')}
         />
         <KpiCard 
-          label="Monthly Rev" 
-          value={formatCurrency(stats.monthlyRevenue)} 
-          icon={IndianRupee} 
+          label="Today's Profit" 
+          value={formatCurrency(stats.todayGrossProfit)} 
+          icon={TrendingUp} 
           loading={loading}
-          colorClass="bg-info/10 text-info"
+          colorClass="bg-primary/10 text-primary"
           isHoverable
           onClick={() => navigate('/reports')}
         />
         <KpiCard 
+          label="Today's Invoices" 
+          value={stats.todayInvoiceCount} 
+          icon={ReceiptText} 
+          loading={loading}
+          colorClass="bg-accent/10 text-accent"
+          isHoverable
+          onClick={() => navigate('/reports')}
+        />
+        <KpiCard 
+          label="Today's Purchase" 
+          value={formatCurrency(stats.todayPurchases)} 
+          icon={Package} 
+          loading={loading}
+          colorClass="bg-purple-500/10 text-purple-500"
+          isHoverable
+          onClick={() => navigate('/purchases')}
+        />
+        <KpiCard 
+          label="Receivable" 
+          value={formatCurrency(stats.totalReceivable)} 
+          icon={Wallet} 
+          loading={loading}
+          colorClass="bg-warning/10 text-warning"
+          isHoverable
+          onClick={() => navigate('/customers')}
+        />
+        <KpiCard 
+          label="Payable" 
+          value={formatCurrency(stats.totalPayable)} 
+          icon={IndianRupee} 
+          loading={loading}
+          colorClass="bg-danger/10 text-danger"
+          isHoverable
+          onClick={() => navigate('/supplier-payments')}
+        />
+        <KpiCard 
+          label="Stock Value" 
+          value={formatCurrency(stats.stockValue)} 
+          icon={Package} 
+          loading={loading}
+          colorClass="bg-info/10 text-info"
+          isHoverable
+          onClick={() => navigate('/inventory')}
+        />
+        <KpiCard 
           label="Low Stock" 
           value={stats.lowStockItems} 
-          icon={TrendingUp} 
+          icon={AlertTriangle} 
           loading={loading}
           isUp={stats.lowStockItems === 0}
           colorClass={stats.lowStockItems > 0 ? "bg-danger/10 text-danger" : "bg-success/10 text-success"}
+          isHoverable
+          onClick={() => navigate('/low-stock')}
+        />
+        <KpiCard 
+          label="Expiring Soon" 
+          value={stats.expiryAlerts} 
+          icon={Package} 
+          loading={loading}
+          isUp={stats.expiryAlerts === 0}
+          colorClass={stats.expiryAlerts > 0 ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}
+          isHoverable
+          onClick={() => navigate('/expiry-alerts')}
+        />
+        <KpiCard 
+          label="Products" 
+          value={stats.totalProducts} 
+          icon={Package} 
+          loading={loading}
+          colorClass="bg-secondary/10 text-secondary"
           isHoverable
           onClick={() => navigate('/inventory')}
         />

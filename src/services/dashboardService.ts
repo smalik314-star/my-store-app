@@ -63,7 +63,9 @@ export const dashboardService = {
       query(collection(db, 'products'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         try {
-          const products = snapshot.docs.map(doc => doc.data() as Product);
+          const products = snapshot.docs
+            .map(doc => doc.data() as Product)
+            .filter(product => product.recordStatus !== 'inactive');
           stats.totalProducts = products.length;
           stats.stockValue = products.reduce((total, product) => {
             const batchValue = (product.batches || []).reduce(
@@ -107,9 +109,12 @@ export const dashboardService = {
     const unsubCustomers = onSnapshot(
       query(collection(db, 'customers'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
-        stats.totalCustomers = snapshot.size;
-        stats.totalReceivable = snapshot.docs.reduce(
-          (total, row) => total + Math.max(0, Number(row.data().outstandingBalance) || 0),
+        const customers = snapshot.docs
+          .map(row => row.data() as { outstandingBalance?: number; recordStatus?: string })
+          .filter(customer => customer.recordStatus !== 'inactive');
+        stats.totalCustomers = customers.length;
+        stats.totalReceivable = customers.reduce(
+          (total, customer) => total + Math.max(0, Number(customer.outstandingBalance) || 0),
           0
         );
         callback({ ...stats });
@@ -261,9 +266,10 @@ export const dashboardService = {
             id: doc.id,
             ...doc.data()
           })) as Product[];
+          const activeProducts = products.filter(product => product.recordStatus !== 'inactive');
 
-          const lowStock = products.filter(p => p.stockQuantity <= p.minimumStock);
-          const expiring = products.filter(p => {
+          const lowStock = activeProducts.filter(p => p.stockQuantity <= p.minimumStock);
+          const expiring = activeProducts.filter(p => {
             if (!p.expiryDate) return false;
             try {
               const expiry = typeof p.expiryDate.toDate === 'function' ? p.expiryDate.toDate() : new Date(p.expiryDate);
@@ -273,7 +279,7 @@ export const dashboardService = {
             }
           });
 
-          callback({ lowStock, expiring, allProducts: products });
+          callback({ lowStock, expiring, allProducts: activeProducts });
         } catch (err) {
           console.error('Alerts Processing Error:', err);
           if (onError) onError(err);

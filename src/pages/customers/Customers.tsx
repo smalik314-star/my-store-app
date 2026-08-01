@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, orderBy, where, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { Customer } from '../../types';
 import { Card } from '../../components/common/Card';
@@ -31,6 +31,7 @@ import { useToast } from '../../context/ToastContext';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import { EmptyState } from '../../components/common/EmptyState';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
+import { customerService } from '../../services/customerService';
 
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/currency';
@@ -61,7 +62,7 @@ export default function Customers() {
         const items = snapshot.docs.map(doc => ({
           ...doc.data(),
           id: doc.id
-        } as Customer));
+        } as Customer)).filter(customer => customer.recordStatus !== 'inactive');
 
         // Client-side sort by name
         items.sort((a, b) => a.name.localeCompare(b.name));
@@ -104,12 +105,13 @@ export default function Customers() {
 
   const handleDelete = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'customers', id));
-      showToast('Customer deleted successfully', 'success');
+      if (!user?.tenantId) throw new Error('Tenant session not found.');
+      await customerService.deleteCustomer(user.tenantId, id);
+      showToast('Customer archived successfully', 'success');
       setDeleteConfirm(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      showToast('Failed to delete customer', 'danger');
+      showToast(error.message || 'Failed to archive customer', 'danger');
     }
   };
 
@@ -417,9 +419,9 @@ export default function Customers() {
         isOpen={!!deleteConfirm}
         onClose={() => setDeleteConfirm(null)}
         onConfirm={() => deleteConfirm && handleDelete(deleteConfirm.id)}
-        title="Delete Customer"
-        message="Are you sure you want to delete this customer? This action will remove all their information and history permanently."
-        confirmText="Delete Customer"
+        title="Archive Customer"
+        message="Archive this customer? Invoice history stays intact, but the customer will no longer appear in active billing and CRM lists."
+        confirmText="Archive Customer"
         variant="danger"
       />
 

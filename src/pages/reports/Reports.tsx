@@ -41,7 +41,7 @@ import {
   AreaChart,
   Area
 } from 'recharts';
-import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay, isWithinInterval, startOfMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from 'date-fns';
 import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
 import { toJsDate } from '../../utils/date';
@@ -52,7 +52,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { Logo } from '../../components/common/Logo';
 
-type DateRange = 'today' | '7days' | '30days' | 'thisMonth' | 'lastMonth' | 'custom';
+type DateRange = 'today' | 'yesterday' | 'thisWeek' | 'thisMonth' | 'previousMonth' | 'custom';
 
 export default function Reports() {
   const { settings } = useSettings();
@@ -63,7 +63,7 @@ export default function Reports() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [saleReturns, setSaleReturns] = useState<SaleReturnRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<DateRange>('30days');
+  const [dateRange, setDateRange] = useState<DateRange>('thisMonth');
   const [customRange, setCustomRange] = useState<{ start: Date; end: Date }>({
     start: subDays(new Date(), 30),
     end: new Date()
@@ -148,16 +148,18 @@ export default function Reports() {
       case 'today':
         start = startOfDay(now);
         break;
-      case '7days':
-        start = startOfDay(subDays(now, 7));
+      case 'yesterday':
+        start = startOfDay(subDays(now, 1));
+        end = endOfDay(subDays(now, 1));
         break;
-      case '30days':
-        start = startOfDay(subDays(now, 30));
+      case 'thisWeek':
+        start = startOfWeek(now, { weekStartsOn: 1 });
+        end = endOfWeek(now, { weekStartsOn: 1 });
         break;
       case 'thisMonth':
         start = startOfMonth(now);
         break;
-      case 'lastMonth':
+      case 'previousMonth':
         start = startOfMonth(subMonths(now, 1));
         end = endOfMonth(subMonths(now, 1));
         break;
@@ -431,7 +433,14 @@ export default function Reports() {
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="bg-surface p-1 rounded-xl border border-border flex items-center gap-1">
-            {(['today', '7days', '30days', 'thisMonth'] as DateRange[]).map((range) => (
+            {([
+              ['today', 'Today'],
+              ['yesterday', 'Yesterday'],
+              ['thisWeek', 'This Week'],
+              ['thisMonth', 'This Month'],
+              ['previousMonth', 'Previous Month'],
+              ['custom', 'Custom Range'],
+            ] as const).map(([range, label]) => (
               <button
                 key={range}
                 onClick={() => setDateRange(range)}
@@ -440,10 +449,36 @@ export default function Reports() {
                   dateRange === range ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-text/40 hover:text-text"
                 )}
               >
-                {range.replace(/([A-Z])/g, ' $1').trim()}
+                {label}
               </button>
             ))}
           </div>
+
+          {dateRange === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-2">
+              <input
+                type="date"
+                value={format(customRange.start, 'yyyy-MM-dd')}
+                onChange={(event) => setCustomRange(range => ({
+                  ...range,
+                  start: new Date(`${event.target.value}T00:00:00`)
+                }))}
+                className="h-10 rounded-lg border border-border bg-background px-3 text-[10px] font-black outline-none focus:border-primary"
+                aria-label="Custom report start date"
+              />
+              <span className="text-[10px] font-black text-text/30 uppercase tracking-widest">to</span>
+              <input
+                type="date"
+                value={format(customRange.end, 'yyyy-MM-dd')}
+                onChange={(event) => setCustomRange(range => ({
+                  ...range,
+                  end: new Date(`${event.target.value}T23:59:59`)
+                }))}
+                className="h-10 rounded-lg border border-border bg-background px-3 text-[10px] font-black outline-none focus:border-primary"
+                aria-label="Custom report end date"
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <Button 

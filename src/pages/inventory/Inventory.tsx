@@ -189,11 +189,11 @@ export default function Inventory() {
       setFormLoading(true);
       try {
         await Promise.all(selectedIds.map(id => productService.deleteProduct(user.tenantId!, id)));
-        showToast(`${selectedIds.length} items deleted`, 'success');
+        showToast(`${selectedIds.length} products archived`, 'success');
         setSelectedIds([]);
         setIsBulkDeleting(false);
       } catch (error) {
-        showToast('Failed to delete items', 'danger');
+        showToast('Failed to archive products', 'danger');
       } finally {
         setFormLoading(false);
       }
@@ -201,11 +201,11 @@ export default function Inventory() {
       setFormLoading(true);
       try {
         await productService.deleteProduct(user.tenantId, deletingProduct.id);
-        showToast('Product deleted successfully', 'success');
+        showToast('Product archived successfully', 'success');
         setDeletingProduct(undefined);
         if (selectedProduct?.id === deletingProduct.id) setSelectedProduct(null);
       } catch (error) {
-        showToast('Failed to delete product', 'danger');
+        showToast('Failed to archive product', 'danger');
       } finally {
         setFormLoading(false);
       }
@@ -448,11 +448,12 @@ export default function Inventory() {
         {(deletingProduct || isBulkDeleting) && (
           <ConfirmModal 
             isOpen={true}
-            title={isBulkDeleting ? 'Delete Multiple Items' : 'Delete Product'}
+            title={isBulkDeleting ? 'Archive Multiple Products' : 'Archive Product'}
             message={isBulkDeleting 
-              ? `Are you sure you want to delete ${selectedIds.length} selected items?` 
-              : `Are you sure you want to delete "${deletingProduct?.name}"?`
+              ? `Archive ${selectedIds.length} selected products? They will be removed from active inventory lists but preserved in audit history.` 
+              : `Archive "${deletingProduct?.name}"? It will be removed from active inventory lists but preserved in audit history.`
             }
+            confirmText={isBulkDeleting ? 'Archive Products' : 'Archive Product'}
             onConfirm={handleDeleteProduct}
             onClose={() => { setDeletingProduct(undefined); setIsBulkDeleting(false); }}
             isLoading={formLoading}

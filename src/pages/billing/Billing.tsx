@@ -193,7 +193,9 @@ export default function Billing() {
       where('tenantId', '==', user.tenantId)
     );
     const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
+      const items = snapshot.docs
+        .map(doc => ({ ...doc.data(), id: doc.id } as Customer))
+        .filter(customer => customer.recordStatus !== 'inactive');
       setCustomers(items);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'customers'));
 

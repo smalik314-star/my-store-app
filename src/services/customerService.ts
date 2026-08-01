@@ -2,7 +2,6 @@ import {
   collection, 
   addDoc, 
   updateDoc, 
-  deleteDoc, 
   doc, 
   query, 
   where, 
@@ -38,7 +37,9 @@ export const customerService = {
     try {
       const q = query(collection(db, COLLECTION_NAME), where('tenantId', '==', tenantId));
       const snapshot = await getDocs(q);
-      const customers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
+      const customers = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Customer))
+        .filter(customer => customer.recordStatus !== 'inactive');
       // Client-side sort by name
       customers.sort((a, b) => a.name.localeCompare(b.name));
       return customers;
@@ -64,7 +65,9 @@ export const customerService = {
 
       const snapshot = await getDocs(q);
       const lastDoc = snapshot.docs[snapshot.docs.length - 1];
-      const customers = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
+      const customers = snapshot.docs
+        .map(doc => ({ ...doc.data(), id: doc.id } as Customer))
+        .filter(customer => customer.recordStatus !== 'inactive');
 
       // Client-side sort by name
       customers.sort((a, b) => a.name.localeCompare(b.name));
@@ -101,6 +104,7 @@ export const customerService = {
         outstandingBalance: sanitized.outstandingBalance || 0,
         totalPurchases: sanitized.totalPurchases || 0,
         totalPaid: sanitized.totalPaid || 0,
+        recordStatus: 'active',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -140,8 +144,19 @@ export const customerService = {
       if (!currentDoc.exists() || currentDoc.data().tenantId !== tenantId) {
         throw new Error('Unauthorized or customer not found');
       }
+      const customer = currentDoc.data() as Customer;
+      if ((Number(customer.outstandingBalance) || 0) > 0) {
+        throw new Error('Customer has outstanding dues. Clear the balance before archiving.');
+      }
+      const actorId = auth.currentUser?.uid;
+      if (!actorId) throw new Error('You must be signed in to archive a customer.');
 
-      await deleteDoc(docRef);
+      await updateDoc(docRef, {
+        recordStatus: 'inactive',
+        archivedAt: serverTimestamp(),
+        archivedBy: actorId,
+        updatedAt: serverTimestamp(),
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${COLLECTION_NAME}/${id}`);
     }

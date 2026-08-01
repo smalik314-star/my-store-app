@@ -272,6 +272,9 @@ export interface Customer {
   totalPurchases: number;
   totalPaid: number;
   creditBalance?: number;
+  recordStatus?: 'active' | 'inactive';
+  archivedAt?: any;
+  archivedBy?: string;
   createdAt: any;
   updatedAt: any;
 }
