@@ -16,6 +16,46 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
   const emailAttempts = new Map<string, { count: number; resetAt: number }>();
+  const normalizeSearchTerm = (value: unknown) => String(value ?? '').trim();
+  const dedupeById = <T extends { id: string }>(rows: T[]): T[] =>
+    Array.from(new Map(rows.map(row => [row.id, row])).values());
+  const getSearchVariants = (term: string): string[] => {
+    const trimmed = normalizeSearchTerm(term);
+    if (!trimmed) return [];
+    const titleCase = trimmed.replace(/\b\w/g, char => char.toUpperCase());
+    return Array.from(new Set([
+      trimmed,
+      trimmed.toLowerCase(),
+      trimmed.toUpperCase(),
+      titleCase,
+    ]));
+  };
+  const authenticateRequest = async (req: any, res: any): Promise<{ uid: string; tenantId: string } | null> => {
+    const authHeader = String(req.headers.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Authentication required.' });
+      return null;
+    }
+
+    let uid = '';
+    try {
+      uid = (await getAuth().verifyIdToken(authHeader.slice(7))).uid;
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired session.' });
+      return null;
+    }
+
+    const userSnap = await adminDb.doc(`users/${uid}`).get();
+    if (!userSnap.exists || userSnap.data()?.status !== 'active' || !userSnap.data()?.tenantId) {
+      res.status(403).json({ error: 'User access is not active for this tenant.' });
+      return null;
+    }
+
+    return {
+      uid,
+      tenantId: String(userSnap.data()?.tenantId),
+    };
+  };
 
   app.disable('x-powered-by');
   app.use((req, res, next) => {
@@ -46,11 +86,9 @@ async function startServer() {
 
   // API: Send Email with PDF attachment
   app.post('/api/send-email', async (req: any, res: any) => {
-    const authHeader = String(req.headers.authorization || '');
-    if (!authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required.' });
-    let uid = '';
-    try { uid = (await getAuth().verifyIdToken(authHeader.slice(7))).uid; }
-    catch { return res.status(401).json({ error: 'Invalid or expired session.' }); }
+    const session = await authenticateRequest(req, res);
+    if (!session) return;
+    const { uid, tenantId } = session;
 
     const rate = emailAttempts.get(uid);
     const now = Date.now();
@@ -70,11 +108,8 @@ async function startServer() {
     }
 
     try {
-      const [userSnap, invoiceSnap] = await Promise.all([
-        adminDb.doc(`users/${uid}`).get(), adminDb.doc(`invoices/${invoiceId}`).get()
-      ]);
-      if (!userSnap.exists || !invoiceSnap.exists || userSnap.data()?.status !== 'active' ||
-          userSnap.data()?.tenantId !== invoiceSnap.data()?.tenantId) {
+      const invoiceSnap = await adminDb.doc(`invoices/${invoiceId}`).get();
+      if (!invoiceSnap.exists || invoiceSnap.data()?.tenantId !== tenantId) {
         return res.status(403).json({ error: 'Invoice access denied.' });
       }
       
@@ -144,6 +179,105 @@ async function startServer() {
     } catch (err: any) {
       console.error('[Email Backend] Failed to send email:', err);
       return res.status(500).json({ error: 'Email could not be sent.' });
+    }
+  });
+
+  app.get('/api/global-search', async (req: any, res: any) => {
+    const session = await authenticateRequest(req, res);
+    if (!session) return;
+    const { tenantId } = session;
+    const searchTerm = normalizeSearchTerm(req.query.q);
+    const numericOrCodeQuery = /^[A-Za-z0-9\-_/]+$/.test(searchTerm);
+
+    if (searchTerm.length < 2) {
+      return res.status(400).json({ error: 'Search term must contain at least 2 characters.' });
+    }
+
+    const prefixSearch = async <T extends { id: string }>(
+      collectionName: string,
+      fields: string[],
+      variants: string[],
+      pageSize: number,
+      mapper: (row: Record<string, any>) => T | null
+    ) => {
+      const snapshots = await Promise.all(
+        fields.flatMap(field =>
+          variants.map(variant =>
+            adminDb
+              .collection(collectionName)
+              .where('tenantId', '==', tenantId)
+              .orderBy(field)
+              .startAt(variant)
+              .endAt(`${variant}\uf8ff`)
+              .limit(pageSize)
+              .get()
+          )
+        )
+      );
+
+      const rows = snapshots.flatMap(snapshot => snapshot.docs.map(doc => mapper({
+        id: doc.id,
+        ...doc.data(),
+      })));
+
+      return dedupeById(rows.filter((row): row is T => Boolean(row))).slice(0, pageSize);
+    };
+
+    try {
+      const productFields = numericOrCodeQuery ? ['barcode', 'sku'] : ['name', 'sku', 'barcode'];
+      const invoiceFields = numericOrCodeQuery ? ['invoiceNumber'] : ['invoiceNumber'];
+      const customerFields = numericOrCodeQuery ? ['phone'] : ['name', 'phone'];
+      const variants = getSearchVariants(searchTerm);
+
+      const [products, invoices, customers] = await Promise.all([
+        prefixSearch(
+          'products',
+          productFields,
+          variants,
+          5,
+          row => row.recordStatus === 'inactive' ? null : {
+            id: String(row.id),
+            name: String(row.name || ''),
+            sku: String(row.sku || ''),
+            barcode: String(row.barcode || ''),
+            brand: String(row.brand || ''),
+            category: String(row.category || ''),
+            stockQuantity: Number(row.stockQuantity) || 0,
+            minimumStock: Number(row.minimumStock) || 0,
+          }
+        ),
+        prefixSearch(
+          'invoices',
+          invoiceFields,
+          variants,
+          5,
+          row => ({
+            id: String(row.id),
+            invoiceNumber: String(row.invoiceNumber || ''),
+            customerName: String(row.customerName || ''),
+            paymentStatus: String(row.paymentStatus || 'due'),
+            grandTotal: Number(row.grandTotal) || 0,
+          })
+        ),
+        prefixSearch(
+          'customers',
+          customerFields,
+          variants,
+          5,
+          row => row.recordStatus === 'inactive' ? null : {
+            id: String(row.id),
+            name: String(row.name || ''),
+            phone: String(row.phone || ''),
+            email: String(row.email || ''),
+            totalPurchases: Number(row.totalPurchases) || 0,
+          }
+        ),
+      ]);
+
+      return res.json({ products, invoices, customers });
+    } catch (error) {
+      console.error('[Global Search] Failed to search tenant records:', error);
+      return res.status(500).json({ error: 'Global search could not be completed.' });
     }
   });
 

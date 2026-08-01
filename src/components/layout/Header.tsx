@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   Bell, 
@@ -20,8 +20,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../common/Button';
-import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
-import { db } from '../../firebase/config';
+import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { auth, db } from '../../firebase/config';
 import { toJsDate } from '../../utils/date';
 import { Product, Invoice, Customer } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,11 +29,61 @@ import { cn } from '../../utils/cn';
 import { Logo } from '../common/Logo';
 import { useBusinessMode } from '../../context/BusinessModeContext';
 import { supportsRetail } from '../../utils/businessMode';
+import { formatCurrency } from '../../utils/currency';
 
 interface HeaderProps {
   onMenuClick: () => void;
   pageTitle?: string;
 }
+
+interface SearchProductResult {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string;
+  brand?: string;
+  category: string;
+  stockQuantity: number;
+  minimumStock: number;
+}
+
+interface SearchInvoiceResult {
+  id: string;
+  invoiceNumber: string;
+  customerName: string;
+  paymentStatus: string;
+  grandTotal: number;
+}
+
+interface SearchCustomerResult {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  totalPurchases: number;
+}
+
+interface GlobalSearchResults {
+  products: SearchProductResult[];
+  invoices: SearchInvoiceResult[];
+  customers: SearchCustomerResult[];
+}
+
+interface NotificationItem {
+  id: string;
+  productId: string;
+  type: 'out_of_stock' | 'critical_stock' | 'low_stock' | 'expired' | 'expiring_very_soon' | 'expiring_soon';
+  severity: 'critical' | 'warning';
+  title: string;
+  message: string;
+  item: Product;
+}
+
+const EMPTY_SEARCH_RESULTS: GlobalSearchResults = {
+  products: [],
+  invoices: [],
+  customers: [],
+};
 
 export function Header({ onMenuClick, pageTitle }: HeaderProps) {
   const { user, logout } = useAuth();
@@ -44,18 +94,19 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
   // Search states
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [products, setProducts] = useState<Product[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [searchResults, setSearchResults] = useState<GlobalSearchResults>(EMPTY_SEARCH_RESULTS);
   const [loadingSearch, setLoadingSearch] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const searchCacheRef = useRef<Map<string, GlobalSearchResults>>(new Map());
 
   // User Profile Dropdown states
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
   // Notifications states
-  const [notifications, setNotifications] = useState<any[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [stockAlertProducts, setStockAlertProducts] = useState<Product[]>([]);
+  const [expiryAlertProducts, setExpiryAlertProducts] = useState<Product[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('pharma_notif_sound');
     return saved !== 'false'; // default true
@@ -68,6 +119,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
 
   const notifRef = useRef<HTMLDivElement>(null);
   const prevCountRef = useRef<number | null>(null);
+  const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
   const getPageTitle = () => {
     if (pageTitle) return pageTitle;
@@ -105,145 +157,240 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetch all search resources when search overlay opens
   useEffect(() => {
-    if (!searchOpen || !user?.tenantId) return;
+    if (searchOpen) return;
+    setSearchQuery('');
+    setSearchError('');
+    setLoadingSearch(false);
+    setSearchResults(EMPTY_SEARCH_RESULTS);
+  }, [searchOpen]);
 
-    const fetchSearchData = async () => {
-      setLoadingSearch(true);
-      try {
-        const productsQuery = query(collection(db, 'products'), where('tenantId', '==', user.tenantId));
-        const productsSnap = await getDocs(productsQuery);
-        const productsList = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-        setProducts(productsList);
+  useEffect(() => {
+    if (!searchOpen) return;
 
-        const invoicesQuery = query(collection(db, 'invoices'), where('tenantId', '==', user.tenantId));
-        const invoicesSnap = await getDocs(invoicesQuery);
-        const invoicesList = invoicesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
-        setInvoices(invoicesList);
-
-        const customersQuery = query(collection(db, 'customers'), where('tenantId', '==', user.tenantId));
-        const customersSnap = await getDocs(customersQuery);
-        const customersList = customersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
-        setCustomers(customersList);
-      } catch (err) {
-        console.error('Error loading global search resources:', err);
-      } finally {
-        setLoadingSearch(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSearchOpen(false);
       }
     };
 
-    fetchSearchData();
-  }, [searchOpen, user?.tenantId]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [searchOpen]);
 
-  // Real-time calculation of active stock/expiry alerts
+  // Bounded tenant search via authenticated backend endpoint.
   useEffect(() => {
-    if (!user?.tenantId) return;
+    if (!searchOpen || !user?.tenantId) return;
 
-    const q = query(
+    const trimmedQuery = searchQuery.trim();
+    if (trimmedQuery.length < 2) {
+      setSearchError('');
+      setLoadingSearch(false);
+      setSearchResults(EMPTY_SEARCH_RESULTS);
+      return;
+    }
+
+    const cacheKey = `${user.tenantId}:${trimmedQuery.toLowerCase()}`;
+    const cached = searchCacheRef.current.get(cacheKey);
+    if (cached) {
+      setSearchError('');
+      setLoadingSearch(false);
+      setSearchResults(cached);
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setLoadingSearch(true);
+        setSearchError('');
+
+        try {
+          const idToken = await auth.currentUser?.getIdToken();
+          if (!idToken) {
+            throw new Error('Please sign in again to use global search.');
+          }
+
+          const response = await fetch(
+            `${apiBaseUrl}/api/global-search?q=${encodeURIComponent(trimmedQuery) || ''}`.replace('//api', '/api'),
+            {
+              headers: {
+                Authorization: `Bearer ${idToken}`,
+              },
+            }
+          );
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.error || 'Global search could not be completed.');
+          }
+
+          const nextResults: GlobalSearchResults = {
+            products: result.products || [],
+            invoices: result.invoices || [],
+            customers: result.customers || [],
+          };
+
+          if (!active) return;
+          searchCacheRef.current.set(cacheKey, nextResults);
+          setSearchResults(nextResults);
+        } catch (error: any) {
+          if (!active) return;
+          console.error('Error loading global search resources:', error);
+          setSearchResults(EMPTY_SEARCH_RESULTS);
+          setSearchError(error?.message || 'Global search is unavailable right now.');
+        } finally {
+          if (active) {
+            setLoadingSearch(false);
+          }
+        }
+      })();
+    }, 250);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [apiBaseUrl, searchOpen, searchQuery, user?.tenantId]);
+
+  // Limited live alert sources so the header never subscribes to the full catalog.
+  useEffect(() => {
+    if (!user?.tenantId) {
+      setStockAlertProducts([]);
+      setExpiryAlertProducts([]);
+      return;
+    }
+
+    const expiryCutoff = new Date();
+    expiryCutoff.setDate(expiryCutoff.getDate() + 60);
+
+    const stockQuery = query(
       collection(db, 'products'),
-      where('tenantId', '==', user.tenantId)
+      where('tenantId', '==', user.tenantId),
+      orderBy('stockQuantity', 'asc'),
+      limit(100)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
+    const expiryQuery = query(
+      collection(db, 'products'),
+      where('tenantId', '==', user.tenantId),
+      where('expiryDate', '<=', expiryCutoff),
+      orderBy('expiryDate', 'asc'),
+      limit(100)
+    );
 
-      const list: any[] = [];
-
-      snapshot.docs.forEach(doc => {
-        const data = doc.data() as Product;
-        const id = doc.id;
-
-        // 1. Stock alert logic
-        if (data.stockQuantity === 0) {
-          list.push({
-            id: `stock-out-${id}`,
-            productId: id,
-            type: 'out_of_stock',
-            severity: 'critical',
-            title: 'Out of Stock',
-            message: `${data.name} is completely out of stock!`,
-            item: data,
-          });
-        } else if (data.stockQuantity <= 2) {
-          list.push({
-            id: `stock-critical-${id}`,
-            productId: id,
-            type: 'critical_stock',
-            severity: 'critical',
-            title: 'Critical Stock Level',
-            message: `${data.name} has only ${data.stockQuantity} ${data.unit} left!`,
-            item: data,
-          });
-        } else if (data.stockQuantity <= data.minimumStock) {
-          list.push({
-            id: `stock-low-${id}`,
-            productId: id,
-            type: 'low_stock',
-            severity: 'warning',
-            title: 'Low Stock Alert',
-            message: `${data.name} is below minimum level (${data.stockQuantity} left).`,
-            item: data,
-          });
-        }
-
-        // 2. Expiry alert logic
-        const expiryDate = toJsDate(data.expiryDate);
-        expiryDate.setHours(0, 0, 0, 0);
-        const diffTime = expiryDate.getTime() - now.getTime();
-        const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        if (daysLeft < 0) {
-          list.push({
-            id: `expiry-expired-${id}`,
-            productId: id,
-            type: 'expired',
-            severity: 'critical',
-            title: 'Product Expired',
-            message: `${data.name} expired ${Math.abs(daysLeft)} days ago!`,
-            item: data,
-          });
-        } else if (daysLeft <= 30) {
-          list.push({
-            id: `expiry-vclose-${id}`,
-            productId: id,
-            type: 'expiring_very_soon',
-            severity: 'critical',
-            title: 'Expiring Very Soon',
-            message: `${data.name} is expiring in ${daysLeft} days!`,
-            item: data,
-          });
-        } else if (daysLeft <= 60) {
-          list.push({
-            id: `expiry-soon-${id}`,
-            productId: id,
-            type: 'expiring_soon',
-            severity: 'warning',
-            title: 'Expiring Soon',
-            message: `${data.name} is expiring in ${daysLeft} days.`,
-            item: data,
-          });
-        }
-      });
-
-      // Sort with critical issues at the top
-      list.sort((a, b) => {
-        if (a.severity === 'critical' && b.severity !== 'critical') return -1;
-        if (a.severity !== 'critical' && b.severity === 'critical') return 1;
-        return 0;
-      });
-
-      setNotifications(list);
-
-      // Track read status in localStorage
-      const readNotifs = JSON.parse(localStorage.getItem('pharma_read_notifications') || '[]');
-      const unreads = list.filter(n => !readNotifs.includes(n.id)).length;
-      setUnreadCount(unreads);
+    const unsubscribeStock = onSnapshot(stockQuery, snapshot => {
+      setStockAlertProducts(
+        snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Product))
+          .filter(product => product.recordStatus !== 'inactive')
+      );
     });
 
-    return () => unsubscribe();
+    const unsubscribeExpiry = onSnapshot(expiryQuery, snapshot => {
+      setExpiryAlertProducts(
+        snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Product))
+          .filter(product => product.recordStatus !== 'inactive')
+      );
+    });
+
+    return () => {
+      unsubscribeStock();
+      unsubscribeExpiry();
+    };
   }, [user?.tenantId]);
+
+  const notifications = useMemo<NotificationItem[]>(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const nextNotifications: NotificationItem[] = [];
+
+    stockAlertProducts.forEach(product => {
+      if (product.stockQuantity === 0) {
+        nextNotifications.push({
+          id: `stock-out-${product.id}`,
+          productId: product.id,
+          type: 'out_of_stock',
+          severity: 'critical',
+          title: 'Out of Stock',
+          message: `${product.name} is completely out of stock.`,
+          item: product,
+        });
+      } else if (product.stockQuantity <= 2) {
+        nextNotifications.push({
+          id: `stock-critical-${product.id}`,
+          productId: product.id,
+          type: 'critical_stock',
+          severity: 'critical',
+          title: 'Critical Stock Level',
+          message: `${product.name} has only ${product.stockQuantity} ${product.unit} left.`,
+          item: product,
+        });
+      } else if (product.stockQuantity <= product.minimumStock) {
+        nextNotifications.push({
+          id: `stock-low-${product.id}`,
+          productId: product.id,
+          type: 'low_stock',
+          severity: 'warning',
+          title: 'Low Stock Alert',
+          message: `${product.name} is below minimum level (${product.stockQuantity} left).`,
+          item: product,
+        });
+      }
+    });
+
+    expiryAlertProducts.forEach(product => {
+      const expiryDate = toJsDate(product.expiryDate);
+      expiryDate.setHours(0, 0, 0, 0);
+      const diffTime = expiryDate.getTime() - now.getTime();
+      const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (daysLeft < 0) {
+        nextNotifications.push({
+          id: `expiry-expired-${product.id}`,
+          productId: product.id,
+          type: 'expired',
+          severity: 'critical',
+          title: 'Product Expired',
+          message: `${product.name} expired ${Math.abs(daysLeft)} days ago.`,
+          item: product,
+        });
+      } else if (daysLeft <= 30) {
+        nextNotifications.push({
+          id: `expiry-vclose-${product.id}`,
+          productId: product.id,
+          type: 'expiring_very_soon',
+          severity: 'critical',
+          title: 'Expiring Very Soon',
+          message: `${product.name} is expiring in ${daysLeft} days.`,
+          item: product,
+        });
+      } else if (daysLeft <= 60) {
+        nextNotifications.push({
+          id: `expiry-soon-${product.id}`,
+          productId: product.id,
+          type: 'expiring_soon',
+          severity: 'warning',
+          title: 'Expiring Soon',
+          message: `${product.name} is expiring in ${daysLeft} days.`,
+          item: product,
+        });
+      }
+    });
+
+    return nextNotifications
+      .sort((left, right) => {
+        if (left.severity === right.severity) return left.title.localeCompare(right.title);
+        return left.severity === 'critical' ? -1 : 1;
+      })
+      .slice(0, 100);
+  }, [expiryAlertProducts, stockAlertProducts]);
+
+  useEffect(() => {
+    const readNotifs = JSON.parse(localStorage.getItem('pharma_read_notifications') || '[]') as string[];
+    setUnreadCount(notifications.filter(notification => !readNotifs.includes(notification.id)).length);
+  }, [notifications]);
 
   // Audio synthesizer beep for real alerts
   const playNotificationSound = () => {
@@ -298,7 +445,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
     setUnreadCount(0);
   };
 
-  const handleNotificationClick = (notif: any) => {
+  const handleNotificationClick = (notif: NotificationItem) => {
     // Mark specifically as read
     const readNotifs = JSON.parse(localStorage.getItem('pharma_read_notifications') || '[]');
     if (!readNotifs.includes(notif.id)) {
@@ -309,7 +456,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
 
     if (notif.type.includes('stock')) {
       navigate('/low-stock');
-    } else if (notif.type.includes('expiry')) {
+    } else if (notif.type === 'expired' || notif.type.includes('expiring')) {
       navigate('/expiry-alerts');
     }
     setNotifOpen(false);
@@ -327,30 +474,10 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
     localStorage.setItem('pharma_notif_email', String(nextVal));
   };
 
-  // Real-time clientside fuzzy filtering
-  const filteredProducts = searchQuery
-    ? products.filter(p => 
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        p.sku.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.brand && p.brand.toLowerCase().includes(searchQuery.toLowerCase()))
-      ).slice(0, 5)
-    : [];
-
-  const filteredInvoices = searchQuery
-    ? invoices.filter(i => 
-        i.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        i.customerName.toLowerCase().includes(searchQuery.toLowerCase())
-      ).slice(0, 5)
-    : [];
-
-  const filteredCustomers = searchQuery
-    ? customers.filter(c => 
-        c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        c.phone.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        (c.email && c.email.toLowerCase().includes(searchQuery.toLowerCase()))
-      ).slice(0, 5)
-    : [];
+  const filteredProducts = searchResults.products;
+  const filteredInvoices = searchResults.invoices;
+  const filteredCustomers = searchResults.customers;
+  const hasSearchResults = filteredProducts.length > 0 || filteredInvoices.length > 0 || filteredCustomers.length > 0;
 
   return (
     <>
@@ -659,6 +786,9 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
               exit={{ opacity: 0, scale: 0.95, y: -20 }}
               className="relative w-full max-w-2xl bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[70vh]"
               id="global-search-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="global-search-heading"
             >
               {/* Input Header */}
               <div className="flex items-center gap-3 px-4 py-4 border-b border-border bg-background">
@@ -668,9 +798,29 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                   placeholder="Type to search medicines, invoices, customers..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={event => {
+                    if (event.key !== 'Enter') return;
+                    const firstProduct = filteredProducts[0];
+                    const firstInvoice = filteredInvoices[0];
+                    const firstCustomer = filteredCustomers[0];
+                    if (firstProduct) {
+                      event.preventDefault();
+                      navigate(`/inventory?view=${firstProduct.id}`);
+                      setSearchOpen(false);
+                    } else if (firstInvoice) {
+                      event.preventDefault();
+                      navigate(`/invoice/${firstInvoice.id}`);
+                      setSearchOpen(false);
+                    } else if (firstCustomer) {
+                      event.preventDefault();
+                      navigate(`/customers/${firstCustomer.id}`);
+                      setSearchOpen(false);
+                    }
+                  }}
                   className="flex-1 bg-transparent border-0 outline-none text-text text-base placeholder-text/30"
                   autoFocus
                   id="global-search-input"
+                  aria-label="Global search across products, invoices, and customers"
                 />
                 <button 
                   onClick={() => setSearchOpen(false)}
@@ -686,22 +836,38 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                 {loadingSearch && (
                   <div className="flex flex-col items-center justify-center py-12 text-text/40" id="search-loading-spinner">
                     <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin mb-2" />
-                    <p className="text-sm font-medium">Loading search indexes...</p>
+                    <p className="text-sm font-medium">Searching tenant records...</p>
                   </div>
                 )}
 
                 {!loadingSearch && !searchQuery && (
                   <div className="text-center py-12 text-text/40" id="search-prompt-screen">
                     <Search className="h-10 w-10 mx-auto mb-3 opacity-30 text-primary animate-pulse" />
-                    <p className="text-sm font-semibold text-text">Search PharmaFlow</p>
-                    <p className="text-xs mt-1">Search for any medicine, invoice number, customer name, or phone number.</p>
-                    <p className="text-[11px] mt-4 font-mono text-primary/60 bg-primary/5 inline-block px-2 py-1 rounded border border-primary/10">Press Ctrl+K anytime to toggle search</p>
+                    <p id="global-search-heading" className="text-sm font-semibold text-text">Search PharmaFlow</p>
+                    <p className="text-xs mt-1">Search medicines, invoice numbers, customer names, SKU codes, barcodes, or phone numbers.</p>
+                    <p className="text-[11px] mt-4 font-mono text-primary/60 bg-primary/5 inline-block px-2 py-1 rounded border border-primary/10">Press Ctrl+K to open, Enter to open the first result, Esc to close</p>
                   </div>
                 )}
 
-                {!loadingSearch && searchQuery && 
-                 filteredProducts.length === 0 && 
-                 filteredInvoices.length === 0 && 
+                {!loadingSearch && searchQuery.trim().length > 0 && searchQuery.trim().length < 2 && (
+                  <div className="text-center py-12 text-text/40" id="search-min-length">
+                    <Search className="h-10 w-10 mx-auto mb-3 opacity-30 text-primary" />
+                    <p className="text-sm font-semibold text-text">Type at least 2 characters</p>
+                    <p className="text-xs mt-1">This search stays tenant-scoped and returns a small result set for speed.</p>
+                  </div>
+                )}
+
+                {!loadingSearch && searchError && (
+                  <div className="text-center py-12 text-danger" id="search-error">
+                    <AlertTriangle className="h-10 w-10 mx-auto mb-3 opacity-60" />
+                    <p className="text-sm font-semibold">{searchError}</p>
+                    <p className="text-xs mt-1 text-text/50">Retry by refining the query or reopening search.</p>
+                  </div>
+                )}
+
+                {!loadingSearch && searchQuery.trim().length >= 2 && !searchError &&
+                 filteredProducts.length === 0 &&
+                 filteredInvoices.length === 0 &&
                  filteredCustomers.length === 0 && (
                   <div className="text-center py-12 text-text/40" id="search-no-results">
                     <AlertTriangle className="h-10 w-10 mx-auto mb-3 opacity-30 text-warning" />
@@ -775,7 +941,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className="text-sm font-bold text-text">${i.grandTotal.toFixed(2)}</p>
+                            <p className="text-sm font-bold text-text">{formatCurrency(i.grandTotal)}</p>
                             <span className={cn(
                               "text-[10px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded",
                               i.paymentStatus === 'paid' 
@@ -817,7 +983,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
                           </div>
                           <div className="text-right">
                             <span className="text-xs text-text/60">
-                              Total spent: ${c.totalPurchases.toFixed(2)}
+                              Total spent: {formatCurrency(c.totalPurchases)}
                             </span>
                           </div>
                         </button>
