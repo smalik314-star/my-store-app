@@ -29,7 +29,8 @@ import { useToast } from '../../context/ToastContext';
 import { Button } from '../common/Button';
 import { transitions } from '../../utils/animations';
 import { Logo } from '../common/Logo';
-import type { UserRole } from '../../types';
+import type { BusinessMode, UserRole } from '../../types';
+import { useBusinessMode } from '../../context/BusinessModeContext';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -46,7 +47,7 @@ interface MenuItem {
   roles?: UserRole[];
 }
 
-const menuSections: Array<{ title: string; items: MenuItem[] }> = [
+const getMenuSections = (mode: BusinessMode): Array<{ title: string; items: MenuItem[] }> => [
   {
     title: 'Workspace',
     items: [
@@ -54,11 +55,16 @@ const menuSections: Array<{ title: string; items: MenuItem[] }> = [
     ]
   },
   {
-    title: 'Sales',
+    title: mode === 'wholesale' ? 'Wholesale Sales' : mode === 'hybrid' ? 'Retail & Wholesale Sales' : 'Retail Sales',
     items: [
-      { icon: Plus, label: 'New Sale / Billing', path: '/billing', active: true },
+      ...(mode !== 'wholesale'
+        ? [{ icon: Plus, label: 'Retail Billing', path: '/billing/retail', active: true }]
+        : []),
+      ...(mode !== 'retail'
+        ? [{ icon: Truck, label: 'Wholesale Billing', path: '/billing/wholesale', active: true }]
+        : []),
       { icon: ReceiptText, label: 'Sales Invoices', path: '/invoices', active: true },
-      { icon: Users, label: 'Customers', path: '/customers', active: true },
+      { icon: Users, label: mode === 'retail' ? 'Customers' : 'Customers / Business Parties', path: '/customers', active: true },
     ]
   },
   {
@@ -101,6 +107,9 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
   const navigate = useNavigate();
   const location = useLocation();
   const shouldReduceMotion = useReducedMotion();
+  const { mode } = useBusinessMode();
+  const modeLabel = mode === 'hybrid' ? 'Retail + Wholesale' : mode === 'wholesale' ? 'Wholesale' : 'Retail';
+  const menuSections = getMenuSections(mode);
 
   const handleLogout = async () => {
     await logout();
@@ -194,12 +203,12 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
               <button
                 type="button"
                 onClick={() => {
-                  navigate('/billing');
+                  navigate(mode === 'wholesale' ? '/billing/wholesale' : '/billing/retail');
                   if (isMobile && onCloseMobile) onCloseMobile();
                 }}
                 className="h-10 rounded-lg bg-secondary text-white text-[10px] font-black uppercase tracking-wider hover:bg-secondary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
               >
-                + New Sale
+                {mode === 'wholesale' ? '+ Wholesale Bill' : '+ Retail Bill'}
               </button>
               <button
                 type="button"
@@ -217,6 +226,12 @@ export function Sidebar({ isOpen, setIsOpen, isMobile, onCloseMobile }: SidebarP
 
         {/* Navigation Menu */}
         <nav role="navigation" aria-label="Main Navigation" className="flex-1 py-3 overflow-y-auto min-w-[260px] custom-scrollbar space-y-3">
+          {isOpen && (
+            <div className="mx-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+              <p className="text-[9px] font-black uppercase tracking-[1.6px] text-white/35">Business Workspace</p>
+              <p className="mt-0.5 text-xs font-black text-secondary">{modeLabel}</p>
+            </div>
+          )}
           {menuSections.map((section, sectionIdx) => (
             <div key={section.title} className="space-y-1">
               {isOpen ? (

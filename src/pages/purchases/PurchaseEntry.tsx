@@ -5,6 +5,7 @@ import { productService } from '../../services/productService';
 import { Supplier, Product } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
+import { RequiredMark } from '../../components/common/RequiredMark';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { PageTransition } from '../../components/common/PageTransition';
@@ -92,6 +93,7 @@ export default function PurchaseEntry() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
   const productInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const batchInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -374,18 +376,27 @@ export default function PurchaseEntry() {
 
   // Final Form Save Handler
   const handleSavePurchase = async (saveAndAddAnother = false) => {
+    setValidationError(null);
+    const failValidation = (message: string, target?: HTMLElement | null) => {
+      setValidationError(message);
+      showToast(message, 'danger');
+      requestAnimationFrame(() => {
+        document.getElementById('purchase-validation-error')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target?.focus();
+      });
+    };
     if (!user?.tenantId) return;
     if (saveInProgressRef.current) return;
     if (!selectedSupplierId) {
-      showToast('Please select a Supplier', 'warning');
+      failValidation('Please select a Supplier');
       return;
     }
     if (!invoiceNumber.trim()) {
-      showToast('Supplier Invoice Number is mandatory', 'warning');
+      failValidation('Supplier Invoice Number is mandatory');
       return;
     }
     if (!invoiceDate) {
-      showToast('Invoice Date is mandatory', 'warning');
+      failValidation('Invoice Date is mandatory');
       return;
     }
 
@@ -396,51 +407,51 @@ export default function PurchaseEntry() {
       const rowNum = i + 1;
 
       if (!item.productId) {
-        showToast(`Please select a valid product for row #${rowNum}`, 'warning');
+        failValidation(`Please select a valid product for row #${rowNum}`, productInputRefs.current[item.id]);
         return;
       }
       if (!item.productName.trim()) {
-        showToast(`Product Name is required for row #${rowNum}`, 'warning');
+        failValidation(`Product Name is required for row #${rowNum}`, productInputRefs.current[item.id]);
         return;
       }
       if (!item.brand.trim()) {
-        showToast(`Brand Name is required for row #${rowNum}`, 'warning');
+        failValidation(`Brand Name is required for row #${rowNum}`);
+        return;
+      }
+      if (!item.manufacturer.trim()) {
+        failValidation(`Manufacturer is required for row #${rowNum}`);
         return;
       }
       if (!item.batchNumber.trim()) {
-        showToast(`Batch Number is required for row #${rowNum}`, 'warning');
+        failValidation(`Batch Number is required for row #${rowNum}`, batchInputRefs.current[item.id]);
         return;
       }
       if (!item.mfgMonth || !item.mfgYear) {
-        showToast(`Manufacturing Date is required for row #${rowNum}`, 'warning');
+        failValidation(`Manufacturing Date is required for row #${rowNum}`);
         return;
       }
       if (!item.expMonth || !item.expYear) {
-        showToast(`Expiry Date is required for row #${rowNum}`, 'warning');
+        failValidation(`Expiry Date is required for row #${rowNum}`);
         return;
       }
       if (item.quantity <= 0) {
-        showToast(`Quantity must be greater than 0 for row #${rowNum}`, 'warning');
+        failValidation(`Quantity must be greater than 0 for row #${rowNum}`);
         return;
       }
       if (!Number.isFinite(item.purchasePrice) || item.purchasePrice <= 0) {
-        showToast(`Purchase Price must be greater than ₹0 for row #${rowNum}`, 'warning');
+        failValidation(`Purchase Price must be greater than ₹0 for row #${rowNum}`);
         return;
       }
       if (!Number.isFinite(item.salePrice) || item.salePrice <= 0) {
-        showToast(`Sale Price must be greater than ₹0 for row #${rowNum}`, 'warning');
-        return;
-      }
-      if (item.salePrice < item.purchasePrice) {
-        showToast(`Sale Price cannot be less than Purchase Price for row #${rowNum}`, 'warning');
+        failValidation(`Sale Price must be greater than ₹0 for row #${rowNum}`);
         return;
       }
       if (![0, 5, 12, 18, 28].includes(item.gstPercentage)) {
-        showToast(`Select a supported GST rate for row #${rowNum}`, 'warning');
+        failValidation(`Select a supported GST rate for row #${rowNum}`);
         return;
       }
       if (item.discount < 0 || item.discount > 100) {
-        showToast(`Discount must be between 0% and 100% for row #${rowNum}`, 'warning');
+        failValidation(`Discount must be between 0% and 100% for row #${rowNum}`);
         return;
       }
 
@@ -449,7 +460,7 @@ export default function PurchaseEntry() {
       const expDateObj = new Date(parseInt(item.expYear), parseInt(item.expMonth), 0, 23, 59, 59, 999);
 
       if (expDateObj.getTime() <= mfgDateObj.getTime()) {
-        showToast(`Expiry Date must be after MFG Date for row #${rowNum}`, 'warning');
+        failValidation(`Expiry Date must be after MFG Date for row #${rowNum}`);
         return;
       }
 
@@ -562,6 +573,17 @@ export default function PurchaseEntry() {
           </div>
         </div>
 
+        {validationError && (
+          <div
+            id="purchase-validation-error"
+            role="alert"
+            aria-live="assertive"
+            className="rounded-2xl border-2 border-red-500 bg-red-50 px-4 py-3 text-sm font-black text-red-700 shadow-sm"
+          >
+            Required information missing: {validationError}
+          </div>
+        )}
+
         {/* Master Row: Supplier and Invoice */}
         <Card className="p-4 md:p-6 border border-border rounded-2xl md:rounded-3xl bg-surface shadow-sm">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4 border-b border-border pb-3">
@@ -583,7 +605,7 @@ export default function PurchaseEntry() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* Supplier select */}
             <div>
-              <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Select Supplier *</label>
+              <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Select Supplier <RequiredMark /></label>
               <select
                 value={selectedSupplierId}
                 onChange={(e) => setSelectedSupplierId(e.target.value)}
@@ -598,7 +620,7 @@ export default function PurchaseEntry() {
 
             {/* Supplier invoice # */}
             <div>
-              <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Supplier Invoice # *</label>
+              <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Supplier Invoice # <RequiredMark /></label>
               <input
                 type="text"
                 placeholder="e.g. INV-1002"
@@ -610,7 +632,7 @@ export default function PurchaseEntry() {
 
             {/* Invoice Date */}
             <div>
-              <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Invoice Date *</label>
+              <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Invoice Date <RequiredMark /></label>
               <input
                 type="date"
                 value={invoiceDate}
@@ -655,7 +677,7 @@ export default function PurchaseEntry() {
                 >
                   {/* Product Search (4 cols) */}
                   <div className="md:col-span-3 relative">
-                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Product Selection *</label>
+                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Product Selection <RequiredMark /></label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text/40" />
                       <input
@@ -740,7 +762,7 @@ export default function PurchaseEntry() {
 
                   {/* Batch Number (1.5 cols) */}
                   <div className="md:col-span-1">
-                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Batch # *</label>
+                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Batch # <RequiredMark /></label>
                     <input
                       ref={(element) => { batchInputRefs.current[item.id] = element; }}
                       type="text"
@@ -754,7 +776,7 @@ export default function PurchaseEntry() {
 
                   {/* MFG Month/Year (2 cols) */}
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-text/70 uppercase mb-2">Mfg (M/Y) *</label>
+                    <label className="block text-xs font-bold text-text/70 uppercase mb-2">Mfg (M/Y) <RequiredMark /></label>
                     <div className="flex gap-1">
                       <select
                         value={item.mfgMonth}
@@ -787,7 +809,7 @@ export default function PurchaseEntry() {
 
                   {/* EXP Month/Year (2 cols) */}
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-text/70 uppercase mb-2">Exp (M/Y) *</label>
+                    <label className="block text-xs font-bold text-text/70 uppercase mb-2">Exp (M/Y) <RequiredMark /></label>
                     <div className="flex gap-1">
                       <select
                         value={item.expMonth}
@@ -820,7 +842,7 @@ export default function PurchaseEntry() {
 
                   {/* Quantity (1 col) */}
                   <div className="md:col-span-1">
-                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Quantity *</label>
+                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Quantity <RequiredMark /></label>
                     <input
                       type="number"
                       placeholder="0"
@@ -832,7 +854,7 @@ export default function PurchaseEntry() {
 
                   {/* Purchase Price (1.25 cols) */}
                   <div className="md:col-span-1">
-                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Buy Price *</label>
+                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Buy Price <RequiredMark /></label>
                     <input
                       type="number"
                       placeholder="0.00"
@@ -847,7 +869,7 @@ export default function PurchaseEntry() {
 
                   {/* Sale Price (1.25 cols) */}
                   <div className="md:col-span-1">
-                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Sale Price *</label>
+                    <label className="block text-xs font-bold text-text/50 uppercase mb-2">Sale Price <RequiredMark /></label>
                     <input
                       type="number"
                       placeholder="0.00"
@@ -877,12 +899,12 @@ export default function PurchaseEntry() {
 
                   <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-7 gap-3 pt-3 border-t border-border/70">
                     <div>
-                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand *</label>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand <RequiredMark /></label>
                       <input value={item.brand} onChange={(e) => handleItemFieldChange(idx, 'brand', e.target.value)} placeholder="Enter brand" required className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Manufacturer</label>
-                      <input value={item.manufacturer} onChange={(e) => handleItemFieldChange(idx, 'manufacturer', e.target.value)} placeholder="Enter manufacturer" className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Manufacturer <RequiredMark /></label>
+                      <input value={item.manufacturer} onChange={(e) => handleItemFieldChange(idx, 'manufacturer', e.target.value)} placeholder="Enter manufacturer" required className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">MRP (Optional)</label>
@@ -976,7 +998,7 @@ export default function PurchaseEntry() {
 
               <form onSubmit={handleAddSupplier} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-1.5">Supplier Name *</label>
+                  <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-1.5">Supplier Name <RequiredMark /></label>
                   <input
                     type="text"
                     required

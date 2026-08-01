@@ -35,7 +35,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { invoiceService } from '../../services/invoiceService';
 import { customerService } from '../../services/customerService';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { useToast } from '../../context/ToastContext';
@@ -47,6 +47,9 @@ import { getFefoAvailableBatch, getValidBatchQuantity } from '../../utils/stock'
 import { calculateLossSale } from '../../utils/pricing';
 import { useMedicineSuggestions } from '../../hooks/useMedicineSuggestions';
 import type { MasterMedicine } from '../../services/medicineMasterService';
+import { useBusinessMode } from '../../context/BusinessModeContext';
+import { supportsRetail, supportsWholesale } from '../../utils/businessMode';
+import { getSaleConversionFactor, resolveSalePrice, type SaleUnit } from '../../utils/wholesale';
 
 type BillingSuggestion =
   | { type: 'inventory'; product: Product }
@@ -76,9 +79,16 @@ const EMPTY_BILL_ROW: InvoiceItem = {
 
 export default function Billing() {
   const { user } = useAuth();
+  const { mode } = useBusinessMode();
   const { settings } = useSettings();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeSaleMode = location.pathname.endsWith('/wholesale')
+    ? 'wholesale'
+    : location.pathname.endsWith('/retail')
+      ? 'retail'
+      : null;
 
   // Primary POS States
   const [loading, setLoading] = useState(false);
@@ -87,6 +97,29 @@ export default function Billing() {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<Invoice[]>([]);
+  const [saleMode, setSaleMode] = useState<'retail' | 'wholesale'>(
+    routeSaleMode || (mode === 'wholesale' ? 'wholesale' : 'retail')
+  );
+
+  useEffect(() => {
+    if (routeSaleMode === 'wholesale' && !supportsWholesale(mode)) {
+      navigate('/billing/retail', { replace: true });
+      return;
+    }
+    if (routeSaleMode === 'retail' && !supportsRetail(mode)) {
+      navigate('/billing/wholesale', { replace: true });
+      return;
+    }
+    if (routeSaleMode === 'wholesale' && supportsWholesale(mode)) {
+      setSaleMode('wholesale');
+      return;
+    }
+    if (routeSaleMode === 'retail' && supportsRetail(mode)) {
+      setSaleMode('retail');
+      return;
+    }
+    setSaleMode(mode === 'wholesale' ? 'wholesale' : 'retail');
+  }, [mode, navigate, routeSaleMode]);
   
   // Selection states
   const [selectedCustomer, setSelectedCustomer] = useState<Customer>(WALK_IN_CUSTOMER);
@@ -219,8 +252,29 @@ export default function Billing() {
     ).slice(0, 5);
   }, [customers, customerSearch]);
 
+  const changeSaleMode = (nextMode: 'retail' | 'wholesale') => {
+    navigate(`/billing/${nextMode}`, { replace: true });
+    setSaleMode(nextMode);
+    setCart(current => current.map(item => {
+      const product = products.find(candidate => candidate.id === item.productId);
+      if (!product) return item;
+      const price = resolveSalePrice(product, nextMode, selectedCustomer);
+      const gstRate = settings?.taxMode ? product.gstPercentage : 0;
+      const lineTax = calculateLineTax({ quantity: item.quantity, rate: price, gstRate });
+      return {
+        ...item,
+        price,
+        gst: roundMoney(lineTax.tax / item.quantity),
+        total: lineTax.total,
+      };
+    }));
+  };
+
   const selectCustomer = (customer: Customer) => {
     setSelectedCustomer(customer);
+    if (mode === 'hybrid' && customer.pricingTier === 'wholesale') {
+      setSaleMode('wholesale');
+    }
     setCustomerSearch('');
     setShowCustomerDropdown(false);
     setCustomerActiveIndex(-1);
@@ -272,6 +326,7 @@ export default function Billing() {
         name: newCustName.trim(),
         phone: normalizedPhone,
         address: 'Counter Sale',
+        pricingTier: saleMode === 'wholesale' ? 'wholesale' : 'retail',
         outstandingBalance: 0,
         totalPurchases: 0,
         totalPaid: 0,
@@ -283,6 +338,7 @@ export default function Billing() {
         name: newCustName.trim(),
         phone: normalizedPhone,
         address: 'Counter Sale',
+        pricingTier: saleMode === 'wholesale' ? 'wholesale' : 'retail',
         outstandingBalance: 0,
         totalPurchases: 0,
         totalPaid: 0,
@@ -365,7 +421,8 @@ export default function Billing() {
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
         const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
-        const gstAmount = calculateLineTax({ quantity: 1, rate: product.sellingPrice, gstRate: effectiveGstRate }).tax;
+        const salePrice = resolveSalePrice(product, saleMode, selectedCustomer);
+        const gstAmount = calculateLineTax({ quantity: 1, rate: salePrice, gstRate: effectiveGstRate }).tax;
         return {
           productId: product.id,
           name: product.name,
@@ -374,9 +431,12 @@ export default function Billing() {
           expiryDate: fefoBatch?.expiryDate || product.expiryDate || null,
           manufacturingDate: fefoBatch?.mfgDate || product.manufacturingDate || null,
           quantity: 1,
-          price: product.sellingPrice,
+          saleQuantity: 1,
+          saleUnit: 'unit',
+          conversionFactor: 1,
+          price: salePrice,
           gst: gstAmount,
-          total: addMoney(product.sellingPrice, gstAmount)
+          total: addMoney(salePrice, gstAmount)
         };
       }
       return item;
@@ -462,6 +522,7 @@ export default function Billing() {
     setPaymentMethod('cash');
     setAmountReceived('');
     setCustomInvoiceDate(new Date().toISOString().split('T')[0]);
+    if (mode === 'hybrid') setSaleMode('retail');
     setFocusedRowIndex(null);
     window.setTimeout(() => customerInputRef.current?.focus(), 0);
   };
@@ -479,7 +540,8 @@ export default function Billing() {
       paymentStatus,
       paymentMethod,
       amountReceived,
-      customInvoiceDate
+      customInvoiceDate,
+      saleMode,
     }));
     setHasHeldBill(true);
     resetBill();
@@ -501,6 +563,12 @@ export default function Billing() {
       setPaymentMethod(heldBill.paymentMethod || 'cash');
       setAmountReceived(heldBill.amountReceived || '');
       setCustomInvoiceDate(heldBill.customInvoiceDate || new Date().toISOString().split('T')[0]);
+      if (
+        heldBill.saleMode === 'wholesale' && supportsWholesale(mode)
+        || heldBill.saleMode === 'retail' && supportsRetail(mode)
+      ) {
+        setSaleMode(heldBill.saleMode);
+      }
       sessionStorage.removeItem('pharmaflow-held-bill');
       setHasHeldBill(false);
       showToast('Held bill restored.', 'success');
@@ -575,6 +643,24 @@ export default function Billing() {
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
         const updated = { ...item, [field]: value };
+        const matchedProd = products.find(p => p.id === item.productId);
+
+        if ((field === 'saleQuantity' || field === 'saleUnit') && matchedProd) {
+          const saleUnit = (field === 'saleUnit' ? value : item.saleUnit || 'unit') as SaleUnit;
+          const saleQuantity = Math.max(
+            1,
+            Math.floor(Number(field === 'saleQuantity' ? value : item.saleQuantity || 1))
+          );
+          const conversionFactor = getSaleConversionFactor(matchedProd, saleUnit);
+          const quantity = saleQuantity * conversionFactor;
+          const gstRate = settings?.taxMode ? matchedProd.gstPercentage : 0;
+          updated.saleUnit = saleUnit;
+          updated.saleQuantity = saleQuantity;
+          updated.conversionFactor = conversionFactor;
+          updated.quantity = quantity;
+          updated.total = calculateLineTax({ quantity, rate: item.price, gstRate }).total;
+          return updated;
+        }
         
         // Recalculate calculations live if rates/quantities edit
         if (field === 'price' || field === 'quantity' || field === 'name') {
@@ -582,7 +668,6 @@ export default function Billing() {
           const rate = field === 'price' ? Math.max(0, Number(value)) : item.price;
           
           // Use product's gst if product was resolved
-          const matchedProd = products.find(p => p.id === item.productId);
           const gstRate = matchedProd ? matchedProd.gstPercentage : 0;
           const effectiveGstRate = settings?.taxMode ? gstRate : 0;
           const gstAmount = calculateLineTax({ quantity: 1, rate, gstRate: effectiveGstRate }).tax;
@@ -606,6 +691,10 @@ export default function Billing() {
     // Validate requirements
     if (selectedCustomer.id === 'walk-in' && paymentStatus !== 'paid') {
       showToast('Walk-in Customers must pay fully (Status: Paid). Choose or register a customer for Credit.', 'danger');
+      return;
+    }
+    if (saleMode === 'wholesale' && selectedCustomer.id === 'walk-in') {
+      showToast('Select a registered customer for a wholesale/B2B invoice.', 'danger');
       return;
     }
 
@@ -643,6 +732,8 @@ export default function Billing() {
         requestId: invoiceRequestIdRef.current,
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.name,
+        customerGstNumber: selectedCustomer.gstNumber || '',
+        saleMode,
         items: validItems,
         subtotal: addMoney(...validItems.map(item => roundMoney(item.price * item.quantity))),
         gstTotal: addMoney(...validItems.map(item => roundMoney(item.gst * item.quantity))),
@@ -789,6 +880,26 @@ _Powered by PharmaFlow_`;
           </div>
 
           <div className="border-t border-border bg-background/40 px-4 py-2.5 flex flex-wrap items-center gap-2">
+            {supportsRetail(mode) && supportsWholesale(mode) && (
+              <div className="flex rounded-lg border border-border bg-surface p-0.5">
+                {(['retail', 'wholesale'] as const).map(option => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => changeSaleMode(option)}
+                    className={cn(
+                      'h-7 rounded-md px-3 text-[10px] font-black uppercase transition-colors',
+                      saleMode === option ? 'bg-primary text-white' : 'text-text/50 hover:text-primary'
+                    )}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Badge variant={saleMode === 'wholesale' ? 'warning' : 'success'} className="text-[9px] font-black uppercase">
+              {saleMode === 'wholesale' ? 'B2B Wholesale Invoice' : 'Retail Invoice'}
+            </Badge>
             <button type="button" onClick={resetBill} className="h-8 px-3 rounded-lg border border-border bg-surface text-[10px] font-black text-text/60 hover:text-primary hover:border-primary/30 flex items-center gap-1.5 transition-colors [&_kbd]:text-[8px] [&_kbd]:text-text/30">
               <RotateCcw className="h-3.5 w-3.5" /> New Bill <kbd>Alt+N</kbd>
             </button>
@@ -1063,7 +1174,7 @@ _Powered by PharmaFlow_`;
                     <tr className="bg-background/40 border-b border-border">
                       <th className="px-4 py-3 text-left text-[10px] font-black text-text/40 uppercase tracking-widest w-12 text-center">#</th>
                       <th className="px-4 py-3 text-left text-[10px] font-black text-text/40 uppercase tracking-widest min-w-[200px]">Medicine / Item Name</th>
-                      <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-28">Quantity</th>
+                      <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-40">Quantity / Pack</th>
                       <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Rate (₹)</th>
                       <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Amount (₹)</th>
                       <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-12"></th>
@@ -1163,7 +1274,9 @@ _Powered by PharmaFlow_`;
                                       <div className="text-right">
                                         {isInventory ? (
                                           <>
-                                            <p className="text-xs font-black text-primary">₹{suggestion.product.sellingPrice}</p>
+                                            <p className="text-xs font-black text-primary">
+                                              ₹{resolveSalePrice(suggestion.product, saleMode, selectedCustomer)}
+                                            </p>
                                             <p className={cn(
                                               "text-[9px] font-bold uppercase",
                                               suggestion.product.stockQuantity <= 5 ? "text-danger" : "text-success"
@@ -1184,10 +1297,16 @@ _Powered by PharmaFlow_`;
 
                           {/* Quantity Cell */}
                           <td className="px-4 py-3.5 text-center">
-                            <div className="flex items-center justify-center gap-1 bg-background/50 rounded-lg p-0.5 border border-border w-24 mx-auto">
+                            <div className="flex items-center justify-center gap-1 bg-background/50 rounded-lg p-0.5 border border-border w-max mx-auto">
                               <button
                                 type="button"
-                                onClick={() => handleRowInputChange(index, 'quantity', Math.max(1, item.quantity - 1))}
+                                onClick={() => handleRowInputChange(
+                                  index,
+                                  saleMode === 'wholesale' ? 'saleQuantity' : 'quantity',
+                                  Math.max(1, saleMode === 'wholesale'
+                                    ? Number(item.saleQuantity || 1) - 1
+                                    : item.quantity - 1)
+                                )}
                                 className="h-6 w-6 rounded flex items-center justify-center text-xs text-text/60 hover:bg-background font-black"
                               >
                                 -
@@ -1196,8 +1315,12 @@ _Powered by PharmaFlow_`;
                                 data-billing-quantity={index}
                                 type="number"
                                 min={1}
-                                value={item.quantity}
-                                onChange={(e) => handleRowInputChange(index, 'quantity', e.target.value)}
+                                value={saleMode === 'wholesale' ? item.saleQuantity || 1 : item.quantity}
+                                onChange={(e) => handleRowInputChange(
+                                  index,
+                                  saleMode === 'wholesale' ? 'saleQuantity' : 'quantity',
+                                  e.target.value
+                                )}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     e.preventDefault();
@@ -1208,12 +1331,35 @@ _Powered by PharmaFlow_`;
                               />
                               <button
                                 type="button"
-                                onClick={() => handleRowInputChange(index, 'quantity', item.quantity + 1)}
+                                onClick={() => handleRowInputChange(
+                                  index,
+                                  saleMode === 'wholesale' ? 'saleQuantity' : 'quantity',
+                                  saleMode === 'wholesale'
+                                    ? Number(item.saleQuantity || 1) + 1
+                                    : item.quantity + 1
+                                )}
                                 className="h-6 w-6 rounded flex items-center justify-center text-xs text-text/60 hover:bg-background font-black"
                               >
                                 +
                               </button>
+                              {saleMode === 'wholesale' && selectedProduct && (
+                                <select
+                                  value={item.saleUnit || 'unit'}
+                                  onChange={event => handleRowInputChange(index, 'saleUnit', event.target.value)}
+                                  className="h-7 rounded-md border-0 bg-surface px-1 text-[9px] font-black uppercase outline-none"
+                                  aria-label={`Sale unit for ${item.name}`}
+                                >
+                                  <option value="unit">{selectedProduct.unit || 'Unit'}</option>
+                                  {(selectedProduct.unitsPerPack || 1) > 1 && <option value="pack">Pack</option>}
+                                  {(selectedProduct.packsPerCase || 1) > 1 && <option value="case">Case</option>}
+                                </select>
+                              )}
                             </div>
+                            {saleMode === 'wholesale' && item.quantity > 1 && (
+                              <p className="mt-1 text-[8px] font-bold text-text/35">
+                                Deducts {item.quantity} base units
+                              </p>
+                            )}
                           </td>
 
                           {/* Rate Cell */}

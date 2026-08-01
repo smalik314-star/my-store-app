@@ -22,6 +22,7 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
     email: editingCustomer?.email || '',
     address: editingCustomer?.address || '',
     gstNumber: editingCustomer?.gstNumber || '',
+    pricingTier: editingCustomer?.pricingTier || 'retail' as 'retail' | 'wholesale',
     outstandingBalance: editingCustomer?.outstandingBalance || 0,
     totalPurchases: editingCustomer?.totalPurchases || 0,
     totalPaid: editingCustomer?.totalPaid || 0,
@@ -61,6 +62,7 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
             email: '',
             address: '',
             gstNumber: '',
+            pricingTier: 'retail',
             outstandingBalance: 0,
             totalPurchases: 0,
             totalPaid: 0,
@@ -185,6 +187,24 @@ export default function CustomerForm({ onClose, editingCustomer }: CustomerFormP
                     placeholder="22AAAAA0000A1Z5"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-text/40 uppercase tracking-widest ml-1">Pricing Tier</label>
+                <select
+                  value={formData.pricingTier}
+                  onChange={(event) => setFormData({
+                    ...formData,
+                    pricingTier: event.target.value as 'retail' | 'wholesale',
+                  })}
+                  className="w-full px-4 py-3.5 rounded-2xl border border-border bg-background focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all outline-none text-sm font-bold"
+                >
+                  <option value="retail">Retail pricing</option>
+                  <option value="wholesale">Wholesale pricing</option>
+                </select>
+                <p className="text-[10px] font-semibold text-text/35">
+                  Wholesale customers automatically receive the saved wholesale product rate.
+                </p>
               </div>
             </div>
 

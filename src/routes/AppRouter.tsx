@@ -4,6 +4,7 @@ import { ProtectedRoute } from './ProtectedRoute';
 import MainLayout from '../layouts/MainLayout';
 import { useAuth } from '../context/AuthContext';
 import { SkeletonPage } from '../components/common/Skeleton';
+import { BusinessModeGate } from './BusinessModeGate';
 
 // Lazy load pages
 const Dashboard = lazy(() => import('../pages/dashboard/Dashboard'));
@@ -27,6 +28,7 @@ const PurchaseReturns = lazy(() => import('../pages/returns/PurchaseReturns'));
 const SupplierPayments = lazy(() => import('../pages/accounting/SupplierPayments'));
 const Login = lazy(() => import('../pages/auth/Login'));
 const NotFound = lazy(() => import('../pages/NotFound'));
+const BusinessModeSetup = lazy(() => import('../pages/onboarding/BusinessModeSetup'));
 
 // Purchases pages
 const Purchases = lazy(() => import('../pages/purchases/Purchases'));
@@ -49,33 +51,38 @@ export function AppRouter() {
           {/* Dedicated Print Route (No Layout) */}
           <Route element={<ProtectedRoute />}>
             <Route path="/invoice/:id/print" element={<PrintInvoice />} />
+            <Route path="/business-setup" element={<BusinessModeSetup />} />
           </Route>
 
           {/* Protected Routes with Main Layout */}
           <Route element={<ProtectedRoute />}>
-            <Route element={<MainLayout />}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/inventory" element={<Inventory />} />
-              <Route path="/expiry-alerts" element={<ExpiryAlerts />} />
-              <Route path="/low-stock" element={<LowStock />} />
-              <Route path="/stock-adjustment" element={<StockAdjustment />} />
-              <Route path="/customers" element={<Customers />} />
-              <Route path="/customers/:id" element={<CustomerProfile />} />
-              <Route path="/billing" element={<Billing />} />
-              <Route path="/invoices" element={<InvoiceList />} />
-              <Route path="/invoice/:id" element={<InvoiceDetail />} />
-              <Route path="/purchases" element={<Purchases />} />
-              <Route path="/purchases/new" element={<PurchaseEntry />} />
-              <Route path="/purchases/:id" element={<PurchaseDetail />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/subscription" element={<Subscription />} />
-              <Route path="/users" element={<UserManagement />} />
-              <Route path="/receipts" element={<Receipts />} />
-              <Route path="/sale-returns" element={<SaleReturns />} />
-              <Route path="/purchase-returns" element={<PurchaseReturns />} />
-              <Route path="/supplier-payments" element={<SupplierPayments />} />
+            <Route element={<BusinessModeGate />}>
+              <Route element={<MainLayout />}>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/inventory" element={<Inventory />} />
+                <Route path="/expiry-alerts" element={<ExpiryAlerts />} />
+                <Route path="/low-stock" element={<LowStock />} />
+                <Route path="/stock-adjustment" element={<StockAdjustment />} />
+                <Route path="/customers" element={<Customers />} />
+                <Route path="/customers/:id" element={<CustomerProfile />} />
+                <Route path="/billing" element={<Billing />} />
+                <Route path="/billing/retail" element={<Billing />} />
+                <Route path="/billing/wholesale" element={<Billing />} />
+                <Route path="/invoices" element={<InvoiceList />} />
+                <Route path="/invoice/:id" element={<InvoiceDetail />} />
+                <Route path="/purchases" element={<Purchases />} />
+                <Route path="/purchases/new" element={<PurchaseEntry />} />
+                <Route path="/purchases/:id" element={<PurchaseDetail />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/subscription" element={<Subscription />} />
+                <Route path="/users" element={<UserManagement />} />
+                <Route path="/receipts" element={<Receipts />} />
+                <Route path="/sale-returns" element={<SaleReturns />} />
+                <Route path="/purchase-returns" element={<PurchaseReturns />} />
+                <Route path="/supplier-payments" element={<SupplierPayments />} />
+              </Route>
             </Route>
           </Route>
 

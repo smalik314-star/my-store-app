@@ -3,6 +3,7 @@ import { collection, query, onSnapshot, orderBy, where, limit, Timestamp } from 
 import { db } from '../../firebase/config';
 import { Invoice, Product, Customer, Purchase, SaleReturnRecord } from '../../types';
 import { Card } from '../../components/common/Card';
+import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { useAuth } from '../../context/AuthContext';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
@@ -196,6 +197,10 @@ export default function Reports() {
     let totalProfit = 0;
     let totalGst = 0;
     let pendingDues = 0;
+    let retailRevenue = 0;
+    let wholesaleRevenue = 0;
+    let retailInvoices = 0;
+    let wholesaleInvoices = 0;
     
     const productPerformance: Record<string, { name: string; quantity: number; revenue: number; profit: number }> = {};
     const customerPerformance: Record<string, { name: string; revenue: number; dues: number; visitCount: number }> = {};
@@ -203,6 +208,13 @@ export default function Reports() {
     filteredInvoices.forEach(inv => {
       totalRevenue += inv.grandTotal;
       totalGst += inv.gstTotal;
+      if (inv.saleMode === 'wholesale') {
+        wholesaleRevenue += inv.grandTotal;
+        wholesaleInvoices += 1;
+      } else {
+        retailRevenue += inv.grandTotal;
+        retailInvoices += 1;
+      }
       
       const exactDue = inv.paymentStatus === 'paid' ? 0 :
         Number.isFinite(inv.outstandingAmount) ? Math.max(0, Number(inv.outstandingAmount)) :
@@ -279,6 +291,10 @@ export default function Reports() {
       totalSales: filteredInvoices.length,
       avgInvoiceValue: filteredInvoices.length > 0 ? totalRevenue / filteredInvoices.length : 0,
       pendingDues,
+      retailRevenue: roundMoney(retailRevenue),
+      wholesaleRevenue: roundMoney(wholesaleRevenue),
+      retailInvoices,
+      wholesaleInvoices,
       totalPurchases: filteredPurchases.reduce((sum, purchase) => sum + (Number(purchase.totalAmount) || 0), 0),
       topProducts,
       topProfitProducts,
@@ -320,7 +336,7 @@ export default function Reports() {
   const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6'];
 
   const handleExportCSV = () => {
-    const headers = ['Date', 'Invoice No', 'Customer', 'Total Amount', 'GST', 'Profit', 'Status'];
+    const headers = ['Date', 'Invoice No', 'Sale Type', 'Customer', 'GSTIN', 'Total Amount', 'GST', 'Profit', 'Status'];
     const rows = filteredInvoices.map(inv => {
       let profit = 0;
       inv.items.forEach(item => {
@@ -331,7 +347,9 @@ export default function Reports() {
       return [
         format(toJsDate(inv.createdAt), 'yyyy-MM-dd HH:mm'),
         inv.invoiceNumber,
+        inv.saleMode || 'retail',
         inv.customerName,
+        inv.customerGstNumber || '',
         inv.grandTotal,
         inv.gstTotal,
         profit.toFixed(2),
@@ -498,6 +516,23 @@ export default function Reports() {
               value={formatCurrency(stats.pendingDues)} 
               icon={<Users className="h-5 w-5 text-danger" />}
             />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Card className="p-5 border-border bg-surface">
+              <p className="text-[10px] font-black uppercase tracking-widest text-text/35">Retail / B2C Sales</p>
+              <div className="mt-2 flex items-end justify-between gap-3">
+                <p className="text-xl font-black text-text">{formatCurrency(stats.retailRevenue)}</p>
+                <Badge variant="success" className="text-[9px] font-black">{stats.retailInvoices} invoices</Badge>
+              </div>
+            </Card>
+            <Card className="p-5 border-border bg-surface">
+              <p className="text-[10px] font-black uppercase tracking-widest text-text/35">Wholesale / B2B Sales</p>
+              <div className="mt-2 flex items-end justify-between gap-3">
+                <p className="text-xl font-black text-text">{formatCurrency(stats.wholesaleRevenue)}</p>
+                <Badge variant="warning" className="text-[9px] font-black">{stats.wholesaleInvoices} invoices</Badge>
+              </div>
+            </Card>
           </div>
 
           {/* Main Charts */}

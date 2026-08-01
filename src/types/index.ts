@@ -10,11 +10,14 @@ export interface User {
 }
 
 export type SubscriptionPlan = 'free' | 'pro' | 'business';
+export type BusinessMode = 'retail' | 'wholesale' | 'hybrid';
 
 export interface Tenant {
   id: string;
   name: string;
   ownerId: string;
+  businessMode?: BusinessMode;
+  businessModeConfigured?: boolean;
   plan: SubscriptionPlan;
   status: 'active' | 'cancelled' | 'past_due';
   subscriptionId?: string;
@@ -78,6 +81,9 @@ export interface Product {
   barcode: string;
   purchasePrice: number;
   sellingPrice: number;
+  wholesalePrice?: number;
+  unitsPerPack?: number;
+  packsPerCase?: number;
   mrp: number;
   gstPercentage: number;
   stockQuantity: number;
@@ -228,6 +234,7 @@ export interface Customer {
   email?: string;
   address: string;
   gstNumber?: string;
+  pricingTier?: 'retail' | 'wholesale';
   outstandingBalance: number;
   totalPurchases: number;
   totalPaid: number;
@@ -249,6 +256,9 @@ export interface InvoiceItem {
   total: number;
   gstRate?: number;
   purchaseCost?: number;
+  saleUnit?: 'unit' | 'pack' | 'case';
+  saleQuantity?: number;
+  conversionFactor?: number;
   batchDeductions?: Array<{
     batchNumber: string;
     quantity: number;
@@ -265,6 +275,8 @@ export interface Invoice {
   requestId?: string;
   customerId: string;
   customerName: string;
+  customerGstNumber?: string;
+  saleMode?: 'retail' | 'wholesale';
   items: InvoiceItem[];
   subtotal: number;
   gstTotal: number;

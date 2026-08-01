@@ -27,6 +27,8 @@ import { Product, Invoice, Customer } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../utils/cn';
 import { Logo } from '../common/Logo';
+import { useBusinessMode } from '../../context/BusinessModeContext';
+import { supportsRetail } from '../../utils/businessMode';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -37,6 +39,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const { mode } = useBusinessMode();
 
   // Search states
   const [searchOpen, setSearchOpen] = useState(false);
@@ -372,15 +375,17 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
 
           <div className="flex items-center gap-0.5 min-[360px]:gap-1 md:gap-4 shrink-0">
             {/* Quick Bill Trigger Button */}
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
-              className="flex h-11 w-11 items-center justify-center gap-1.5 p-0 sm:w-auto sm:px-3 md:px-4 text-xs font-black text-white bg-accent hover:bg-accent/90 rounded-xl transition-all shadow-sm shadow-accent/15 cursor-pointer active:scale-[0.98]"
-              aria-label="Open quick bill"
-              id="global-quick-bill-trigger"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Quick Bill</span>
-            </button>
+            {supportsRetail(mode) && (
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
+                className="flex h-11 w-11 items-center justify-center gap-1.5 p-0 sm:w-auto sm:px-3 md:px-4 text-xs font-black text-white bg-accent hover:bg-accent/90 rounded-xl transition-all shadow-sm shadow-accent/15 cursor-pointer active:scale-[0.98]"
+                aria-label="Open quick bill"
+                id="global-quick-bill-trigger"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Quick Bill</span>
+              </button>
+            )}
 
             {/* Interactive Search Bar Clickable Target */}
             <button 

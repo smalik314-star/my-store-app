@@ -26,11 +26,14 @@ import { Invoice, Product } from '../../types';
 import { formatCurrency, formatCurrencyCompact } from '../../utils/currency';
 import { useNavigate } from 'react-router-dom';
 import { PageTransition } from '../../components/common/PageTransition';
+import { useBusinessMode } from '../../context/BusinessModeContext';
+import { supportsRetail } from '../../utils/businessMode';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
+  const { mode } = useBusinessMode();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     totalProducts: 0,
@@ -117,7 +120,13 @@ export default function Dashboard() {
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-black text-text tracking-tight">Pharmacy Control Centre</h1>
+              <h1 className="text-xl md:text-2xl font-black text-text tracking-tight">
+                {mode === 'wholesale'
+                  ? 'Wholesale Distribution Centre'
+                  : mode === 'hybrid'
+                    ? 'Retail + Wholesale Control Centre'
+                    : 'Retail Pharmacy Control Centre'}
+              </h1>
               <span className="inline-flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-success">
                 <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
                 Live
@@ -133,15 +142,17 @@ export default function Dashboard() {
             <CalendarDays className="h-3.5 w-3.5 text-primary" />
             {new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date())}
           </div>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="w-full justify-center font-bold h-11 sm:h-9 sm:w-auto hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
-            leftIcon={<Zap className="h-4 w-4" />}
-            onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
-          >
-            Quick Bill
-          </Button>
+          {supportsRetail(mode) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-center font-bold h-11 sm:h-9 sm:w-auto hover:bg-accent/5 hover:text-accent border-accent/30 text-accent/90"
+              leftIcon={<Zap className="h-4 w-4" />}
+              onClick={() => window.dispatchEvent(new CustomEvent('open-quick-bill'))}
+            >
+              Quick Bill
+            </Button>
+          )}
           <Button 
             variant="outline" 
             size="sm" 
@@ -155,10 +166,20 @@ export default function Dashboard() {
             size="sm" 
             className="w-full justify-center font-bold h-11 sm:h-9 sm:w-auto shadow-sm"
             leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => handleQuickAction('/billing')}
+            onClick={() => handleQuickAction(mode === 'wholesale' ? '/billing/wholesale' : '/billing/retail')}
           >
-            New Sale
+            {mode === 'wholesale' ? 'Wholesale Invoice' : 'Retail Sale'}
           </Button>
+          {mode === 'hybrid' && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="col-span-2 w-full justify-center font-bold h-11 sm:col-span-1 sm:h-9 sm:w-auto"
+              onClick={() => handleQuickAction('/billing/wholesale')}
+            >
+              Wholesale Invoice
+            </Button>
+          )}
         </div>
       </div>
 

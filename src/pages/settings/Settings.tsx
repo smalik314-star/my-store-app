@@ -41,10 +41,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { medicineMasterService } from '../../services/medicineMasterService';
 import { useAuth } from '../../context/AuthContext';
 import { parseMedicineCsv } from '../../utils/medicineCsv';
+import { useBusinessMode } from '../../context/BusinessModeContext';
+import type { BusinessMode } from '../../types';
 
 export default function Settings() {
   const { settings, loading: settingsLoading, updateSettings } = useSettings();
   const { user } = useAuth();
+  const { mode: businessMode, updateMode } = useBusinessMode();
+  const [selectedBusinessMode, setSelectedBusinessMode] = useState<BusinessMode>(businessMode);
+  const [savingBusinessMode, setSavingBusinessMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const { showToast } = useToast();
   
@@ -114,6 +119,22 @@ export default function Settings() {
       });
     }
   }, [settings]);
+
+  useEffect(() => {
+    setSelectedBusinessMode(businessMode);
+  }, [businessMode]);
+
+  const saveBusinessMode = async () => {
+    setSavingBusinessMode(true);
+    try {
+      await updateMode(selectedBusinessMode);
+      showToast('Business workspace updated successfully.', 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'Unable to update business workspace.', 'danger');
+    } finally {
+      setSavingBusinessMode(false);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -343,6 +364,51 @@ export default function Settings() {
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {user?.role === 'owner' && (
+          <Card className="md:col-span-2 p-6 md:p-8 space-y-5">
+            <div className="flex items-center gap-3 pb-4 border-b border-border">
+              <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <Building2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-widest text-text/60">Business Workspace</h3>
+                <p className="text-[10px] font-bold text-text/30">Choose Retail, Wholesale, or both without changing your existing inventory.</p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {([
+                ['retail', 'Retail', 'Counter billing and walk-in customer workflows'],
+                ['wholesale', 'Wholesale', 'B2B parties, bulk invoices and credit workflows'],
+                ['hybrid', 'Retail + Wholesale', 'Both workflows with shared batch stock'],
+              ] as Array<[BusinessMode, string, string]>).map(([value, label, description]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSelectedBusinessMode(value)}
+                  className={cn(
+                    'rounded-2xl border p-4 text-left transition-all',
+                    selectedBusinessMode === value
+                      ? 'border-2 border-primary bg-primary/5'
+                      : 'border-border bg-background hover:border-primary/40'
+                  )}
+                >
+                  <p className="text-sm font-black text-text">{label}</p>
+                  <p className="mt-1 text-[10px] font-semibold leading-relaxed text-text/45">{description}</p>
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                onClick={() => void saveBusinessMode()}
+                isLoading={savingBusinessMode}
+                disabled={selectedBusinessMode === businessMode}
+              >
+                Update Workspace
+              </Button>
+            </div>
+          </Card>
+        )}
         {/* Store Information */}
         <Card className="p-8 space-y-6">
           <div className="flex items-center gap-3 pb-4 border-b border-border">

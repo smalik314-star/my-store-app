@@ -16,7 +16,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { SubscriptionRequest, Tenant, SubscriptionPlan, UserRole } from '../types';
+import { BusinessMode, SubscriptionRequest, Tenant, SubscriptionPlan, UserRole } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import {
   type BillingPeriod,
@@ -36,6 +36,8 @@ export const tenantService = {
       id: tenantId,
       name: storeName,
       ownerId: ownerId,
+      businessMode: 'retail',
+      businessModeConfigured: false,
       plan: 'free',
       status: 'active',
       subscriptionStatus: 'free',
@@ -92,6 +94,23 @@ export const tenantService = {
     const snap = await getDoc(usageRef);
     if (!snap.exists() || snap.data().tenantId !== tenantId) return 0;
     return Math.max(0, Number(snap.data().invoicesCount) || 0);
+  },
+
+  async updateBusinessMode(tenantId: string, businessMode: BusinessMode) {
+    const actorId = auth.currentUser?.uid;
+    if (!actorId) throw new Error('You must be signed in.');
+    if (!['retail', 'wholesale', 'hybrid'].includes(businessMode)) {
+      throw new Error('Select a valid business mode.');
+    }
+    const tenant = await this.getTenant(tenantId);
+    if (!tenant || tenant.ownerId !== actorId) {
+      throw new Error('Only the workspace owner can change the business mode.');
+    }
+    await updateDoc(doc(db, 'tenants', tenantId), {
+      businessMode,
+      businessModeConfigured: true,
+      updatedAt: serverTimestamp(),
+    });
   },
 
   async updateUsage(tenantId: string, field: 'invoicesCount' | 'productsCount' | 'usersCount', delta: number) {

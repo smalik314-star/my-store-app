@@ -51,6 +51,10 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
           <span>Bill No:</span>
           <span>{invoice.invoiceNumber}</span>
         </div>
+        <div className="flex justify-between mb-2 font-bold uppercase">
+          <span>Sale Type:</span>
+          <span>{invoice.saleMode || 'retail'}</span>
+        </div>
 
         <div className="border-b border-dashed border-black mb-2 pb-2">
           <p className="font-bold mb-1">Customer: {invoice.customerName}</p>
@@ -66,7 +70,9 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <div key={idx} className="py-1 border-b border-gray-100 last:border-0">
               <div className="flex justify-between">
                 <span className="w-1/2 truncate font-bold">{item.name}</span>
-                <span className="w-1/6 text-center">{item.quantity}</span>
+                <span className="w-1/6 text-center">
+                  {item.saleQuantity || item.quantity}{item.saleUnit ? ` ${item.saleUnit}` : ''}
+                </span>
                 <span className="w-1/3 text-right">{formatCurrency(item.total)}</span>
               </div>
               <div className="text-[8px] text-gray-500">
@@ -138,8 +144,13 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
 
         <div className="text-right flex flex-col justify-between items-end">
           <div className="space-y-1">
-            <h1 className="text-5xl font-black text-text tracking-tighter opacity-10 uppercase">Invoice</h1>
+            <h1 className="text-5xl font-black text-text tracking-tighter opacity-10 uppercase">
+              {invoice.saleMode === 'wholesale' ? 'Tax Invoice' : 'Invoice'}
+            </h1>
             <p className="text-lg font-black text-text tracking-tight uppercase">{invoice.invoiceNumber}</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-primary">
+              {invoice.saleMode === 'wholesale' ? 'Wholesale / B2B' : 'Retail / B2C'}
+            </p>
             <Badge variant={invoice.paymentStatus === 'paid' ? 'success' : 'warning'} className="font-black px-4 py-1">
               {invoice.paymentStatus.toUpperCase()}
             </Badge>
@@ -162,7 +173,11 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
               <div className="space-y-1 text-xs font-bold text-text/60 leading-relaxed">
                 <p className="flex items-center gap-2"><Phone className="h-3 w-3" /> {customer.phone}</p>
                 <p className="flex items-start gap-2"><MapPin className="h-3 w-3 mt-0.5" /> {customer.address}</p>
-                {customer.gstNumber && <p className="flex items-center gap-2 text-primary"><CreditCard className="h-3 w-3" /> GSTIN: {customer.gstNumber}</p>}
+                {(customer.gstNumber || invoice.customerGstNumber) && (
+                  <p className="flex items-center gap-2 text-primary">
+                    <CreditCard className="h-3 w-3" /> GSTIN: {customer.gstNumber || invoice.customerGstNumber}
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-xs font-bold text-text/40 italic">Walk-in Customer Detail</p>
@@ -179,10 +194,6 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <div className="space-y-1">
               <p className="text-[10px] font-black text-text/30 uppercase tracking-widest">Due Date</p>
               <p className="text-sm font-black text-text">On Receipt</p>
-            </div>
-            <div className="space-y-1 col-span-2">
-              <p className="text-[10px] font-black text-text/30 uppercase tracking-widest">Transaction Ref</p>
-              <p className="text-xs font-mono text-text/40 break-all">{invoice.id}</p>
             </div>
           </div>
         </div>
@@ -221,7 +232,14 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                   <span className="text-xs text-text/60">{item.expiryDate ? formatDate(item.expiryDate) : '—'}</span>
                 </td>
                 <td className="px-4 py-6 text-center">
-                  <span className="text-sm font-black text-text">{item.quantity}</span>
+                  <span className="text-sm font-black text-text">
+                    {item.saleQuantity || item.quantity}{item.saleUnit ? ` ${item.saleUnit}` : ''}
+                  </span>
+                  {item.conversionFactor && item.conversionFactor > 1 && (
+                    <span className="block text-[8px] font-bold text-text/35">
+                      {item.quantity} base units
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-6 text-right">
                   <span className="text-sm font-bold text-text/60">{formatCurrency(item.price)}</span>

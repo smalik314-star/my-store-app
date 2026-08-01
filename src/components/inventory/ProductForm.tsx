@@ -19,6 +19,8 @@ import { brandService } from '../../services/brandService';
 import { db } from '../../firebase/config';
 import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 import { MedicineAutocomplete } from '../common/MedicineAutocomplete';
+import { RequiredMark } from '../common/RequiredMark';
+import { useToast } from '../../context/ToastContext';
 
 interface ProductFormProps {
   product?: Product;
@@ -31,34 +33,22 @@ const CATEGORIES = ['Tablets', 'Capsules', 'Syrups', 'Injections', 'Topicals', '
 const UNITS = ['Strip', 'Bottle', 'Box', 'Piece', 'Vial', 'Tube'];
 
 export function ProductForm({ product, onSave, onClose, loading: saveLoading }: ProductFormProps) {
-  const getDefaultExpiryDate = () => {
-    const futureYear = new Date().getFullYear() + 2;
-    const currentMonthNum = new Date().getMonth() + 1;
-    const lastDay = new Date(futureYear, currentMonthNum, 0).getDate();
-    const monthStr = String(currentMonthNum).padStart(2, '0');
-    const lastDayStr = String(lastDay).padStart(2, '0');
-    return `${futureYear}-${monthStr}-${lastDayStr}`;
-  };
-
-  const getDefaultMfgDate = () => {
-    const currentYear = new Date().getFullYear();
-    const currentMonthNum = new Date().getMonth() + 1;
-    const monthStr = String(currentMonthNum).padStart(2, '0');
-    return `${currentYear}-${monthStr}-01`;
-  };
-
+  const { showToast } = useToast();
   const [formData, setFormData] = useState({
     name: product?.name || '',
     brand: product?.brand || '',
     batchNumber: product?.batchNumber || '',
     manufacturingDate: product?.manufacturingDate 
       ? toJsDate(product.manufacturingDate).toISOString().split('T')[0] 
-      : getDefaultMfgDate(),
+      : '',
     expiryDate: product?.expiryDate 
       ? toJsDate(product.expiryDate).toISOString().split('T')[0] 
-      : getDefaultExpiryDate(),
+      : '',
     purchasePrice: product?.purchasePrice || 0,
     sellingPrice: product?.sellingPrice || 0,
+    wholesalePrice: product?.wholesalePrice || 0,
+    unitsPerPack: product?.unitsPerPack || 1,
+    packsPerCase: product?.packsPerCase || 1,
     stockQuantity: product?.stockQuantity || 0,
     
     // Optional Fields
@@ -82,7 +72,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     if (initialDate) {
       return initialDate.split('-')[1] || '';
     }
-    return String(new Date().getMonth() + 1).padStart(2, '0');
+    return '';
   });
 
   const [mfgYear, setMfgYear] = useState(() => {
@@ -90,7 +80,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     if (initialDate) {
       return initialDate.split('-')[0] || '';
     }
-    return String(new Date().getFullYear());
+    return '';
   });
 
   const [expMonth, setExpMonth] = useState(() => {
@@ -98,7 +88,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     if (initialDate) {
       return initialDate.split('-')[1] || '';
     }
-    return String(new Date().getMonth() + 1).padStart(2, '0');
+    return '';
   });
 
   const [expYear, setExpYear] = useState(() => {
@@ -106,7 +96,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     if (initialDate) {
       return initialDate.split('-')[0] || '';
     }
-    return String(new Date().getFullYear() + 2);
+    return '';
   });
 
   // Synchronize dropdown state with formData.manufacturingDate & expiryDate changes (e.g. from autofill)
@@ -482,45 +472,65 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     e.preventDefault();
     setError(null);
 
+    const failValidation = (message: string, fieldName?: string) => {
+      setError(message);
+      showToast(message, 'danger');
+      requestAnimationFrame(() => {
+        const form = document.querySelector('[data-product-form]');
+        form?.scrollTo({ top: 0, behavior: 'smooth' });
+        if (fieldName) {
+          document.querySelector<HTMLElement>(`[name="${fieldName}"]`)?.focus();
+        }
+      });
+    };
+
     // Section 1 Required Fields Validation
     if (!formData.name.trim()) {
-      setError('Product Name is required');
+      failValidation('Product Name is required', 'name');
       return;
     }
     if (!formData.brand.trim()) {
-      setError('Brand Name is required');
+      failValidation('Brand Name is required', 'brand');
       return;
     }
     if (!formData.manufacturer.trim()) {
-      setError('Manufacturer is required');
+      failValidation('Manufacturer is required', 'manufacturer');
       return;
     }
     if (!formData.batchNumber.trim()) {
-      setError('Batch Number is required');
+      failValidation('Batch Number is required', 'batchNumber');
       return;
     }
     if (!formData.manufacturingDate) {
-      setError('Manufacturing Date is required');
+      failValidation('Manufacturing Date is required', 'mfgMonth');
       return;
     }
     if (!formData.expiryDate) {
-      setError('Expiry Date is required');
+      failValidation('Expiry Date is required', 'expMonth');
       return;
     }
     if (!Number.isFinite(Number(formData.purchasePrice)) || Number(formData.purchasePrice) <= 0) {
-      setError('Purchase Price must be greater than ₹0');
+      failValidation('Purchase Price must be greater than ₹0', 'purchasePrice');
       return;
     }
     if (!Number.isFinite(Number(formData.sellingPrice)) || Number(formData.sellingPrice) <= 0) {
-      setError('Sale Price must be greater than ₹0');
+      failValidation('Sale Price must be greater than ₹0', 'sellingPrice');
       return;
     }
-    if (formData.sellingPrice < formData.purchasePrice) {
-      setError('Sale Price cannot be lower than Purchase Price');
+    if (!Number.isFinite(Number(formData.wholesalePrice)) || Number(formData.wholesalePrice) < 0) {
+      setError('Wholesale Price must be zero or a valid positive amount');
       return;
     }
-    if (formData.stockQuantity < 0) {
-      setError('Stock Quantity cannot be negative');
+    if (!Number.isInteger(Number(formData.unitsPerPack)) || Number(formData.unitsPerPack) < 1) {
+      setError('Units per Pack must be a whole number of at least 1');
+      return;
+    }
+    if (!Number.isInteger(Number(formData.packsPerCase)) || Number(formData.packsPerCase) < 1) {
+      setError('Packs per Case must be a whole number of at least 1');
+      return;
+    }
+    if (!product && (!Number.isInteger(Number(formData.stockQuantity)) || Number(formData.stockQuantity) <= 0)) {
+      failValidation('Stock Quantity must be a whole number greater than zero', 'stockQuantity');
       return;
     }
 
@@ -620,6 +630,9 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         expiryDate,
         purchasePrice: Number(formData.purchasePrice),
         sellingPrice: Number(formData.sellingPrice),
+        wholesalePrice: Number(formData.wholesalePrice) || 0,
+        unitsPerPack: Number(formData.unitsPerPack) || 1,
+        packsPerCase: Number(formData.packsPerCase) || 1,
         stockQuantity,
         batches,
         
@@ -693,7 +706,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         </div>
 
         {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-6 space-y-6">
+        <form data-product-form noValidate onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-6 space-y-6">
           {error && (
             <motion.div 
               initial={{ opacity: 0, y: -5 }}
@@ -718,7 +731,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Product Name */}
               <div className="flex flex-col gap-1.5 relative">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Product Name *
+                  Product Name <RequiredMark />
                 </label>
                 <div className="relative">
                   <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
@@ -814,7 +827,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Brand Name */}
               <div className="flex flex-col gap-1.5 relative">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Brand Name *
+                  Brand Name <RequiredMark />
                 </label>
                 <MedicineAutocomplete
                   type="brand"
@@ -832,7 +845,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Manufacturer */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Manufacturer *
+                  Manufacturer <RequiredMark />
                 </label>
                 <div className="relative">
                   <Factory className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
@@ -851,7 +864,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Batch Number */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Batch Number *
+                  Batch Number <RequiredMark />
                 </label>
                 <div className="relative">
                   <Info className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
@@ -869,7 +882,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Stock Quantity */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Stock Quantity *
+                  Stock Quantity <RequiredMark />
                 </label>
                 <div className="relative">
                   <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
@@ -880,7 +893,8 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     onChange={handleChange}
                     className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
                     placeholder="e.g. 150"
-                    min="0.01"
+                    min="1"
+                    step="1"
                     required
                   />
                 </div>
@@ -889,10 +903,11 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Manufacturing Date */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Manufacturing Date *
+                  Manufacturing Date <RequiredMark />
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <select
+                    name="mfgMonth"
                     value={mfgMonth}
                     onChange={(e) => handleMfgMonthChange(e.target.value)}
                     className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
@@ -910,6 +925,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     })}
                   </select>
                   <select
+                    name="mfgYear"
                     value={mfgYear}
                     onChange={(e) => handleMfgYearChange(e.target.value)}
                     className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
@@ -931,10 +947,11 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Expiry Date */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Expiry Date *
+                  Expiry Date <RequiredMark />
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <select
+                    name="expMonth"
                     value={expMonth}
                     onChange={(e) => handleExpMonthChange(e.target.value)}
                     className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
@@ -952,6 +969,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     })}
                   </select>
                   <select
+                    name="expYear"
                     value={expYear}
                     onChange={(e) => handleExpYearChange(e.target.value)}
                     className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
@@ -973,7 +991,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Purchase Price */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Purchase Price (INR) *
+                  Purchase Price (INR) <RequiredMark />
                 </label>
                 <div className="relative">
                   <IndianRupee className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
@@ -994,7 +1012,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
               {/* Sale Price */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Sale Price (INR) *
+                  Sale Price (INR) <RequiredMark />
                 </label>
                 <div className="relative">
                   <IndianRupee className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
@@ -1008,6 +1026,56 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                     step="0.01"
                     min="0"
                     required
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
+                  Wholesale Price (INR)
+                </label>
+                <div className="relative">
+                  <IndianRupee className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
+                  <input
+                    type="number"
+                    name="wholesalePrice"
+                    value={formData.wholesalePrice || ''}
+                    onChange={handleChange}
+                    className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-sm"
+                    placeholder="Optional B2B rate"
+                    step="0.01"
+                    min="0"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
+                    Units / Pack
+                  </label>
+                  <input
+                    type="number"
+                    name="unitsPerPack"
+                    value={formData.unitsPerPack}
+                    onChange={handleChange}
+                    min="1"
+                    step="1"
+                    className="w-full px-3 py-3 rounded-xl border border-border bg-background outline-none text-sm font-semibold"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
+                    Packs / Case
+                  </label>
+                  <input
+                    type="number"
+                    name="packsPerCase"
+                    value={formData.packsPerCase}
+                    onChange={handleChange}
+                    min="1"
+                    step="1"
+                    className="w-full px-3 py-3 rounded-xl border border-border bg-background outline-none text-sm font-semibold"
                   />
                 </div>
               </div>

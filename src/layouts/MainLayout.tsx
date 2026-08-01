@@ -6,20 +6,23 @@ import { AIAssistant } from '../components/ai/AIAssistant';
 import { QuickBillModal } from '../components/billing/QuickBillModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils/cn';
+import { useBusinessMode } from '../context/BusinessModeContext';
+import { supportsRetail } from '../utils/businessMode';
 
 export default function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [quickBillOpen, setQuickBillOpen] = useState(false);
+  const { mode } = useBusinessMode();
 
   useEffect(() => {
     const handleOpenQuickBill = () => {
-      setQuickBillOpen(true);
+      if (supportsRetail(mode)) setQuickBillOpen(true);
     };
 
     window.addEventListener('open-quick-bill', handleOpenQuickBill);
     return () => window.removeEventListener('open-quick-bill', handleOpenQuickBill);
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -55,7 +58,9 @@ export default function MainLayout() {
       </main>
 
       {/* Global Quick Bill Modal Overlay */}
-      <QuickBillModal isOpen={quickBillOpen} onClose={() => setQuickBillOpen(false)} />
+      {supportsRetail(mode) && (
+        <QuickBillModal isOpen={quickBillOpen} onClose={() => setQuickBillOpen(false)} />
+      )}
     </div>
   );
 }

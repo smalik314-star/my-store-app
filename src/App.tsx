@@ -4,18 +4,21 @@ import { ToastProvider } from './context/ToastContext';
 import { AIProvider } from './context/AIContext';
 import { AppRouter } from './routes/AppRouter';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { BusinessModeProvider } from './context/BusinessModeContext';
 
 function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <SettingsProvider>
-          <ToastProvider>
-            <AIProvider>
-              <AppRouter />
-            </AIProvider>
-          </ToastProvider>
-        </SettingsProvider>
+        <BusinessModeProvider>
+          <SettingsProvider>
+            <ToastProvider>
+              <AIProvider>
+                <AppRouter />
+              </AIProvider>
+            </ToastProvider>
+          </SettingsProvider>
+        </BusinessModeProvider>
       </AuthProvider>
     </ErrorBoundary>
   );
