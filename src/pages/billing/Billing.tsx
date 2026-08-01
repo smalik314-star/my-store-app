@@ -81,6 +81,7 @@ export default function Billing() {
   const { user } = useAuth();
   const { mode } = useBusinessMode();
   const { settings } = useSettings();
+  const canCollectGst = Boolean(settings?.taxMode && settings?.gstNumber && (settings.gstRegistrationType || 'regular') === 'regular');
   const { showToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
@@ -259,7 +260,7 @@ export default function Billing() {
       const product = products.find(candidate => candidate.id === item.productId);
       if (!product) return item;
       const price = resolveSalePrice(product, nextMode, selectedCustomer);
-      const gstRate = settings?.taxMode ? product.gstPercentage : 0;
+      const gstRate = canCollectGst ? product.gstPercentage : 0;
       const lineTax = calculateLineTax({ quantity: item.quantity, rate: price, gstRate });
       return {
         ...item,
@@ -420,7 +421,7 @@ export default function Billing() {
 
     setCart(prev => prev.map((item, i) => {
       if (i === index) {
-        const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
+        const effectiveGstRate = canCollectGst ? product.gstPercentage : 0;
         const salePrice = resolveSalePrice(product, saleMode, selectedCustomer);
         const gstAmount = calculateLineTax({ quantity: 1, rate: salePrice, gstRate: effectiveGstRate }).tax;
         return {
@@ -471,7 +472,7 @@ export default function Billing() {
         );
       }
 
-      const effectiveGstRate = settings?.taxMode ? product.gstPercentage : 0;
+      const effectiveGstRate = canCollectGst ? product.gstPercentage : 0;
       const gstAmount = (product.sellingPrice * effectiveGstRate) / 100;
       const scannedItem: InvoiceItem = {
         productId: product.id,
@@ -653,7 +654,7 @@ export default function Billing() {
           );
           const conversionFactor = getSaleConversionFactor(matchedProd, saleUnit);
           const quantity = saleQuantity * conversionFactor;
-          const gstRate = settings?.taxMode ? matchedProd.gstPercentage : 0;
+          const gstRate = canCollectGst ? matchedProd.gstPercentage : 0;
           updated.saleUnit = saleUnit;
           updated.saleQuantity = saleQuantity;
           updated.conversionFactor = conversionFactor;
@@ -669,7 +670,7 @@ export default function Billing() {
           
           // Use product's gst if product was resolved
           const gstRate = matchedProd ? matchedProd.gstPercentage : 0;
-          const effectiveGstRate = settings?.taxMode ? gstRate : 0;
+          const effectiveGstRate = canCollectGst ? gstRate : 0;
           const gstAmount = calculateLineTax({ quantity: 1, rate, gstRate: effectiveGstRate }).tax;
           
           updated.quantity = qty;
@@ -1484,7 +1485,7 @@ _Powered by PharmaFlow_`;
                       <div className="flex items-center gap-2 h-11 px-4 rounded-xl border border-border bg-surface">
                         <span className="h-2 w-2 bg-success rounded-full" />
                         <span className="text-xs font-bold text-text/60">
-                          {settings?.taxMode ? 'Automated Tax Rules ON' : 'Direct Store Rates'}
+                          {canCollectGst ? 'Automated Tax Rules ON' : 'GST collection disabled'}
                         </span>
                       </div>
                     </div>

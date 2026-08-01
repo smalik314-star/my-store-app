@@ -60,6 +60,12 @@ export default function Settings() {
     email: '',
     address: '',
     gstNumber: '',
+    gstRegistrationType: 'regular' as 'regular' | 'composition' | 'unregistered',
+    stateName: '',
+    stateCode: '',
+    drugLicenseNumber: '',
+    annualAggregateTurnover: 0,
+    einvoiceEnabled: false,
     logoURL: '',
     invoiceFooterText: '',
     currency: '₹',
@@ -105,6 +111,12 @@ export default function Settings() {
         email: settings.email || '',
         address: settings.address || '',
         gstNumber: settings.gstNumber || '',
+        gstRegistrationType: settings.gstRegistrationType || 'regular',
+        stateName: settings.stateName || '',
+        stateCode: settings.stateCode || '',
+        drugLicenseNumber: settings.drugLicenseNumber || '',
+        annualAggregateTurnover: settings.annualAggregateTurnover || 0,
+        einvoiceEnabled: settings.einvoiceEnabled || false,
         logoURL: settings.logoURL || '',
         invoiceFooterText: settings.invoiceFooterText || '',
         currency: settings.currency || '₹',
@@ -308,8 +320,16 @@ export default function Settings() {
       return;
     }
 
+    if (formData.gstRegistrationType !== 'unregistered' && !formData.gstNumber) {
+      showToast('GSTIN is required for regular or composition registration', 'danger');
+      return;
+    }
     if (formData.gstNumber && !validateGST(formData.gstNumber)) {
       showToast('Invalid GST number format', 'danger');
+      return;
+    }
+    if (formData.gstRegistrationType !== 'regular' && formData.taxMode) {
+      showToast('Only a regular GST taxpayer can collect GST on a tax invoice.', 'danger');
       return;
     }
 
@@ -499,7 +519,12 @@ export default function Settings() {
               </label>
             </div>
 
-            <div className={cn("space-y-4", !formData.taxMode && "opacity-40 pointer-events-none")}>
+            <div className="space-y-4">
+              <label className="block text-[10px] font-black uppercase tracking-widest text-text/40">GST Registration Type
+                <select name="gstRegistrationType" value={formData.gstRegistrationType} onChange={handleInputChange} className="mt-1.5 w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-text">
+                  <option value="regular">Regular taxpayer (Tax Invoice)</option><option value="composition">Composition taxpayer (Bill of Supply)</option><option value="unregistered">Unregistered / no GST collection</option>
+                </select>
+              </label>
               <Input
                 label="GST Number"
                 name="gstNumber"
@@ -507,6 +532,10 @@ export default function Settings() {
                 onChange={handleInputChange}
                 placeholder="22AAAAA0000A1Z5"
               />
+              <div className="grid grid-cols-2 gap-4"><Input label="State" name="stateName" value={formData.stateName} onChange={handleInputChange} placeholder="Maharashtra" /><Input label="State Code" name="stateCode" value={formData.stateCode} onChange={handleInputChange} placeholder="27" /></div>
+              <Input label="Drug Licence Number" name="drugLicenseNumber" value={formData.drugLicenseNumber} onChange={handleInputChange} placeholder="Retail / wholesale drug licence" />
+              <Input label="Annual Aggregate Turnover (₹)" name="annualAggregateTurnover" type="number" value={formData.annualAggregateTurnover} onChange={handleInputChange} placeholder="0" />
+              {Number(formData.annualAggregateTurnover) >= 50000000 && <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-xs font-bold text-amber-900">E-invoicing may be mandatory for covered B2B documents at ₹5 crore+ AATO. Configure an authorized IRP integration before issuing applicable B2B invoices; PharmaFlow will not generate a fake IRN or QR code.</div>}
               <div className="grid grid-cols-2 gap-4">
                 <Input
                   label="CGST Rate (%)"

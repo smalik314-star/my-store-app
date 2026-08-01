@@ -15,6 +15,14 @@
         { "fieldPath": "purchaseId", "order": "ASCENDING" },
         { "fieldPath": "tenantId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "estimates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tenantId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

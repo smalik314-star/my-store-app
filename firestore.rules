@@ -19,6 +19,7 @@ service cloud.firestore {
         && userData().status == 'active'
         && (
           counterId == 'invoices_' + userData().tenantId
+          || counterId == 'estimates_' + userData().tenantId
           || counterId == userData().tenantId + '_purchase'
         );
     }
@@ -63,6 +64,18 @@ service cloud.firestore {
           !('saleMode' in request.resource.data)
           || request.resource.data.saleMode in ['retail','wholesale']
         );
+    }
+    function validEstimate() {
+      return request.resource.data.documentType == 'estimate'
+        && request.resource.data.taxInvoice == false
+        && request.resource.data.gstTotal == 0
+        && request.resource.data.items is list
+        && request.resource.data.items.size() > 0
+        && request.resource.data.subtotal is number
+        && request.resource.data.discount is number
+        && request.resource.data.grandTotal is number
+        && request.resource.data.grandTotal >= 0
+        && request.resource.data.status in ['draft','sent','accepted','expired','converted','cancelled'];
     }
 
     match /users/{userId} {
@@ -304,6 +317,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /productUsageCounters/{tenantId} {
+      allow get: if inTenant(tenantId);
+      allow list: if false;
+      allow create: if inTenant(tenantId) && roleIs(['owner','admin','staff'])
+        && request.resource.data.tenantId == tenantId
+        && request.resource.data.productsCount is int
+        && request.resource.data.productsCount >= 1;
+      allow update: if inTenant(tenantId) && roleIs(['owner','admin','staff'])
+        && request.resource.data.tenantId == resource.data.tenantId
+        && request.resource.data.productsCount is int
+        && request.resource.data.productsCount == resource.data.productsCount + 1
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['productsCount','updatedAt']);
+      allow delete: if false;
+    }
+
     match /brands/{brandId} {
       allow read: if inTenant(resource.data.tenantId);
       allow create: if validTenantCreate(request.resource.data.tenantId) && roleIs(['owner','admin','staff']);
@@ -362,6 +391,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /estimates/{estimateId} {
+      allow get: if hasTenantPrefixedId(estimateId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff']) && validEstimate();
+      allow update: if inTenant(resource.data.tenantId) && sameTenant()
+        && roleIs(['owner','admin','staff']) && validEstimate()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status','convertedInvoiceId','updatedAt']);
+      allow delete: if false;
+    }
+
     match /counters/{counterId} {
       // Transactions must read a counter before its first create. Restrict that
       // missing-document read to the signed-in user's own deterministic IDs.
@@ -374,7 +415,12 @@ service cloud.firestore {
           (counterId == 'invoices_' + userData().tenantId
             && request.resource.data.count is int
             && request.resource.data.count >= 1
-            && request.resource.data.year is int)
+            && request.resource.data.financialYear is string)
+          ||
+          (counterId == 'estimates_' + userData().tenantId
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.financialYear is string)
           ||
           (counterId == userData().tenantId + '_purchase'
             && request.resource.data.value is int
@@ -386,12 +432,17 @@ service cloud.firestore {
         && roleIs(['owner','admin','staff'])
         && request.resource.data.tenantId == userData().tenantId
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['count','year','value','tenantId'])
+          .hasOnly(['count','year','financialYear','value','tenantId'])
         && (
           (counterId == 'invoices_' + userData().tenantId
             && request.resource.data.count is int
             && request.resource.data.count >= 1
-            && request.resource.data.year is int)
+            && request.resource.data.financialYear is string)
+          ||
+          (counterId == 'estimates_' + userData().tenantId
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.financialYear is string)
           ||
           (counterId == userData().tenantId + '_purchase'
             && request.resource.data.value is int

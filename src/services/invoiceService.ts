@@ -23,6 +23,7 @@ import { toJsDate } from '../utils/date';
 import { allocateFefo, getValidBatchQuantity, isBatchExpired } from '../utils/stock';
 import { addMoney, calculateLineTax, roundMoney, subtractMoney } from '../utils/currency';
 import { getEffectiveLimits } from '../config/subscription';
+import { formatDocumentNumber, getIndianFinancialYear } from '../utils/financialYear';
 
 const COLLECTION_NAME = 'invoices';
 
@@ -63,9 +64,9 @@ export const invoiceService = {
     if (!tenantId) throw new Error('Tenant ID required');
 
     const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
-    const year = new Date().getFullYear();
+    const financialYear = getIndianFinancialYear();
     
-    logFirestoreOperation(OperationType.GET, `counters/invoices_${tenantId}`, 'pending', { prefix, year });
+    logFirestoreOperation(OperationType.GET, `counters/invoices_${tenantId}`, 'pending', { prefix, financialYear: financialYear.key });
     try {
       const result = await runTransaction(db, async (transaction) => {
         const counterDoc = await transaction.get(counterRef);
@@ -73,16 +74,16 @@ export const invoiceService = {
         
         if (counterDoc.exists()) {
           const data = counterDoc.data();
-          if (data.year === year) {
+          if (data.financialYear === financialYear.key) {
             nextNumber = data.count + 1;
           }
         }
         
-        transaction.set(counterRef, { count: nextNumber, year, tenantId });
+        transaction.set(counterRef, { count: nextNumber, financialYear: financialYear.key, tenantId });
         return nextNumber;
       });
       
-      const generatedNum = `${prefix}-${year}-${result.toString().padStart(6, '0')}`;
+      const generatedNum = formatDocumentNumber(prefix, financialYear, result);
       logFirestoreOperation(OperationType.GET, `counters/invoices_${tenantId}`, 'success', { generatedNum });
       return generatedNum;
     } catch (error) {
@@ -104,7 +105,7 @@ export const invoiceService = {
     const requestId = invoiceData.requestId || crypto.randomUUID();
     const invoiceRef = doc(db, COLLECTION_NAME, `${tenantId}_${requestId}`);
     const counterRef = doc(db, 'counters', `invoices_${tenantId}`);
-    const year = new Date().getFullYear();
+    const financialYear = getIndianFinancialYear();
     const usageMonth = new Date().toISOString().slice(0, 7);
     const usageRef = doc(db, 'tenants', tenantId, 'usageCounters', usageMonth);
 
@@ -132,10 +133,10 @@ export const invoiceService = {
         const counterDoc = await transaction.get(counterRef);
         const usageDoc = await transaction.get(usageRef);
         let nextNumber = 1;
-        if (counterDoc.exists() && counterDoc.data().year === year) {
+        if (counterDoc.exists() && counterDoc.data().financialYear === financialYear.key) {
           nextNumber = (Number(counterDoc.data().count) || 0) + 1;
         }
-        const generatedInvoiceNumber = `${prefix}-${year}-${nextNumber.toString().padStart(6, '0')}`;
+        const generatedInvoiceNumber = formatDocumentNumber(prefix, financialYear, nextNumber);
         
         // 2. Get all unique Product Docs needed for this invoice
         const productDocsMap = new Map<string, any>();
@@ -394,7 +395,7 @@ export const invoiceService = {
           discount: safeDiscount, grandTotal: authoritativeTotal, amountReceived,
           outstandingAmount: subtractMoney(authoritativeTotal, amountReceived) });
         transaction.set(invoiceRef, sanitizeForFirestore(invoice));
-        transaction.set(counterRef, { count: nextNumber, year, tenantId });
+        transaction.set(counterRef, { count: nextNumber, financialYear: financialYear.key, tenantId });
 
         // 4. Update Customer Stats
         if (customerDoc && customerRef && customerDoc.exists() && customerDoc.data().tenantId === tenantId) {

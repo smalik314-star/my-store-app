@@ -21,7 +21,8 @@ import {
   Truck,
   UserCog,
   RotateCcw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  FileText
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { useAuth } from '../../context/AuthContext';
@@ -64,6 +65,7 @@ const getMenuSections = (mode: BusinessMode): Array<{ title: string; items: Menu
         ? [{ icon: Truck, label: 'Wholesale Billing', path: '/billing/wholesale', active: true }]
         : []),
       { icon: ReceiptText, label: 'Sales Invoices', path: '/invoices', active: true },
+      { icon: FileText, label: 'Estimates', path: '/estimates', active: true },
       { icon: Users, label: mode === 'retail' ? 'Customers' : 'Customers / Business Parties', path: '/customers', active: true },
     ]
   },

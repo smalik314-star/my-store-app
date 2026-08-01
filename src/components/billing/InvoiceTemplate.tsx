@@ -87,7 +87,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <span>Subtotal:</span>
             <span>{formatCurrency(invoice.subtotal)}</span>
           </div>
-          {settings?.taxMode && (
+          {settings?.taxMode && settings?.gstNumber && (settings.gstRegistrationType || 'regular') === 'regular' && (
             <div className="flex justify-between">
               <span>GST:</span>
               <span>{formatCurrency(invoice.gstTotal)}</span>
@@ -139,13 +139,15 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             {settings?.phone && <p className="flex items-center gap-2 mt-2"><Phone className="h-3 w-3" /> {settings.phone}</p>}
             {settings?.email && <p className="flex items-center gap-2"><Mail className="h-3 w-3" /> {settings.email}</p>}
             {settings?.gstNumber && <p className="flex items-center gap-2"><CreditCard className="h-3 w-3 text-primary" /> GSTIN: {settings.gstNumber}</p>}
+            {settings?.stateName && <p>State: {settings.stateName}{settings.stateCode ? ` (${settings.stateCode})` : ''}</p>}
+            {settings?.drugLicenseNumber && <p>Drug Licence: {settings.drugLicenseNumber}</p>}
           </div>
         </div>
 
         <div className="text-right flex flex-col justify-between items-end">
           <div className="space-y-1">
             <h1 className="text-5xl font-black text-text tracking-tighter opacity-10 uppercase">
-              {invoice.saleMode === 'wholesale' ? 'Tax Invoice' : 'Invoice'}
+              {settings?.gstRegistrationType === 'composition' ? 'Bill of Supply' : settings?.taxMode && settings?.gstNumber && (settings?.gstRegistrationType || 'regular') === 'regular' ? 'Tax Invoice' : 'Invoice'}
             </h1>
             <p className="text-lg font-black text-text tracking-tight uppercase">{invoice.invoiceNumber}</p>
             <p className="text-[10px] font-black uppercase tracking-widest text-primary">
@@ -264,6 +266,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
               <li>Goods once sold will not be taken back without valid prescription.</li>
               <li>Verify your medications before leaving the counter.</li>
               <li>This is a computer-generated invoice and requires no physical signature.</li>
+              {settings?.gstRegistrationType === 'composition' && <li className="text-red-700">Composition taxable person, not eligible to collect tax on supplies.</li>}
             </ul>
           </div>
         </div>
@@ -273,7 +276,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
             <span className="uppercase tracking-widest text-[10px]">Subtotal</span>
             <span>{formatCurrency(invoice.subtotal)}</span>
           </div>
-          {settings?.taxMode && (
+          {settings?.taxMode && settings?.gstNumber && (settings.gstRegistrationType || 'regular') === 'regular' && (
             <>
               <div className="flex justify-between items-center text-sm font-bold text-text/60">
                 <span className="uppercase tracking-widest text-[10px]">CGST ({settings.cgstRate}%)</span>

@@ -255,6 +255,7 @@ export interface InvoiceItem {
   gst: number;
   total: number;
   gstRate?: number;
+  hsnCode?: string;
   purchaseCost?: number;
   saleUnit?: 'unit' | 'pack' | 'case';
   saleQuantity?: number;
@@ -266,6 +267,39 @@ export interface InvoiceItem {
     salePrice: number;
     expiryDate?: any;
   }>;
+}
+
+export interface EstimateItem {
+  productId?: string;
+  name: string;
+  quantity: number;
+  rate: number;
+  discount: number;
+  total: number;
+  hsnCode?: string;
+}
+
+export interface Estimate {
+  id: string;
+  tenantId: string;
+  estimateNumber: string;
+  requestId: string;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  items: EstimateItem[];
+  subtotal: number;
+  discount: number;
+  grandTotal: number;
+  validUntil: any;
+  notes?: string;
+  terms?: string;
+  status: 'draft' | 'sent' | 'accepted' | 'expired' | 'converted' | 'cancelled';
+  convertedInvoiceId?: string;
+  createdBy: string;
+  createdAt: any;
+  updatedAt: any;
 }
 
 export interface Invoice {
@@ -415,6 +449,13 @@ export interface StoreSettings {
   email: string;
   address: string;
   gstNumber: string;
+  gstRegistrationType?: 'regular' | 'composition' | 'unregistered';
+  stateName?: string;
+  stateCode?: string;
+  drugLicenseNumber?: string;
+  financialYearStartMonth?: 4;
+  annualAggregateTurnover?: number;
+  einvoiceEnabled?: boolean;
   logoURL: string;
   invoiceFooterText: string;
   currency: string;

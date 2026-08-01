@@ -41,6 +41,7 @@ export const productService = {
 
     try {
       const tenantRef = doc(db, 'tenants', tenantId);
+      const usageRef = doc(db, 'productUsageCounters', tenantId);
 
       // Check SKU uniqueness for this tenant if provided
       if (sanitized.sku && sanitized.sku.trim() !== '') {
@@ -74,11 +75,15 @@ export const productService = {
 
       await runTransaction(db, async transaction => {
         const tenantDoc = await transaction.get(tenantRef);
+        const usageDoc = await transaction.get(usageRef);
         if (!tenantDoc.exists()) throw new Error('Store profile not found.');
         const tenant = tenantDoc.data() as Tenant;
-        const usage = tenant.usage || { invoicesCount: 0, productsCount: 0, usersCount: 1 };
+        const legacyProductCount = Number(tenant.usage?.productsCount) || 0;
+        const productCount = usageDoc.exists()
+          ? Math.max(0, Number(usageDoc.data().productsCount) || 0)
+          : legacyProductCount;
         const limits = getEffectiveLimits(tenant);
-        if (usage.productsCount >= limits.maxProducts) {
+        if (productCount >= limits.maxProducts) {
           throw new Error('Product limit reached. Please upgrade your plan.');
         }
 
@@ -91,10 +96,11 @@ export const productService = {
           updatedAt: serverTimestamp(),
         });
 
-        transaction.update(tenantRef, {
-          usage: { ...usage, productsCount: usage.productsCount + 1 },
+        transaction.set(usageRef, {
+          tenantId,
+          productsCount: productCount + 1,
           updatedAt: serverTimestamp()
-        });
+        }, { merge: true });
 
         const openingQuantity = Number(sanitized.stockQuantity) || 0;
         if (openingQuantity > 0) {

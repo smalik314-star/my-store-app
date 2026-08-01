@@ -29,6 +29,8 @@ const SupplierPayments = lazy(() => import('../pages/accounting/SupplierPayments
 const Login = lazy(() => import('../pages/auth/Login'));
 const NotFound = lazy(() => import('../pages/NotFound'));
 const BusinessModeSetup = lazy(() => import('../pages/onboarding/BusinessModeSetup'));
+const Estimates = lazy(() => import('../pages/estimates/Estimates'));
+const EstimateDetail = lazy(() => import('../pages/estimates/EstimateDetail'));
 
 // Purchases pages
 const Purchases = lazy(() => import('../pages/purchases/Purchases'));
@@ -70,6 +72,8 @@ export function AppRouter() {
                 <Route path="/billing/retail" element={<Billing />} />
                 <Route path="/billing/wholesale" element={<Billing />} />
                 <Route path="/invoices" element={<InvoiceList />} />
+                <Route path="/estimates" element={<Estimates />} />
+                <Route path="/estimate/:id" element={<EstimateDetail />} />
                 <Route path="/invoice/:id" element={<InvoiceDetail />} />
                 <Route path="/purchases" element={<Purchases />} />
                 <Route path="/purchases/new" element={<PurchaseEntry />} />
