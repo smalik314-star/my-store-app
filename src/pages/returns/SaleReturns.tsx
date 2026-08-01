@@ -32,6 +32,7 @@ export default function SaleReturns() {
   const { showToast } = useToast();
   const requestIdRef = useRef<string | null>(null);
   const savingRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -92,6 +93,9 @@ export default function SaleReturns() {
       setReturnedByLine(returned);
       setDrafts({});
       requestIdRef.current = null;
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLInputElement>('[data-sale-return-qty]')?.focus();
+      });
     } catch (error: any) {
       showToast(error.message || 'Returnable quantities could not be loaded.', 'danger');
     } finally {
@@ -113,6 +117,21 @@ export default function SaleReturns() {
     requestIdRef.current = null;
   };
 
+  const focusNextReturnQuantity = (currentIndex: number) => {
+    if (!selected) return;
+    for (let index = currentIndex + 1; index < selected.items.length; index += 1) {
+      const nextItem = selected.items[index];
+      if (returnableQuantity(index, nextItem) > 0) {
+        window.requestAnimationFrame(() => {
+          document
+            .querySelector<HTMLInputElement>(`[data-sale-return-qty="${index}"]`)
+            ?.focus();
+        });
+        return;
+      }
+    }
+  };
+
   const previewTotal = useMemo(() => {
     if (!selected) return 0;
     return roundMoney(selected.items.reduce((sum, item, index) => {
@@ -121,6 +140,25 @@ export default function SaleReturns() {
       return sum + (roundMoney(item.total) / Number(item.quantity)) * quantity;
     }, 0));
   }, [drafts, selected]);
+
+  useEffect(() => {
+    const handleKeyboardShortcuts = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (event.key === 'F2' && selected && previewTotal > 0 && !savingRef.current) {
+        event.preventDefault();
+        void submit();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyboardShortcuts);
+    return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
+  }, [selected, previewTotal]);
 
   const submit = async () => {
     if (!user?.tenantId || !selected || savingRef.current) return;
@@ -201,13 +239,23 @@ export default function SaleReturns() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text/40" />
                 <input
+                  ref={searchInputRef}
                   value={search}
                   onChange={event => setSearch(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' && filtered[0]) {
+                      event.preventDefault();
+                      void selectInvoice(filtered[0]);
+                    }
+                  }}
                   placeholder="Invoice, customer or product"
                   aria-label="Search returnable invoices"
                   className="h-12 w-full rounded-xl border border-border bg-surface pl-10 pr-4 text-sm outline-none focus:border-primary"
                 />
               </div>
+              <p className="mt-3 text-xs font-semibold text-text/45">
+                Ctrl+F focuses search. Enter opens the first result. F2 posts the current sale return.
+              </p>
             </div>
             {loading ? (
               <SkeletonTable rows={6} />
@@ -289,7 +337,7 @@ export default function SaleReturns() {
                           <div>
                             <div className="font-semibold">{item.name}</div>
                             <div className="mt-1 text-xs text-text/50">
-                              Sold {item.quantity} · Returned {returned} · Returnable {returnable}
+                              Sold {item.quantity} - Returned {returned} - Returnable {returnable}
                             </div>
                           </div>
                           <span className="font-bold">{formatCurrency(item.total)}</span>
@@ -306,12 +354,19 @@ export default function SaleReturns() {
                           <label className="text-xs font-semibold text-text/60">
                             Return quantity
                             <input
+                              data-sale-return-qty={index}
                               type="number"
                               min="0"
                               max={returnable}
                               step="1"
                               value={draft.quantity}
                               onChange={event => setLine(index, { quantity: Number(event.target.value) })}
+                              onKeyDown={event => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  focusNextReturnQuantity(index);
+                                }
+                              }}
                               className="mt-1 h-12 w-full rounded-lg border border-border bg-surface px-3 text-right text-base"
                             />
                           </label>
@@ -374,12 +429,19 @@ export default function SaleReturns() {
                             </td>
                             <td className="px-4 py-3 text-right">
                               <input
+                                data-sale-return-qty={index}
                                 type="number"
                                 min="0"
                                 max={returnable}
                                 step="1"
                                 value={draft.quantity}
                                 onChange={event => setLine(index, { quantity: Number(event.target.value) })}
+                                onKeyDown={event => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    focusNextReturnQuantity(index);
+                                  }
+                                }}
                                 className="h-10 w-24 rounded-lg border border-border bg-surface px-3 text-right"
                               />
                             </td>
@@ -408,7 +470,7 @@ export default function SaleReturns() {
                 </div>
                 <div className="hidden justify-end border-t border-border p-4 md:flex">
                   <Button onClick={submit} disabled={saving || previewTotal <= 0}>
-                    {saving ? 'Posting return…' : `Post Return · ${formatCurrency(previewTotal)}`}
+                    {saving ? 'Posting return…' : `Post Return - ${formatCurrency(previewTotal)}`}
                   </Button>
                 </div>
               </>
@@ -478,7 +540,7 @@ export default function SaleReturns() {
         {selected && (
           <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 p-3 shadow-2xl backdrop-blur md:hidden">
             <Button className="h-12 w-full" onClick={submit} disabled={saving || previewTotal <= 0}>
-              {saving ? 'Posting return…' : `Post Return · ${formatCurrency(previewTotal)}`}
+              {saving ? 'Posting return…' : `Post Return - ${formatCurrency(previewTotal)}`}
             </Button>
           </div>
         )}

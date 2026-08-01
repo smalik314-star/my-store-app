@@ -78,6 +78,10 @@ export default function PurchaseEntry() {
   const [isSaving, setIsSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
+  const supplierSelectRef = useRef<HTMLSelectElement | null>(null);
+  const supplierInvoiceRef = useRef<HTMLInputElement | null>(null);
+  const invoiceDateRef = useRef<HTMLInputElement | null>(null);
+  const notesInputRef = useRef<HTMLInputElement | null>(null);
   const productInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const batchInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -161,6 +165,31 @@ export default function PurchaseEntry() {
   }
 
   const handleAddRow = () => {
+    const newItem = createEmptyItem();
+    setItems(current => [...current, newItem]);
+    window.requestAnimationFrame(() => productInputRefs.current[newItem.id]?.focus());
+  };
+
+  const focusPurchaseField = (
+    field: 'product' | 'batch' | 'quantity' | 'purchasePrice' | 'salePrice',
+    itemId: string
+  ) => {
+    window.requestAnimationFrame(() => {
+      const selector = `[data-purchase-${field}="${itemId}"]`;
+      const input = document.querySelector<HTMLInputElement>(selector);
+      input?.focus();
+      input?.select?.();
+    });
+  };
+
+  const handleSalePriceEnter = (itemId: string) => {
+    const currentIndex = items.findIndex(row => row.id === itemId);
+    if (currentIndex === -1) return;
+    const nextItem = items[currentIndex + 1];
+    if (nextItem) {
+      focusPurchaseField('product', nextItem.id);
+      return;
+    }
     const newItem = createEmptyItem();
     setItems(current => [...current, newItem]);
     window.requestAnimationFrame(() => productInputRefs.current[newItem.id]?.focus());
@@ -308,6 +337,56 @@ export default function PurchaseEntry() {
     };
   }, [items]);
 
+  useEffect(() => {
+    const handleKeyboardShortcuts = (event: KeyboardEvent) => {
+      if (showSupplierModal || autofillModal) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (showSupplierModal) setShowSupplierModal(false);
+          if (autofillModal) confirmAutofill(false);
+        }
+        return;
+      }
+
+      if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        supplierInvoiceRef.current?.focus();
+        supplierInvoiceRef.current?.select();
+        return;
+      }
+
+      if (event.altKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        handleAddRow();
+        return;
+      }
+
+      if (event.key === 'F2') {
+        event.preventDefault();
+        void handleSavePurchase(false);
+        return;
+      }
+
+      if (event.key === 'F3') {
+        event.preventDefault();
+        void handleSavePurchase(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyboardShortcuts);
+    return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
+  }, [
+    autofillModal,
+    showSupplierModal,
+    items,
+    selectedSupplierId,
+    invoiceNumber,
+    invoiceDate,
+    notes,
+    suppliers,
+    purchaseTotals,
+  ]);
+
   // Inline Supplier Addition
   const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -425,11 +504,11 @@ export default function PurchaseEntry() {
         return;
       }
       if (!Number.isFinite(item.purchasePrice) || item.purchasePrice <= 0) {
-        failValidation(`Purchase Price must be greater than ₹0 for row #${rowNum}`);
+        failValidation(`Purchase Price must be greater than zero for row #${rowNum}`);
         return;
       }
       if (!Number.isFinite(item.salePrice) || item.salePrice <= 0) {
-        failValidation(`Sale Price must be greater than ₹0 for row #${rowNum}`);
+        failValidation(`Sale Price must be greater than zero for row #${rowNum}`);
         return;
       }
       if (![0, 5, 12, 18, 28].includes(item.gstPercentage)) {
@@ -527,7 +606,7 @@ export default function PurchaseEntry() {
         setAutofillModal(null);
         window.scrollTo({ top: 0, behavior: 'smooth' });
         window.requestAnimationFrame(() => {
-          document.querySelector<HTMLInputElement>('[data-purchase-product-input="true"]')?.focus();
+          supplierSelectRef.current?.focus();
         });
       } else {
         navigate('/purchases');
@@ -590,15 +669,20 @@ export default function PurchaseEntry() {
               <FileText className="h-5 w-5 text-primary" />
               Supplier & Document Details
             </h3>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowSupplierModal(true)}
-              className="rounded-xl flex items-center justify-center gap-1 text-primary border-primary/20 hover:bg-primary/5 font-semibold min-h-11 sm:h-9 sm:min-h-0 w-full sm:w-auto"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add New Supplier
-            </Button>
+            <div className="flex flex-col items-start gap-2 sm:items-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSupplierModal(true)}
+                className="rounded-xl flex items-center justify-center gap-1 text-primary border-primary/20 hover:bg-primary/5 font-semibold min-h-11 sm:h-9 sm:min-h-0 w-full sm:w-auto"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add New Supplier
+              </Button>
+              <span className="text-[11px] font-bold text-text/45">
+                Enter moves forward - Alt+A adds row - F2 saves - F3 saves and starts a fresh purchase
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -606,8 +690,16 @@ export default function PurchaseEntry() {
             <div>
               <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Select Supplier <RequiredMark /></label>
               <select
+                ref={supplierSelectRef}
                 value={selectedSupplierId}
                 onChange={(e) => setSelectedSupplierId(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    supplierInvoiceRef.current?.focus();
+                    supplierInvoiceRef.current?.select();
+                  }
+                }}
                 className="w-full h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-semibold transition-all"
               >
                 <option value="">-- Choose Supplier --</option>
@@ -621,10 +713,17 @@ export default function PurchaseEntry() {
             <div>
               <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Supplier Invoice # <RequiredMark /></label>
               <input
+                ref={supplierInvoiceRef}
                 type="text"
                 placeholder="e.g. INV-1002"
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    invoiceDateRef.current?.focus();
+                  }
+                }}
                 className="w-full h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-semibold transition-all placeholder:text-text/30"
               />
             </div>
@@ -633,9 +732,17 @@ export default function PurchaseEntry() {
             <div>
               <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Invoice Date <RequiredMark /></label>
               <input
+                ref={invoiceDateRef}
                 type="date"
                 value={invoiceDate}
                 onChange={(e) => setInvoiceDate(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    notesInputRef.current?.focus();
+                    notesInputRef.current?.select();
+                  }
+                }}
                 className="w-full h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-semibold transition-all"
               />
             </div>
@@ -644,10 +751,20 @@ export default function PurchaseEntry() {
             <div>
               <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Internal Notes (Optional)</label>
               <input
+                ref={notesInputRef}
                 type="text"
                 placeholder="e.g. Received intact, fridge stock"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    const firstItem = items[0];
+                    if (firstItem) {
+                      focusPurchaseField('product', firstItem.id);
+                    }
+                  }
+                }}
                 className="w-full h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-semibold transition-all placeholder:text-text/30"
               />
             </div>
@@ -681,7 +798,7 @@ export default function PurchaseEntry() {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text/40" />
                       <input
                         ref={(element) => { productInputRefs.current[item.id] = element; }}
-                        data-purchase-product-input="true"
+                        data-purchase-product={item.id}
                         type="text"
                         placeholder="Type name, brand, or SKU..."
                         value={item.searchQuery}
@@ -712,6 +829,9 @@ export default function PurchaseEntry() {
                             const selected = suggestions[activeIndex >= 0 ? activeIndex : 0];
                             if (selected.type === 'inventory') handleSelectProduct(idx, selected.product);
                             else handleSelectCatalogueMedicine(idx, selected.medicine);
+                          } else if (event.key === 'Enter' && item.productId) {
+                            event.preventDefault();
+                            focusPurchaseField('batch', item.id);
                           } else if (event.key === 'Escape') {
                             const updated = [...items];
                             updated[idx].showSuggestions = false;
@@ -749,8 +869,8 @@ export default function PurchaseEntry() {
                             <p className="font-bold text-text">{medicine.name}</p>
                             <p className="text-text/50 font-medium">
                               {isInventory
-                                ? `Your inventory · Brand: ${suggestion.product.brand || 'N/A'} · Stock: ${suggestion.product.stockQuantity}`
-                                : `Medicine catalogue · Mfg: ${suggestion.medicine.manufacturer || 'Not listed'}`}
+                                ? `Your inventory - Brand: ${suggestion.product.brand || 'N/A'} - Stock: ${suggestion.product.stockQuantity}`
+                                : `Medicine catalogue - Manufacturer: ${suggestion.medicine.manufacturer || 'Not listed'}`}
                             </p>
                           </button>
                           );
@@ -764,10 +884,17 @@ export default function PurchaseEntry() {
                     <label className="block text-xs font-bold text-text/50 uppercase mb-2">Batch # <RequiredMark /></label>
                     <input
                       ref={(element) => { batchInputRefs.current[item.id] = element; }}
+                      data-purchase-batch={item.id}
                       type="text"
                       placeholder="e.g. B-99"
                       value={item.batchNumber}
                       onChange={(e) => handleItemFieldChange(idx, 'batchNumber', e.target.value.toUpperCase())}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          document.getElementById(`purchase-${item.id}-mfg-month`)?.focus();
+                        }
+                      }}
                       required
                       className="w-full min-h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-mono font-bold transition-all placeholder:text-text/30"
                     />
@@ -785,17 +912,25 @@ export default function PurchaseEntry() {
                     <MonthYearField label="EXP (M/Y)" month={item.expMonth} year={item.expYear}
                       onMonthChange={value => handleItemFieldChange(idx, 'expMonth', value)}
                       onYearChange={value => handleItemFieldChange(idx, 'expYear', value)}
-                      kind="expiry" required compact idPrefix={`purchase-${item.id}-exp`} />
+                      kind="expiry" required compact idPrefix={`purchase-${item.id}-exp`}
+                      onComplete={() => focusPurchaseField('quantity', item.id)} />
                   </div>
 
                   {/* Quantity (1 col) */}
                   <div className="md:col-span-1">
                     <label className="block text-xs font-bold text-text/50 uppercase mb-2">Quantity <RequiredMark /></label>
                     <input
+                      data-purchase-quantity={item.id}
                       type="number"
                       placeholder="0"
                       value={item.quantity || ''}
                       onChange={(e) => handleItemFieldChange(idx, 'quantity', Math.max(0, parseInt(e.target.value) || 0))}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          focusPurchaseField('purchasePrice', item.id);
+                        }
+                      }}
                       className="w-full h-10 px-2.5 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-xs font-bold transition-all"
                     />
                   </div>
@@ -804,10 +939,17 @@ export default function PurchaseEntry() {
                   <div className="md:col-span-1">
                     <label className="block text-xs font-bold text-text/50 uppercase mb-2">Buy Price <RequiredMark /></label>
                     <input
+                      data-purchase-purchasePrice={item.id}
                       type="number"
                       placeholder="0.00"
                       value={item.purchasePrice || ''}
                       onChange={(e) => handleItemFieldChange(idx, 'purchasePrice', Math.max(0, parseFloat(e.target.value) || 0))}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          focusPurchaseField('salePrice', item.id);
+                        }
+                      }}
                       min="0.01"
                       step="0.01"
                       required
@@ -819,10 +961,17 @@ export default function PurchaseEntry() {
                   <div className="md:col-span-1">
                     <label className="block text-xs font-bold text-text/50 uppercase mb-2">Sale Price <RequiredMark /></label>
                     <input
+                      data-purchase-salePrice={item.id}
                       type="number"
                       placeholder="0.00"
                       value={item.salePrice || ''}
                       onChange={(e) => handleItemFieldChange(idx, 'salePrice', Math.max(0, parseFloat(e.target.value) || 0))}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          handleSalePriceEnter(item.id);
+                        }
+                      }}
                       min="0.01"
                       step="0.01"
                       required
@@ -898,8 +1047,8 @@ export default function PurchaseEntry() {
             </Button>
 
             <div className="text-right space-y-1 mt-4 md:mt-0">
-              <p className="text-xs font-semibold text-text/50">Gross {formatCurrency(purchaseTotals.gross)} · Discount {formatCurrency(purchaseTotals.discount)}</p>
-              <p className="text-xs font-semibold text-text/50">Taxable {formatCurrency(purchaseTotals.taxable)} · GST {formatCurrency(purchaseTotals.gst)}</p>
+              <p className="text-xs font-semibold text-text/50">Gross {formatCurrency(purchaseTotals.gross)} - Discount {formatCurrency(purchaseTotals.discount)}</p>
+              <p className="text-xs font-semibold text-text/50">Taxable {formatCurrency(purchaseTotals.taxable)} - GST {formatCurrency(purchaseTotals.gst)}</p>
               <span className="text-sm font-semibold text-text/50">Grand Total:</span>
               <span className="text-2xl font-black text-text block">{formatCurrency(purchaseTotals.total)}</span>
             </div>
@@ -925,7 +1074,7 @@ export default function PurchaseEntry() {
             className="rounded-xl md:rounded-2xl min-h-12 px-3 md:px-6 font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all flex-1 md:flex-none"
           >
             <Save className="h-5 w-5" />
-            {isSaving ? "Saving stock in..." : "Save & Close"}
+            {isSaving ? 'Saving...' : 'Save & Close'}
           </Button>
         </div>
 

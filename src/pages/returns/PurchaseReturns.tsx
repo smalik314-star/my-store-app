@@ -36,6 +36,7 @@ export default function PurchaseReturns() {
   const { showToast } = useToast();
   const requestIdRef = useRef<string | null>(null);
   const savingRef = useRef(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -102,6 +103,9 @@ export default function PurchaseReturns() {
       setReturnedByItem(returned);
       setDraft({});
       requestIdRef.current = null;
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLInputElement>('[data-purchase-return-qty]')?.focus();
+      });
     } catch (error: any) {
       showToast(error.message || 'Purchase items could not be loaded.', 'danger');
     } finally {
@@ -124,6 +128,21 @@ export default function PurchaseReturns() {
     requestIdRef.current = null;
   };
 
+  const focusNextQuantityInput = (currentItemId: string) => {
+    const currentIndex = items.findIndex(item => item.id === currentItemId);
+    for (let index = currentIndex + 1; index < items.length; index += 1) {
+      const nextItem = items[index];
+      if (returnableQuantity(nextItem) > 0) {
+        window.requestAnimationFrame(() => {
+          document
+            .querySelector<HTMLInputElement>(`[data-purchase-return-qty="${nextItem.id}"]`)
+            ?.focus();
+        });
+        return;
+      }
+    }
+  };
+
   const previewTotal = useMemo(
     () =>
       roundMoney(
@@ -135,6 +154,25 @@ export default function PurchaseReturns() {
       ),
     [draft, items]
   );
+
+  useEffect(() => {
+    const handleKeyboardShortcuts = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (event.key === 'F2' && selected && previewTotal > 0 && !savingRef.current) {
+        event.preventDefault();
+        void submit();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyboardShortcuts);
+    return () => window.removeEventListener('keydown', handleKeyboardShortcuts);
+  }, [selected, previewTotal]);
 
   const submit = async () => {
     if (!user?.tenantId || !selected || savingRef.current) return;
@@ -205,12 +243,23 @@ export default function PurchaseReturns() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text/40" />
                 <input
+                  ref={searchInputRef}
                   value={search}
                   onChange={event => setSearch(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' && filtered[0]) {
+                      event.preventDefault();
+                      void selectPurchase(filtered[0]);
+                    }
+                  }}
                   placeholder="Purchase, supplier or invoice"
+                  aria-label="Search returnable purchases"
                   className="h-12 w-full rounded-xl border border-border bg-surface pl-10 pr-4 text-sm outline-none focus:border-primary"
                 />
               </div>
+              <p className="mt-3 text-xs font-semibold text-text/45">
+                Ctrl+F focuses search. Enter opens the first result. F2 posts the current return.
+              </p>
             </div>
             {loading ? (
               <SkeletonTable rows={6} />
@@ -269,7 +318,7 @@ export default function PurchaseReturns() {
                 <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
                   <div>
                     <div className="font-bold">
-                      {selected.purchaseNumber} · {selected.supplierName}
+                      {selected.purchaseNumber} - {selected.supplierName}
                     </div>
                     <div className="mt-1 text-xs text-text/55">
                       Previously returned quantities are excluded. Current batch stock is revalidated
@@ -305,6 +354,7 @@ export default function PurchaseReturns() {
                               Return qty
                             </span>
                             <input
+                              data-purchase-return-qty={item.id}
                               type="number"
                               min="0"
                               max={available}
@@ -314,6 +364,12 @@ export default function PurchaseReturns() {
                               onChange={event =>
                                 setLine(item.id, { quantity: Number(event.target.value) })
                               }
+                              onKeyDown={event => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  focusNextQuantityInput(item.id);
+                                }
+                              }}
                               className="mt-2 h-12 w-full rounded-xl border border-border bg-surface px-3"
                             />
                           </label>
@@ -380,6 +436,7 @@ export default function PurchaseReturns() {
                             <td className="px-4 py-3 text-right font-bold">{available}</td>
                             <td className="px-4 py-3">
                               <input
+                                data-purchase-return-qty={item.id}
                                 type="number"
                                 min="0"
                                 max={available}
@@ -389,6 +446,12 @@ export default function PurchaseReturns() {
                                 onChange={event =>
                                   setLine(item.id, { quantity: Number(event.target.value) })
                                 }
+                                onKeyDown={event => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    focusNextQuantityInput(item.id);
+                                  }
+                                }}
                                 className="h-11 w-24 rounded-lg border border-border bg-surface px-3"
                               />
                             </td>
@@ -444,7 +507,7 @@ export default function PurchaseReturns() {
                     </div>
                     <div className="font-semibold">{row.supplierName}</div>
                     <div className="text-xs text-text/55">
-                      {row.purchaseNumber} · Payable adjusted {formatCurrency(row.payableAdjusted)}
+                      {row.purchaseNumber} - Payable adjusted {formatCurrency(row.payableAdjusted)}
                     </div>
                   </div>
                 ))}
@@ -494,7 +557,7 @@ export default function PurchaseReturns() {
               onClick={submit}
               disabled={saving || previewTotal <= 0}
             >
-              {saving ? 'Posting…' : `Post Return · ${formatCurrency(previewTotal)}`}
+              {saving ? 'Posting…' : `Post Return - ${formatCurrency(previewTotal)}`}
             </Button>
           </div>
         )}
