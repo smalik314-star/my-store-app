@@ -20,6 +20,7 @@ service cloud.firestore {
         && (
           counterId == 'invoices_' + userData().tenantId
           || counterId == 'estimates_' + userData().tenantId
+          || counterId == 'reorders_' + userData().tenantId
           || counterId == userData().tenantId + '_purchase'
         );
     }
@@ -403,6 +404,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /reorderOrders/{orderId} {
+      allow get: if hasTenantPrefixedId(orderId) || inTenant(resource.data.tenantId);
+      allow list: if inTenant(resource.data.tenantId);
+      allow create: if validTenantCreate(request.resource.data.tenantId)
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.lines is list
+        && request.resource.data.lines.size() > 0
+        && request.resource.data.totalItems is int
+        && request.resource.data.totalItems > 0
+        && request.resource.data.status == 'draft';
+      allow update: if inTenant(resource.data.tenantId) && sameTenant()
+        && roleIs(['owner','admin','staff'])
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status','updatedAt'])
+        && request.resource.data.status in ['sent','partially_received','received','cancelled'];
+      allow delete: if false;
+    }
+
     match /counters/{counterId} {
       // Transactions must read a counter before its first create. Restrict that
       // missing-document read to the signed-in user's own deterministic IDs.
@@ -418,6 +438,11 @@ service cloud.firestore {
             && request.resource.data.financialYear is string)
           ||
           (counterId == 'estimates_' + userData().tenantId
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.financialYear is string)
+          ||
+          (counterId == 'reorders_' + userData().tenantId
             && request.resource.data.count is int
             && request.resource.data.count >= 1
             && request.resource.data.financialYear is string)
@@ -440,6 +465,11 @@ service cloud.firestore {
             && request.resource.data.financialYear is string)
           ||
           (counterId == 'estimates_' + userData().tenantId
+            && request.resource.data.count is int
+            && request.resource.data.count >= 1
+            && request.resource.data.financialYear is string)
+          ||
+          (counterId == 'reorders_' + userData().tenantId
             && request.resource.data.count is int
             && request.resource.data.count >= 1
             && request.resource.data.financialYear is string)

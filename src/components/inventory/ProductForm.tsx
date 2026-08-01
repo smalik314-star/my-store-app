@@ -60,7 +60,8 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     mrp: product?.mrp || 0,
     gstPercentage: product?.gstPercentage !== undefined ? product.gstPercentage : 12,
     unit: product?.unit || 'Strip',
-    minimumStock: product?.minimumStock !== undefined ? product.minimumStock : 10,
+    minimumStock: product?.minimumStock !== undefined ? product.minimumStock : 0,
+    reorderTarget: product?.reorderTarget || 0,
     rackLocation: product?.rackLocation || '',
     description: product?.description || '',
     imageUrl: product?.imageUrl || '',
@@ -646,6 +647,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
         gstPercentage: Number(formData.gstPercentage) || 0,
         unit: formData.unit || 'Strip',
         minimumStock: Number(formData.minimumStock) || 0,
+        reorderTarget: Number(formData.reorderTarget) || 0,
         rackLocation: formData.rackLocation.trim() || '',
         description: formData.description.trim() || '',
         imageUrl: imageUrl || '',
@@ -1251,7 +1253,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
                       {/* Minimum Stock */}
                       <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">Minimum Stock</label>
+                        <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">Low Stock Alert (Optional)</label>
                         <div className="relative">
                           <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-text/20" />
                           <input
@@ -1264,6 +1266,12 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                             min="0"
                           />
                         </div>
+                      </div>
+
+                      {/* Rack Location */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">Reorder Target (Optional)</label>
+                        <input type="number" name="reorderTarget" value={formData.reorderTarget || ''} onChange={handleChange} min="0" className="w-full px-4 py-3 rounded-xl border border-border bg-background text-xs font-semibold" placeholder="Stock to restore up to" />
                       </div>
 
                       {/* Rack Location */}

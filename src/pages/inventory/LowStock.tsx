@@ -73,7 +73,7 @@ export default function LowStock() {
           ...data,
           id: doc.id,
           status,
-          suggestedReorder: data.minimumStock * 2
+          suggestedReorder: Math.max(0, (data.reorderTarget || data.minimumStock * 2) - data.stockQuantity)
         };
       });
 

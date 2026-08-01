@@ -31,6 +31,7 @@ const NotFound = lazy(() => import('../pages/NotFound'));
 const BusinessModeSetup = lazy(() => import('../pages/onboarding/BusinessModeSetup'));
 const Estimates = lazy(() => import('../pages/estimates/Estimates'));
 const EstimateDetail = lazy(() => import('../pages/estimates/EstimateDetail'));
+const ReorderManagement = lazy(() => import('../pages/inventory/ReorderManagement'));
 
 // Purchases pages
 const Purchases = lazy(() => import('../pages/purchases/Purchases'));
@@ -65,6 +66,7 @@ export function AppRouter() {
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/expiry-alerts" element={<ExpiryAlerts />} />
                 <Route path="/low-stock" element={<LowStock />} />
+                <Route path="/reorders" element={<ReorderManagement />} />
                 <Route path="/stock-adjustment" element={<StockAdjustment />} />
                 <Route path="/customers" element={<Customers />} />
                 <Route path="/customers/:id" element={<CustomerProfile />} />

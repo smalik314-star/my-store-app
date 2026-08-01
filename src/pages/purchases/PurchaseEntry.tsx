@@ -158,7 +158,7 @@ export default function PurchaseEntry() {
       manufacturer: '',
       unit: 'Units',
       gstPercentage: 0,
-      minimumStock: 10,
+      minimumStock: 0,
       isNewProduct: false,
       
       batchNumber: '',
@@ -253,7 +253,7 @@ export default function PurchaseEntry() {
     updated[idx].manufacturer = product.manufacturer || '';
     updated[idx].unit = product.unit || 'Units';
     updated[idx].gstPercentage = product.gstPercentage ?? 0;
-    updated[idx].minimumStock = product.minimumStock ?? 10;
+    updated[idx].minimumStock = product.minimumStock ?? 0;
     updated[idx].isNewProduct = false;
     
     updated[idx].searchQuery = product.name;
@@ -897,7 +897,11 @@ export default function PurchaseEntry() {
                     </div>
                   </div>
 
-                  <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-7 gap-3 pt-3 border-t border-border/70">
+                  <div className="md:col-span-12 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 pt-3 border-t border-border/70">
+                    <div>
+                      <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Low Stock Alert (Optional)</label>
+                      <input type="number" min="0" value={item.minimumStock || ''} onChange={(e) => handleItemFieldChange(idx, 'minimumStock', Math.max(0, Number(e.target.value) || 0))} placeholder="e.g. 10" className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />
+                    </div>
                     <div>
                       <label className="block text-[10px] font-bold text-text/50 uppercase mb-1">Brand <RequiredMark /></label>
                       <input value={item.brand} onChange={(e) => handleItemFieldChange(idx, 'brand', e.target.value)} placeholder="Enter brand" required className="w-full h-9 px-3 border border-border rounded-lg bg-surface text-xs font-semibold" />

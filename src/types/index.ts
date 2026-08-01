@@ -89,6 +89,7 @@ export interface Product {
   stockQuantity: number;
   unit: string;
   minimumStock: number;
+  reorderTarget?: number;
   batchNumber: string;
   expiryDate: any; // Firebase Timestamp
   manufacturingDate?: any; // Firebase Timestamp
@@ -117,6 +118,38 @@ export interface Supplier {
   creditBalance?: number;
   createdAt: any;
   updatedAt?: any;
+}
+
+export interface ReorderLine {
+  productId: string;
+  productName: string;
+  brand?: string;
+  manufacturer?: string;
+  unit: string;
+  currentStock: number;
+  minimumStock: number;
+  targetStock: number;
+  orderQuantity: number;
+  lastPurchasePrice?: number;
+}
+
+export interface ReorderOrder {
+  id: string;
+  tenantId: string;
+  reorderNumber: string;
+  requestId: string;
+  supplierId: string;
+  supplierName: string;
+  supplierPhone?: string;
+  supplierEmail?: string;
+  lines: ReorderLine[];
+  totalItems: number;
+  estimatedAmount: number;
+  status: 'draft' | 'sent' | 'partially_received' | 'received' | 'cancelled';
+  notes?: string;
+  createdBy: string;
+  createdAt: any;
+  updatedAt: any;
 }
 
 export interface Purchase {

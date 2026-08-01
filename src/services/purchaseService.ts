@@ -324,7 +324,7 @@ export const purchaseService = {
                 manufacturer: firstItem.productManufacturer || '',
                 category: firstItem.productCategory || 'Others',
                 unit: firstItem.productUnit || 'Units',
-                minimumStock: Number(firstItem.productMinimumStock) || 10,
+                minimumStock: Number(firstItem.productMinimumStock) || 0,
                 sku: '',
                 barcode: '',
                 purchasePrice: 0,
@@ -404,6 +404,9 @@ export const purchaseService = {
             batches: batchesList,
             updatedAt: serverTimestamp()
           };
+          if (Number.isFinite(Number(latestItem.productMinimumStock))) {
+            updatedProductFields.minimumStock = Math.max(0, Number(latestItem.productMinimumStock) || 0);
+          }
           if (currentBatch) {
             updatedProductFields.batchNumber = currentBatch.batchNumber;
             updatedProductFields.expiryDate = currentBatch.expiryDate;

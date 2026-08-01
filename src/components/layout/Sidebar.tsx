@@ -82,6 +82,7 @@ const getMenuSections = (mode: BusinessMode): Array<{ title: string; items: Menu
     items: [
       { icon: Package, label: 'Product Master', path: '/inventory', active: true },
       { icon: ShoppingCart, label: 'Low Stock', path: '/low-stock', active: true },
+      { icon: ReceiptText, label: 'Reorder Management', path: '/reorders', active: true },
       { icon: Clock, label: 'Expiry Management', path: '/expiry-alerts', active: true },
       {
         icon: SlidersHorizontal,
