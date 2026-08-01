@@ -24,7 +24,7 @@ beforeAll(async () => {
     projectId,
     firestore: { rules: readFileSync(resolve('firestore.rules'), 'utf8') },
   });
-});
+}, 30000);
 
 beforeEach(async () => {
   await env.clearFirestore();
@@ -41,7 +41,11 @@ beforeEach(async () => {
   });
 });
 
-afterAll(async () => env.cleanup());
+afterAll(async () => {
+  if (env) {
+    await env.cleanup();
+  }
+});
 
 describe('catalogue product isolation', () => {
   it('allows an own-tenant missing catalogue product read followed by create', async () => {
