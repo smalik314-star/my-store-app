@@ -20,6 +20,7 @@ import { db } from '../../firebase/config';
 import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 import { MedicineAutocomplete } from '../common/MedicineAutocomplete';
 import { RequiredMark } from '../common/RequiredMark';
+import { MonthYearField } from '../common/MonthYearField';
 import { useToast } from '../../context/ToastContext';
 
 interface ProductFormProps {
@@ -535,10 +536,25 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
       return;
     }
 
-    const mfgDate = new Date(formData.manufacturingDate);
-    const expDate = new Date(formData.expiryDate);
+    const [mfgYearValue, mfgMonthValue] = formData.manufacturingDate.split('-').map(Number);
+    const [expYearValue, expMonthValue] = formData.expiryDate.split('-').map(Number);
+    const mfgDate = new Date(mfgYearValue, mfgMonthValue - 1, 1);
+    const expDate = new Date(expYearValue, expMonthValue, 0, 23, 59, 59, 999);
+    const currentMonth = new Date();
+    currentMonth.setDate(1);
+    currentMonth.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     if (expDate <= mfgDate) {
       setError('Expiry Date must be after Manufacturing Date');
+      return;
+    }
+    if (mfgDate > currentMonth) {
+      setError('Manufacturing month cannot be in the future');
+      return;
+    }
+    if (expDate < today) {
+      setError('Expired stock cannot be added to saleable inventory');
       return;
     }
 
@@ -902,93 +918,13 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
                 </div>
               </div>
 
-              {/* Manufacturing Date */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Manufacturing Date <RequiredMark />
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <select
-                    name="mfgMonth"
-                    value={mfgMonth}
-                    onChange={(e) => handleMfgMonthChange(e.target.value)}
-                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
-                    required
-                  >
-                    <option value="" disabled>Month</option>
-                    {Array.from({ length: 12 }, (_, i) => {
-                      const monthNum = String(i + 1).padStart(2, '0');
-                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-IN', { month: 'short' });
-                      return (
-                        <option key={monthNum} value={monthNum}>
-                          {monthNum} - {monthName}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  <select
-                    name="mfgYear"
-                    value={mfgYear}
-                    onChange={(e) => handleMfgYearChange(e.target.value)}
-                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
-                    required
-                  >
-                    <option value="" disabled>Year</option>
-                    {Array.from({ length: 12 }, (_, i) => {
-                      const yr = String(new Date().getFullYear() - 10 + i);
-                      return (
-                        <option key={yr} value={yr}>
-                          {yr}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              </div>
+              <MonthYearField label="Manufacturing (M/Y)" month={mfgMonth} year={mfgYear}
+                onMonthChange={handleMfgMonthChange} onYearChange={handleMfgYearChange}
+                kind="manufacturing" required idPrefix="product-mfg" />
 
-              {/* Expiry Date */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-text/50 uppercase tracking-widest ml-1">
-                  Expiry Date <RequiredMark />
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <select
-                    name="expMonth"
-                    value={expMonth}
-                    onChange={(e) => handleExpMonthChange(e.target.value)}
-                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
-                    required
-                  >
-                    <option value="" disabled>Month</option>
-                    {Array.from({ length: 12 }, (_, i) => {
-                      const monthNum = String(i + 1).padStart(2, '0');
-                      const monthName = new Date(2020, i, 1).toLocaleDateString('en-IN', { month: 'short' });
-                      return (
-                        <option key={monthNum} value={monthNum}>
-                          {monthNum} - {monthName}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  <select
-                    name="expYear"
-                    value={expYear}
-                    onChange={(e) => handleExpYearChange(e.target.value)}
-                    className="w-full px-3 py-3 rounded-xl border border-border bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none font-semibold text-xs cursor-pointer"
-                    required
-                  >
-                    <option value="" disabled>Year</option>
-                    {Array.from({ length: 16 }, (_, i) => {
-                      const yr = String(new Date().getFullYear() - 2 + i);
-                      return (
-                        <option key={yr} value={yr}>
-                          {yr}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              </div>
+              <MonthYearField label="Expiry (M/Y)" month={expMonth} year={expYear}
+                onMonthChange={handleExpMonthChange} onYearChange={handleExpYearChange}
+                kind="expiry" required idPrefix="product-expiry" />
 
               {/* Purchase Price */}
               <div className="flex flex-col gap-1.5">

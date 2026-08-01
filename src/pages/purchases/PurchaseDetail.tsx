@@ -8,7 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { PageTransition } from '../../components/common/PageTransition';
 import { formatCurrency } from '../../utils/currency';
-import { formatDate } from '../../utils/date';
+import { formatDate, formatMedicineMonthYear } from '../../utils/date';
 import { 
   ArrowLeft, 
   Printer, 
@@ -181,7 +181,7 @@ export default function PurchaseDetail() {
                     <div>
                       <p className="text-text/50 font-semibold">MFG / EXP</p>
                       <p className="font-bold mt-0.5">
-                        {formatDate(item.mfgDate, { month: '2-digit', year: 'numeric' })} / {formatDate(item.expiryDate, { month: '2-digit', year: 'numeric' })}
+                        {formatMedicineMonthYear(item.mfgDate)} / {formatMedicineMonthYear(item.expiryDate)}
                       </p>
                     </div>
                     <div>
@@ -223,9 +223,9 @@ export default function PurchaseDetail() {
                         {item.batchNumber}
                       </td>
                       <td className="px-6 py-4.5 text-center text-sm font-medium">
-                        <span className="text-text/50">M:</span> {formatDate(item.mfgDate, { month: '2-digit', year: 'numeric' })}
+                        <span className="text-text/50">M:</span> {formatMedicineMonthYear(item.mfgDate)}
                         <span className="mx-2 text-text/20">|</span>
-                        <span className="text-text/50">E:</span> {formatDate(item.expiryDate, { month: '2-digit', year: 'numeric' })}
+                        <span className="text-text/50">E:</span> {formatMedicineMonthYear(item.expiryDate)}
                       </td>
                       <td className="px-6 py-4.5 text-right font-semibold text-text print:text-black">
                         {formatCurrency(item.purchasePrice)}

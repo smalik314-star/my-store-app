@@ -45,3 +45,9 @@ export function formatDate(value: any, options?: Intl.DateTimeFormatOptions): st
   const date = toJsDate(value);
   return date.toLocaleDateString('en-IN', options || { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+/** Pharmacy batches are entered and printed as month/year, not an artificial day. */
+export function formatMedicineMonthYear(value: any): string {
+  if (!value) return '—';
+  return toJsDate(value).toLocaleDateString('en-IN', { month: '2-digit', year: 'numeric' });
+}

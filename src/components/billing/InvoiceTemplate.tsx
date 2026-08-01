@@ -12,7 +12,7 @@ import {
 import { cn } from '../../utils/cn';
 import { useSettings } from '../../context/SettingsContext';
 import { formatCurrency } from '../../utils/currency';
-import { toJsDate, formatDate } from '../../utils/date';
+import { toJsDate, formatDate, formatMedicineMonthYear } from '../../utils/date';
 import { Logo } from '../common/Logo';
 
 interface InvoiceTemplateProps {
@@ -76,7 +76,7 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                 <span className="w-1/3 text-right">{formatCurrency(item.total)}</span>
               </div>
               <div className="text-[8px] text-gray-500">
-                Batch: {item.batchNumber || 'N/A'} | Exp: {item.expiryDate ? formatDate(item.expiryDate, { month: '2-digit', year: '2-digit' }) : 'N/A'}
+                Batch: {item.batchNumber || 'N/A'} | Exp: {item.expiryDate ? formatMedicineMonthYear(item.expiryDate) : 'N/A'}
               </div>
             </div>
           ))}
@@ -228,10 +228,10 @@ export const InvoiceTemplate = forwardRef<HTMLDivElement, InvoiceTemplateProps>(
                   <span className="text-xs font-bold text-text">{item.batchNumber || '—'}</span>
                 </td>
                 <td className="px-4 py-6 text-center">
-                  <span className="text-xs text-text/60">{item.manufacturingDate ? formatDate(item.manufacturingDate) : '—'}</span>
+                  <span className="text-xs text-text/60">{formatMedicineMonthYear(item.manufacturingDate)}</span>
                 </td>
                 <td className="px-4 py-6 text-center">
-                  <span className="text-xs text-text/60">{item.expiryDate ? formatDate(item.expiryDate) : '—'}</span>
+                  <span className="text-xs text-text/60">{formatMedicineMonthYear(item.expiryDate)}</span>
                 </td>
                 <td className="px-4 py-6 text-center">
                   <span className="text-sm font-black text-text">

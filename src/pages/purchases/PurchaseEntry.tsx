@@ -6,6 +6,7 @@ import { Supplier, Product } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { RequiredMark } from '../../components/common/RequiredMark';
+import { MonthYearField } from '../../components/common/MonthYearField';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { PageTransition } from '../../components/common/PageTransition';
@@ -23,24 +24,6 @@ import {
   FileText, 
   HelpCircle 
 } from 'lucide-react';
-
-const MONTHS = [
-  { value: '01', label: 'Jan (01)' },
-  { value: '02', label: 'Feb (02)' },
-  { value: '03', label: 'Mar (03)' },
-  { value: '04', label: 'Apr (04)' },
-  { value: '05', label: 'May (05)' },
-  { value: '06', label: 'Jun (06)' },
-  { value: '07', label: 'Jul (07)' },
-  { value: '08', label: 'Aug (08)' },
-  { value: '09', label: 'Sep (09)' },
-  { value: '10', label: 'Oct (10)' },
-  { value: '11', label: 'Nov (11)' },
-  { value: '12', label: 'Dec (12)' },
-];
-
-const currentYear = new Date().getFullYear();
-const YEARS = Array.from({ length: 30 }, (_, i) => currentYear - 5 + i);
 
 interface FormItem {
   id: string; // client-side temp id
@@ -461,9 +444,22 @@ export default function PurchaseEntry() {
       // Convert month/years to timestamps
       const mfgDateObj = new Date(parseInt(item.mfgYear), parseInt(item.mfgMonth) - 1, 1);
       const expDateObj = new Date(parseInt(item.expYear), parseInt(item.expMonth), 0, 23, 59, 59, 999);
+      const currentMonth = new Date();
+      currentMonth.setDate(1);
+      currentMonth.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
       if (expDateObj.getTime() <= mfgDateObj.getTime()) {
         failValidation(`Expiry Date must be after MFG Date for row #${rowNum}`);
+        return;
+      }
+      if (mfgDateObj.getTime() > currentMonth.getTime()) {
+        failValidation(`MFG month cannot be in the future for row #${rowNum}`);
+        return;
+      }
+      if (expDateObj.getTime() < today.getTime()) {
+        failValidation(`Expired stock cannot be added for row #${rowNum}`);
         return;
       }
 
@@ -777,70 +773,19 @@ export default function PurchaseEntry() {
                     />
                   </div>
 
-                  {/* MFG Month/Year (2 cols) */}
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-text/70 uppercase mb-2">Mfg (M/Y) <RequiredMark /></label>
-                    <div className="flex gap-1">
-                      <select
-                        value={item.mfgMonth}
-                        onChange={(e) => handleItemFieldChange(idx, 'mfgMonth', e.target.value)}
-                        required
-                        className={`w-1/2 h-10 px-2.5 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
-                          !item.mfgMonth ? 'text-text/30' : 'text-text'
-                        }`}
-                      >
-                        <option value="" disabled hidden className="text-text/30">Month</option>
-                        {MONTHS.map(m => (
-                          <option key={m.value} value={m.value} className="text-text font-semibold">{m.label}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={item.mfgYear}
-                        onChange={(e) => handleItemFieldChange(idx, 'mfgYear', e.target.value)}
-                        required
-                        className={`w-1/2 h-10 px-2 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
-                          !item.mfgYear ? 'text-text/30' : 'text-text'
-                        }`}
-                      >
-                        <option value="" disabled hidden className="text-text/30">Year</option>
-                        {YEARS.map(y => (
-                          <option key={y} value={String(y)} className="text-text font-semibold">{y}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <MonthYearField label="MFG (M/Y)" month={item.mfgMonth} year={item.mfgYear}
+                      onMonthChange={value => handleItemFieldChange(idx, 'mfgMonth', value)}
+                      onYearChange={value => handleItemFieldChange(idx, 'mfgYear', value)}
+                      kind="manufacturing" required compact idPrefix={`purchase-${item.id}-mfg`}
+                      onComplete={() => document.getElementById(`purchase-${item.id}-exp-month`)?.focus()} />
                   </div>
 
-                  {/* EXP Month/Year (2 cols) */}
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-text/70 uppercase mb-2">Exp (M/Y) <RequiredMark /></label>
-                    <div className="flex gap-1">
-                      <select
-                        value={item.expMonth}
-                        onChange={(e) => handleItemFieldChange(idx, 'expMonth', e.target.value)}
-                        required
-                        className={`w-1/2 h-10 px-2.5 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
-                          !item.expMonth ? 'text-text/30' : 'text-text'
-                        }`}
-                      >
-                        <option value="" disabled hidden className="text-text/30">Month</option>
-                        {MONTHS.map(m => (
-                          <option key={m.value} value={m.value} className="text-text font-semibold">{m.label}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={item.expYear}
-                        onChange={(e) => handleItemFieldChange(idx, 'expYear', e.target.value)}
-                        required
-                        className={`w-1/2 h-10 px-2 border border-text/30 rounded-xl bg-surface focus:border-primary/50 outline-none text-xs font-bold transition-all cursor-pointer shadow-sm ${
-                          !item.expYear ? 'text-text/30' : 'text-text'
-                        }`}
-                      >
-                        <option value="" disabled hidden className="text-text/30">Year</option>
-                        {YEARS.map(y => (
-                          <option key={y} value={String(y)} className="text-text font-semibold">{y}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <MonthYearField label="EXP (M/Y)" month={item.expMonth} year={item.expYear}
+                      onMonthChange={value => handleItemFieldChange(idx, 'expMonth', value)}
+                      onYearChange={value => handleItemFieldChange(idx, 'expYear', value)}
+                      kind="expiry" required compact idPrefix={`purchase-${item.id}-exp`} />
                   </div>
 
                   {/* Quantity (1 col) */}
