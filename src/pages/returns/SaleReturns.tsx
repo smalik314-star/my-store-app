@@ -14,6 +14,7 @@ import type { Invoice, InvoiceItem, SaleReturnRecord } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
 import { isBatchExpired } from '../../utils/stock';
+import { matchesSearchQuery } from '../../utils/search';
 
 interface ReturnDraft {
   quantity: number;
@@ -75,12 +76,9 @@ export default function SaleReturns() {
   }, [user?.tenantId]);
 
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return invoices;
     return invoices.filter(invoice =>
-      invoice.invoiceNumber.toLowerCase().includes(term)
-      || invoice.customerName.toLowerCase().includes(term)
-      || invoice.items.some(item => item.name.toLowerCase().includes(term))
+      matchesSearchQuery(search, invoice.invoiceNumber, invoice.customerName)
+      || invoice.items.some(item => matchesSearchQuery(search, item.name))
     );
   }, [invoices, search]);
 

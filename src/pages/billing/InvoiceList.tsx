@@ -37,6 +37,7 @@ import { SkeletonTable } from '../../components/common/Skeleton';
 import { useAuth } from '../../context/AuthContext';
 import { toJsDate } from '../../utils/date';
 import { handleFirestoreError, OperationType } from '../../utils/firestore-errors';
+import { matchesSearchQuery } from '../../utils/search';
 const EmptyState = ({ title, description, icon, action, className }: any) => {
   return (
     <div className={cn("flex flex-col items-center justify-center py-20 text-center", className)}>
@@ -146,10 +147,12 @@ export default function InvoiceList() {
 
     return invoices.filter(inv => {
       const customerPhone = customerPhoneMap.get(inv.customerId) || '';
-      const matchesSearch = 
-        inv.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        inv.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customerPhone.includes(searchTerm);
+      const matchesSearch = matchesSearchQuery(
+        searchTerm,
+        inv.invoiceNumber,
+        inv.customerName,
+        customerPhone
+      );
       
       const matchesStatus = statusFilter === 'ALL' || inv.paymentStatus.toUpperCase() === statusFilter;
       const matchesMethod = methodFilter === 'ALL' || inv.paymentMethod.toUpperCase() === methodFilter;

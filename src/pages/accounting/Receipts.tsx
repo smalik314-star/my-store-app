@@ -13,6 +13,7 @@ import { receiptService } from '../../services/receiptService';
 import type { Invoice, ReceiptRecord } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
+import { matchesSearchQuery } from '../../utils/search';
 
 export default function Receipts() {
   const { user } = useAuth();
@@ -56,11 +57,8 @@ export default function Receipts() {
 
   const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
   const filteredInvoices = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return invoices;
     return invoices.filter(invoice =>
-      invoice.invoiceNumber.toLowerCase().includes(term) ||
-      invoice.customerName.toLowerCase().includes(term)
+      matchesSearchQuery(search, invoice.invoiceNumber, invoice.customerName)
     );
   }, [invoices, search]);
 

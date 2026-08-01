@@ -18,6 +18,7 @@ import type {
 } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
+import { matchesSearchQuery } from '../../utils/search';
 
 type DraftLine = { quantity: number; reason: PurchaseReturnLine['reason'] };
 
@@ -81,12 +82,8 @@ export default function PurchaseReturns() {
   }, [user?.tenantId]);
 
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return purchases;
     return purchases.filter(row =>
-      row.purchaseNumber.toLowerCase().includes(term)
-      || row.invoiceNumber.toLowerCase().includes(term)
-      || row.supplierName.toLowerCase().includes(term)
+      matchesSearchQuery(search, row.purchaseNumber, row.invoiceNumber, row.supplierName)
     );
   }, [purchases, search]);
 

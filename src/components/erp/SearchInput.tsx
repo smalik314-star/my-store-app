@@ -10,7 +10,7 @@ interface SearchInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, '
 }
 
 export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
-  ({ value, onChange, onClear, loading = false, className, placeholder = 'Search…', ...props }, ref) => {
+  ({ value, onChange, onClear, loading = false, className, placeholder = 'Search...', ...props }, ref) => {
     const handleChange = (event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value);
     const clear = () => {
       onChange('');

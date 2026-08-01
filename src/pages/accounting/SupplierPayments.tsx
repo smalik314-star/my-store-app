@@ -13,6 +13,7 @@ import { supplierPaymentService } from '../../services/supplierPaymentService';
 import type { Purchase, SupplierPaymentRecord } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
+import { matchesSearchQuery } from '../../utils/search';
 
 export default function SupplierPayments() {
   const { user } = useAuth();
@@ -54,12 +55,8 @@ export default function SupplierPayments() {
 
   const selected = purchases.find(row => row.id === selectedId);
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return purchases;
     return purchases.filter(row =>
-      row.purchaseNumber.toLowerCase().includes(term) ||
-      row.invoiceNumber.toLowerCase().includes(term) ||
-      row.supplierName.toLowerCase().includes(term)
+      matchesSearchQuery(search, row.purchaseNumber, row.invoiceNumber, row.supplierName)
     );
   }, [purchases, search]);
 

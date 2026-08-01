@@ -13,6 +13,7 @@ import { EmptyState } from '../../components/common/EmptyState';
 import { ConfirmModal } from '../../components/common/ConfirmModal';
 import { formatCurrency } from '../../utils/currency';
 import { formatDate } from '../../utils/date';
+import { matchesSearchQuery } from '../../utils/search';
 import { 
   Truck, 
   Search, 
@@ -60,14 +61,9 @@ export default function Purchases() {
   };
 
   const filteredPurchases = useMemo(() => {
-    return purchases.filter(p => {
-      const s = searchTerm.toLowerCase();
-      return (
-        p.purchaseNumber.toLowerCase().includes(s) ||
-        p.supplierName.toLowerCase().includes(s) ||
-        p.invoiceNumber.toLowerCase().includes(s)
-      );
-    });
+    return purchases.filter(p =>
+      matchesSearchQuery(searchTerm, p.purchaseNumber, p.supplierName, p.invoiceNumber)
+    );
   }, [purchases, searchTerm]);
 
   const stats = useMemo(() => {

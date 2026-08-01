@@ -35,6 +35,7 @@ import { customerService } from '../../services/customerService';
 
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/currency';
+import { matchesSearchQuery } from '../../utils/search';
 
 export default function Customers() {
   const { user } = useAuth();
@@ -83,8 +84,7 @@ export default function Customers() {
 
   const filteredCustomers = useMemo(() => {
     return customers.filter(c => {
-      const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           c.phone.includes(searchTerm);
+      const matchesSearch = matchesSearchQuery(searchTerm, c.name, c.phone);
       
       const matchesTab = 
         activeTab === 'ALL' ? true :
