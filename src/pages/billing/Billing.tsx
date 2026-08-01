@@ -410,12 +410,21 @@ export default function Billing() {
     return [...inventory, ...catalogue];
   };
 
-  // Auto-fill row with selected product suggestion
-  const handleSelectProductSuggestion = (index: number, product: Product) => {
+  const getSaleableProductContext = (product: Product) => {
     const fefoBatch = getFefoAvailableBatch(product.batches || []);
     const validStock = product.batches?.length
       ? getValidBatchQuantity(product.batches)
       : product.stockQuantity;
+
+    return {
+      fefoBatch,
+      validStock: Math.max(0, Number(validStock) || 0),
+    };
+  };
+
+  // Auto-fill row with selected product suggestion
+  const handleSelectProductSuggestion = (index: number, product: Product) => {
+    const { fefoBatch, validStock } = getSaleableProductContext(product);
     if (product.stockQuantity <= 0 || validStock <= 0 || (product.batches?.length && !fefoBatch)) {
       showToast(`${product.name} has no saleable, non-expired batch stock.`, 'danger');
       return;
@@ -450,20 +459,24 @@ export default function Billing() {
     showToast(`Loaded ${product.name}`, 'info');
   };
 
-  const addScannedProduct = (product: Product) => {
-    if (product.stockQuantity <= 0) {
-      showToast(`${product.name} is out of stock!`, 'danger');
-      return;
+  const addScannedProduct = (product: Product): boolean => {
+    const { fefoBatch, validStock } = getSaleableProductContext(product);
+    if (product.stockQuantity <= 0 || validStock <= 0 || (product.batches?.length && !fefoBatch)) {
+      showToast(`${product.name} has no saleable, non-expired batch stock.`, 'danger');
+      return false;
     }
 
+    let added = false;
+    let blockedMessage = '';
     setCart(prev => {
       const existingIndex = prev.findIndex(item => item.productId === product.id);
       if (existingIndex >= 0) {
         const existing = prev[existingIndex];
-        if (existing.quantity >= product.stockQuantity) {
-          showToast(`Only ${product.stockQuantity} units available for ${product.name}.`, 'danger');
+        if (existing.quantity >= validStock) {
+          blockedMessage = `Only ${validStock} saleable units are available for ${product.name}.`;
           return prev;
         }
+        added = true;
         return prev.map((item, index) => index === existingIndex
           ? {
               ...item,
@@ -474,27 +487,39 @@ export default function Billing() {
         );
       }
 
+      const salePrice = resolveSalePrice(product, saleMode, selectedCustomer);
       const effectiveGstRate = canCollectGst ? product.gstPercentage : 0;
-      const gstAmount = (product.sellingPrice * effectiveGstRate) / 100;
+      const gstAmount = calculateLineTax({ quantity: 1, rate: salePrice, gstRate: effectiveGstRate }).tax;
       const scannedItem: InvoiceItem = {
         productId: product.id,
         name: product.name,
         sku: product.sku || '',
-        batchNumber: product.batchNumber || '',
-        expiryDate: product.expiryDate || null,
-        manufacturingDate: product.manufacturingDate || null,
+        batchNumber: fefoBatch?.batchNumber || product.batchNumber || '',
+        expiryDate: fefoBatch?.expiryDate || product.expiryDate || null,
+        manufacturingDate: fefoBatch?.mfgDate || product.manufacturingDate || null,
         quantity: 1,
-        price: product.sellingPrice,
+        saleQuantity: 1,
+        saleUnit: 'unit',
+        conversionFactor: 1,
+        price: salePrice,
         gst: gstAmount,
-        total: product.sellingPrice + gstAmount
+        total: addMoney(salePrice, gstAmount)
       };
+      added = true;
       const blankIndex = prev.findIndex(item => !item.productId && !item.name);
       if (blankIndex >= 0) {
         return prev.map((item, index) => index === blankIndex ? scannedItem : item);
       }
       return [...prev, scannedItem];
     });
-    showToast(`${product.name} scanned`, 'success');
+    if (blockedMessage) {
+      showToast(blockedMessage, 'danger');
+      return false;
+    }
+    if (added) {
+      showToast(`${product.name} scanned`, 'success');
+    }
+    return added;
   };
 
   const handleBarcodeSubmit = (e: React.FormEvent) => {
@@ -510,8 +535,8 @@ export default function Billing() {
       barcodeInputRef.current?.select();
       return;
     }
-    addScannedProduct(product);
-    setBarcodeSearch('');
+    const added = addScannedProduct(product);
+    if (added) setBarcodeSearch('');
     barcodeInputRef.current?.focus();
   };
 

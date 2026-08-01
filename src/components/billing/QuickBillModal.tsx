@@ -95,7 +95,9 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
       where('tenantId', '==', user.tenantId)
     );
     const unsub = onSnapshot(qProducts, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
+      const items = snapshot.docs
+        .map(doc => ({ ...doc.data(), id: doc.id } as Product))
+        .filter(product => product.recordStatus !== 'inactive');
       setProducts(items);
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'products'));
 
