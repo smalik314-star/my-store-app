@@ -3,9 +3,12 @@ import {
   doc,
   getDocs,
   increment,
+  limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
@@ -138,5 +141,28 @@ export const supplierPaymentService = {
         const r = typeof right.createdAt?.toMillis === 'function' ? right.createdAt.toMillis() : 0;
         return r - l;
       });
+  },
+
+  async listPaymentsPage(tenantId: string, pageSize: number = 20, lastPayment?: any) {
+    if (!tenantId) return { payments: [], lastDoc: null };
+    const paymentsQuery = lastPayment
+      ? query(
+          collection(db, 'supplierPayments'),
+          where('tenantId', '==', tenantId),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastPayment),
+          limit(pageSize)
+        )
+      : query(
+          collection(db, 'supplierPayments'),
+          where('tenantId', '==', tenantId),
+          orderBy('createdAt', 'desc'),
+          limit(pageSize)
+        );
+    const snapshot = await getDocs(paymentsQuery);
+    return {
+      payments: snapshot.docs.map(item => ({ id: item.id, ...item.data() } as SupplierPaymentRecord)),
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+    };
   },
 };

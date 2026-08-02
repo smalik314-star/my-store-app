@@ -3,9 +3,12 @@ import {
   doc,
   getDocs,
   increment,
+  limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
@@ -142,5 +145,28 @@ export const receiptService = {
         const r = typeof right.createdAt?.toMillis === 'function' ? right.createdAt.toMillis() : 0;
         return r - l;
       });
+  },
+
+  async listReceiptsPage(tenantId: string, pageSize: number = 20, lastReceipt?: any) {
+    if (!tenantId) return { receipts: [], lastDoc: null };
+    const receiptsQuery = lastReceipt
+      ? query(
+          collection(db, 'receipts'),
+          where('tenantId', '==', tenantId),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastReceipt),
+          limit(pageSize)
+        )
+      : query(
+          collection(db, 'receipts'),
+          where('tenantId', '==', tenantId),
+          orderBy('createdAt', 'desc'),
+          limit(pageSize)
+        );
+    const snapshot = await getDocs(receiptsQuery);
+    return {
+      receipts: snapshot.docs.map(item => ({ id: item.id, ...item.data() } as ReceiptRecord)),
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+    };
   },
 };

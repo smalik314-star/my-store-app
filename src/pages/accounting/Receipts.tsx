@@ -14,7 +14,11 @@ import { receiptService } from '../../services/receiptService';
 import type { Invoice, ReceiptRecord } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
-import { matchesSearchQuery } from '../../utils/search';
+
+const isOutstandingInvoice = (invoice: Invoice) =>
+  invoice.status !== 'cancelled'
+  && invoice.customerId !== 'walk-in'
+  && (Number(invoice.outstandingAmount) || 0) > 0;
 
 export default function Receipts() {
   const { user } = useAuth();
@@ -30,43 +34,89 @@ export default function Receipts() {
   const [loadError, setLoadError] = useState('');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [receipts, setReceipts] = useState<ReceiptRecord[]>([]);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [invoiceCursor, setInvoiceCursor] = useState<any>(null);
+  const [receiptCursor, setReceiptCursor] = useState<any>(null);
+  const [hasMoreInvoices, setHasMoreInvoices] = useState(false);
+  const [hasMoreReceipts, setHasMoreReceipts] = useState(false);
+  const [loadingMoreInvoices, setLoadingMoreInvoices] = useState(false);
+  const [loadingMoreReceipts, setLoadingMoreReceipts] = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<ReceiptRecord['paymentMethod']>('cash');
   const [notes, setNotes] = useState('');
 
-  const load = async () => {
+  const selectedInvoice = useMemo(
+    () => invoices.find(invoice => invoice.id === selectedInvoiceId) || null,
+    [invoices, selectedInvoiceId]
+  );
+
+  const loadInvoices = async (term: string, append: boolean = false) => {
     if (!user?.tenantId) return;
-    setLoading(true);
-    setLoadError('');
+    const searching = term.trim().length >= 2;
+    if (append) {
+      setLoadingMoreInvoices(true);
+    } else {
+      setLoading(true);
+      setLoadError('');
+    }
+
     try {
-      const [invoiceResult, receiptRows] = await Promise.all([
-        invoiceService.getInvoicesPaginated(user.tenantId, 200),
-        receiptService.listReceipts(user.tenantId),
-      ]);
-      setInvoices((invoiceResult?.invoices || []).filter(invoice =>
-        invoice.status !== 'cancelled' &&
-        invoice.customerId !== 'walk-in' &&
-        (Number(invoice.outstandingAmount) || 0) > 0
-      ));
-      setReceipts(receiptRows);
+      if (searching) {
+        const rows = await invoiceService.searchInvoices(user.tenantId, term, 20);
+        setInvoices(rows.filter(isOutstandingInvoice));
+        setInvoiceCursor(null);
+        setHasMoreInvoices(false);
+        return;
+      }
+
+      const result = await invoiceService.getInvoicesPaginated(
+        user.tenantId,
+        20,
+        append ? invoiceCursor : null
+      );
+      const nextRows = (result?.invoices || []).filter(isOutstandingInvoice);
+      setInvoices(current => (append ? [...current, ...nextRows] : nextRows));
+      setInvoiceCursor(result?.lastDoc || null);
+      setHasMoreInvoices(Boolean(result?.lastDoc));
     } catch (error: any) {
       const message = error.message || 'Receipts could not be loaded.';
       setLoadError(message);
       showToast(message, 'danger');
     } finally {
       setLoading(false);
+      setLoadingMoreInvoices(false);
     }
   };
 
-  const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
+  const loadReceiptHistory = async (append: boolean = false) => {
+    if (!user?.tenantId) return;
+    if (append) setLoadingMoreReceipts(true);
+    try {
+      const result = await receiptService.listReceiptsPage(
+        user.tenantId,
+        20,
+        append ? receiptCursor : null
+      );
+      setReceipts(current => (append ? [...current, ...result.receipts] : result.receipts));
+      setReceiptCursor(result.lastDoc);
+      setHasMoreReceipts(Boolean(result.lastDoc));
+    } catch (error: any) {
+      const message = error.message || 'Receipt history could not be loaded.';
+      setLoadError(message);
+      showToast(message, 'danger');
+    } finally {
+      setLoadingMoreReceipts(false);
+    }
+  };
 
-  const filteredInvoices = useMemo(() => {
-    return invoices.filter(invoice =>
-      matchesSearchQuery(search, invoice.invoiceNumber, invoice.customerName)
-    );
-  }, [invoices, search]);
+  const load = async (term: string = search) => {
+    await Promise.all([
+      loadInvoices(term, false),
+      loadReceiptHistory(false),
+    ]);
+  };
 
   const selectInvoice = (invoice: Invoice) => {
     setSelectedInvoiceId(invoice.id);
@@ -79,8 +129,20 @@ export default function Receipts() {
   };
 
   useEffect(() => {
-    void load();
+    void load('');
   }, [user?.tenantId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    void loadInvoices(search, false);
+  }, [search, user?.tenantId]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -125,7 +187,9 @@ export default function Receipts() {
       setSelectedInvoiceId('');
       setAmount('');
       setNotes('');
-      await load();
+      setSearchInput('');
+      setSearch('');
+      await load('');
     } catch (error: any) {
       showToast(error.message || 'Receipt could not be recorded.', 'danger');
     } finally {
@@ -147,7 +211,7 @@ export default function Receipts() {
           description="Allocate customer payments against outstanding sales invoices with an auditable ledger entry."
           breadcrumbs={[{ label: 'Accounting' }, { label: 'Receipts' }]}
           actions={
-            <Button variant="outline" onClick={() => void load()} disabled={loading}>
+            <Button variant="outline" onClick={() => void load(search)} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
           }
@@ -158,19 +222,19 @@ export default function Receipts() {
             <div className="border-b border-border p-4">
               <SearchInput
                 ref={searchInputRef}
-                value={search}
-                onChange={setSearch}
+                value={searchInput}
+                onChange={setSearchInput}
                 placeholder="Search customer or invoice number"
                 aria-label="Search outstanding invoices"
                 onKeyDown={event => {
-                  if (event.key === 'Enter' && filteredInvoices[0]) {
+                  if (event.key === 'Enter' && invoices[0]) {
                     event.preventDefault();
-                    selectInvoice(filteredInvoices[0]);
+                    selectInvoice(invoices[0]);
                   }
                 }}
               />
               <p className="mt-3 text-xs font-semibold text-text/45">
-                Ctrl+F focuses search. Enter selects the first invoice. F2 records the current receipt.
+                Ctrl+F focuses search. Results stay paged. Enter selects the first invoice. F2 records the current receipt.
               </p>
             </div>
 
@@ -180,20 +244,20 @@ export default function Receipts() {
               <div className="p-6 text-center">
                 <AlertCircle className="mx-auto h-10 w-10 text-danger" />
                 <p className="mt-3 text-sm text-danger">{loadError}</p>
-                <Button variant="outline" className="mt-4" onClick={() => void load()}>
+                <Button variant="outline" className="mt-4" onClick={() => void load(search)}>
                   Retry
                 </Button>
               </div>
-            ) : filteredInvoices.length === 0 ? (
+            ) : invoices.length === 0 ? (
               <EmptyState
                 icon={<CheckCircle2 className="h-12 w-12" />}
-                title="No outstanding invoices"
-                description={search ? 'No outstanding invoice matches this search.' : 'All registered-customer invoices are fully paid.'}
+                title={search ? 'No matching outstanding invoices' : 'No outstanding invoices'}
+                description={search ? 'Try a different customer or invoice number.' : 'All registered-customer invoices are fully paid.'}
               />
             ) : (
               <>
                 <div className="divide-y divide-border md:hidden">
-                  {filteredInvoices.map(invoice => (
+                  {invoices.map(invoice => (
                     <button
                       key={invoice.id}
                       type="button"
@@ -234,7 +298,7 @@ export default function Receipts() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {filteredInvoices.map(invoice => (
+                      {invoices.map(invoice => (
                         <tr key={invoice.id} className={selectedInvoiceId === invoice.id ? 'bg-primary/5' : 'hover:bg-text/[0.02]'}>
                           <td className="px-4 py-3 font-mono font-bold text-primary">{invoice.invoiceNumber}</td>
                           <td className="px-4 py-3 font-semibold">{invoice.customerName}</td>
@@ -255,6 +319,19 @@ export default function Receipts() {
                     </tbody>
                   </table>
                 </div>
+
+                {!search && hasMoreInvoices && (
+                  <div className="border-t border-border p-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void loadInvoices('', true)}
+                      disabled={loadingMoreInvoices}
+                    >
+                      {loadingMoreInvoices ? 'Loading more…' : 'Load More Outstanding Invoices'}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </Card>
@@ -330,7 +407,7 @@ export default function Receipts() {
           ) : (
             <>
               <div className="divide-y divide-border md:hidden">
-                {receipts.slice(0, 20).map(receipt => (
+                {receipts.map(receipt => (
                   <div key={receipt.id} className="p-4">
                     <div className="flex justify-between gap-3">
                       <span className="font-mono font-semibold text-primary">{receipt.receiptNumber}</span>
@@ -356,7 +433,7 @@ export default function Receipts() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {receipts.slice(0, 50).map(receipt => (
+                    {receipts.map(receipt => (
                       <tr key={receipt.id}>
                         <td className="px-4 py-3 font-mono font-semibold">{receipt.receiptNumber}</td>
                         <td className="px-4 py-3">{receipt.customerName}</td>
@@ -368,6 +445,18 @@ export default function Receipts() {
                   </tbody>
                 </table>
               </div>
+              {hasMoreReceipts && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={() => void loadReceiptHistory(true)}
+                    disabled={loadingMoreReceipts}
+                  >
+                    {loadingMoreReceipts ? 'Loading more…' : 'Load More Receipt History'}
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </Card>

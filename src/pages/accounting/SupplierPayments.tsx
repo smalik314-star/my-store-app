@@ -14,7 +14,11 @@ import { supplierPaymentService } from '../../services/supplierPaymentService';
 import type { Purchase, SupplierPaymentRecord } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
-import { matchesSearchQuery } from '../../utils/search';
+
+const isPayablePurchase = (purchase: Purchase) =>
+  purchase.status !== 'cancelled'
+  && purchase.supplierLedgerTracked === true
+  && (Number(purchase.payableAmount) || 0) > 0;
 
 export default function SupplierPayments() {
   const { user } = useAuth();
@@ -30,43 +34,87 @@ export default function SupplierPayments() {
   const [loadError, setLoadError] = useState('');
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [payments, setPayments] = useState<SupplierPaymentRecord[]>([]);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [purchaseCursor, setPurchaseCursor] = useState<any>(null);
+  const [paymentCursor, setPaymentCursor] = useState<any>(null);
+  const [hasMorePurchases, setHasMorePurchases] = useState(false);
+  const [hasMorePayments, setHasMorePayments] = useState(false);
+  const [loadingMorePurchases, setLoadingMorePurchases] = useState(false);
+  const [loadingMorePayments, setLoadingMorePayments] = useState(false);
   const [selectedId, setSelectedId] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<SupplierPaymentRecord['paymentMethod']>('bank');
   const [notes, setNotes] = useState('');
 
-  const load = async () => {
+  const selected = useMemo(
+    () => purchases.find(row => row.id === selectedId) || null,
+    [purchases, selectedId]
+  );
+
+  const loadPurchases = async (term: string, append: boolean = false) => {
     if (!user?.tenantId) return;
-    setLoading(true);
-    setLoadError('');
+    const searching = term.trim().length >= 2;
+    if (append) {
+      setLoadingMorePurchases(true);
+    } else {
+      setLoading(true);
+      setLoadError('');
+    }
     try {
-      const [purchaseRows, paymentRows] = await Promise.all([
-        purchaseService.getPurchases(user.tenantId),
-        supplierPaymentService.listPayments(user.tenantId),
-      ]);
-      setPurchases(purchaseRows.filter(row =>
-        row.status !== 'cancelled' &&
-        row.supplierLedgerTracked === true &&
-        (Number(row.payableAmount) || 0) > 0
-      ));
-      setPayments(paymentRows);
+      if (searching) {
+        const rows = await purchaseService.searchPurchases(user.tenantId, term, 20);
+        setPurchases(rows.filter(isPayablePurchase));
+        setPurchaseCursor(null);
+        setHasMorePurchases(false);
+        return;
+      }
+      const result = await purchaseService.getPurchasesPage(
+        user.tenantId,
+        20,
+        append ? purchaseCursor : null
+      );
+      const nextRows = result.purchases.filter(isPayablePurchase);
+      setPurchases(current => (append ? [...current, ...nextRows] : nextRows));
+      setPurchaseCursor(result.lastDoc);
+      setHasMorePurchases(Boolean(result.lastDoc));
     } catch (error: any) {
       const message = error.message || 'Supplier payments could not be loaded.';
       setLoadError(message);
       showToast(message, 'danger');
     } finally {
       setLoading(false);
+      setLoadingMorePurchases(false);
     }
   };
 
-  const selected = purchases.find(row => row.id === selectedId);
+  const loadPaymentHistory = async (append: boolean = false) => {
+    if (!user?.tenantId) return;
+    if (append) setLoadingMorePayments(true);
+    try {
+      const result = await supplierPaymentService.listPaymentsPage(
+        user.tenantId,
+        20,
+        append ? paymentCursor : null
+      );
+      setPayments(current => (append ? [...current, ...result.payments] : result.payments));
+      setPaymentCursor(result.lastDoc);
+      setHasMorePayments(Boolean(result.lastDoc));
+    } catch (error: any) {
+      const message = error.message || 'Supplier payment history could not be loaded.';
+      setLoadError(message);
+      showToast(message, 'danger');
+    } finally {
+      setLoadingMorePayments(false);
+    }
+  };
 
-  const filtered = useMemo(() => {
-    return purchases.filter(row =>
-      matchesSearchQuery(search, row.purchaseNumber, row.invoiceNumber, row.supplierName)
-    );
-  }, [purchases, search]);
+  const load = async (term: string = search) => {
+    await Promise.all([
+      loadPurchases(term, false),
+      loadPaymentHistory(false),
+    ]);
+  };
 
   const selectPurchase = (purchase: Purchase) => {
     setSelectedId(purchase.id);
@@ -79,8 +127,20 @@ export default function SupplierPayments() {
   };
 
   useEffect(() => {
-    void load();
+    void load('');
   }, [user?.tenantId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    void loadPurchases(search, false);
+  }, [search, user?.tenantId]);
 
   useEffect(() => {
     const handleShortcuts = (event: KeyboardEvent) => {
@@ -125,7 +185,9 @@ export default function SupplierPayments() {
       setSelectedId('');
       setAmount('');
       setNotes('');
-      await load();
+      setSearchInput('');
+      setSearch('');
+      await load('');
     } catch (error: any) {
       showToast(error.message || 'Supplier payment could not be recorded.', 'danger');
     } finally {
@@ -147,7 +209,7 @@ export default function SupplierPayments() {
           description="Allocate payments against posted supplier bills without changing stock."
           breadcrumbs={[{ label: 'Accounting' }, { label: 'Supplier Payments' }]}
           actions={
-            <Button variant="outline" onClick={() => void load()} disabled={loading}>
+            <Button variant="outline" onClick={() => void load(search)} disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
           }
@@ -158,19 +220,19 @@ export default function SupplierPayments() {
             <div className="border-b border-border p-4">
               <SearchInput
                 ref={searchInputRef}
-                value={search}
-                onChange={setSearch}
+                value={searchInput}
+                onChange={setSearchInput}
                 placeholder="Search supplier, purchase or invoice"
                 aria-label="Search payable purchase bills"
                 onKeyDown={event => {
-                  if (event.key === 'Enter' && filtered[0]) {
+                  if (event.key === 'Enter' && purchases[0]) {
                     event.preventDefault();
-                    selectPurchase(filtered[0]);
+                    selectPurchase(purchases[0]);
                   }
                 }}
               />
               <p className="mt-3 text-xs font-semibold text-text/45">
-                Ctrl+F focuses search. Enter selects the first bill. F2 records the current payment.
+                Ctrl+F focuses search. Results stay paged. Enter selects the first bill. F2 records the current payment.
               </p>
             </div>
 
@@ -180,20 +242,20 @@ export default function SupplierPayments() {
               <div className="p-6 text-center">
                 <AlertCircle className="mx-auto h-10 w-10 text-danger" />
                 <p className="mt-3 text-sm text-danger">{loadError}</p>
-                <Button variant="outline" className="mt-4" onClick={() => void load()}>
+                <Button variant="outline" className="mt-4" onClick={() => void load(search)}>
                   Retry
                 </Button>
               </div>
-            ) : filtered.length === 0 ? (
+            ) : purchases.length === 0 ? (
               <EmptyState
                 icon={<CheckCircle2 className="h-12 w-12" />}
-                title="No linked payables"
-                description={search ? 'No payable bill matches this search.' : 'New posted purchases with supplier ledger tracking will appear here.'}
+                title={search ? 'No matching payables' : 'No linked payables'}
+                description={search ? 'Try a different supplier, purchase number, or invoice number.' : 'New posted purchases with supplier ledger tracking will appear here.'}
               />
             ) : (
               <>
                 <div className="divide-y divide-border md:hidden">
-                  {filtered.map(row => (
+                  {purchases.map(row => (
                     <button
                       key={row.id}
                       type="button"
@@ -235,7 +297,7 @@ export default function SupplierPayments() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {filtered.map(row => (
+                      {purchases.map(row => (
                         <tr key={row.id} className={selectedId === row.id ? 'bg-primary/5' : 'hover:bg-text/[0.02]'}>
                           <td className="px-4 py-3">
                             <div className="font-mono font-bold text-primary">{row.purchaseNumber}</div>
@@ -259,6 +321,19 @@ export default function SupplierPayments() {
                     </tbody>
                   </table>
                 </div>
+
+                {!search && hasMorePurchases && (
+                  <div className="border-t border-border p-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void loadPurchases('', true)}
+                      disabled={loadingMorePurchases}
+                    >
+                      {loadingMorePurchases ? 'Loading more…' : 'Load More Payable Purchases'}
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </Card>
@@ -334,7 +409,7 @@ export default function SupplierPayments() {
           ) : (
             <>
               <div className="divide-y divide-border md:hidden">
-                {payments.slice(0, 20).map(payment => (
+                {payments.map(payment => (
                   <div key={payment.id} className="p-4">
                     <div className="flex justify-between gap-3">
                       <span className="font-mono font-semibold text-primary">{payment.paymentNumber}</span>
@@ -360,7 +435,7 @@ export default function SupplierPayments() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {payments.slice(0, 50).map(payment => (
+                    {payments.map(payment => (
                       <tr key={payment.id}>
                         <td className="px-4 py-3 font-mono font-semibold">{payment.paymentNumber}</td>
                         <td className="px-4 py-3">{payment.supplierName}</td>
@@ -372,6 +447,18 @@ export default function SupplierPayments() {
                   </tbody>
                 </table>
               </div>
+              {hasMorePayments && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={() => void loadPaymentHistory(true)}
+                    disabled={loadingMorePayments}
+                  >
+                    {loadingMorePayments ? 'Loading more…' : 'Load More Payment History'}
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </Card>
