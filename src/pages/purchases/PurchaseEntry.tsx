@@ -78,6 +78,7 @@ export default function PurchaseEntry() {
   const [isSaving, setIsSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
+  const supplierSearchInputRef = useRef<HTMLInputElement | null>(null);
   const supplierSelectRef = useRef<HTMLSelectElement | null>(null);
   const supplierInvoiceRef = useRef<HTMLInputElement | null>(null);
   const invoiceDateRef = useRef<HTMLInputElement | null>(null);
@@ -87,6 +88,11 @@ export default function PurchaseEntry() {
 
   // Form Header State
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState('');
+  const [supplierCursor, setSupplierCursor] = useState<any>(null);
+  const [hasMoreSuppliers, setHasMoreSuppliers] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
@@ -114,23 +120,61 @@ export default function PurchaseEntry() {
   } | null>(null);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSupplierSearch(supplierSearch), 250);
+    return () => window.clearTimeout(timer);
+  }, [supplierSearch]);
+
+  const loadSuppliers = async (reset: boolean = true) => {
     if (!user?.tenantId) return;
-    let active = true;
+    setLoadingSuppliers(true);
+    try {
+      const trimmedSearch = debouncedSupplierSearch.trim();
+      if (trimmedSearch.length >= 2) {
+        const rows = await purchaseService.searchSuppliers(user.tenantId, trimmedSearch, 20);
+        setSuppliers(current => {
+          const selectedSupplier = current.find(supplier => supplier.id === selectedSupplierId);
+          if (selectedSupplier && !rows.some(supplier => supplier.id === selectedSupplier.id)) {
+            return [selectedSupplier, ...rows];
+          }
+          return rows;
+        });
+        setSupplierCursor(null);
+        setHasMoreSuppliers(false);
+      } else {
+        const result = await purchaseService.listSuppliersPage(
+          user.tenantId,
+          50,
+          reset ? undefined : supplierCursor
+        );
+        setSuppliers(current => {
+          const merged = reset
+            ? result.suppliers
+            : Array.from(new Map([...current, ...result.suppliers].map(supplier => [supplier.id, supplier])).values());
+          const selectedSupplier = current.find(supplier => supplier.id === selectedSupplierId);
+          if (selectedSupplier && !merged.some(supplier => supplier.id === selectedSupplier.id)) {
+            return [selectedSupplier, ...merged];
+          }
+          return merged;
+        });
+        setSupplierCursor(result.lastDoc);
+        setHasMoreSuppliers(result.hasMore);
+      }
+    } finally {
+      setLoadingSuppliers(false);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
     setLoading(true);
-    void purchaseService.getSuppliers(user.tenantId)
-      .then(supps => {
-        if (active) setSuppliers(supps);
-        if (active) setLoading(false);
-      })
+    void loadSuppliers(true)
       .catch(error => {
         console.error('Error loading suppliers:', error);
-        if (active) showToast('Unable to load suppliers. Please retry.', 'danger');
-        if (active) setLoading(false);
+        showToast('Unable to load suppliers. Please retry.', 'danger');
+        setLoading(false);
       });
-    return () => {
-      active = false;
-    };
-  }, [user]);
+  }, [debouncedSupplierSearch, user?.tenantId]);
 
   function createEmptyItem(): FormItem {
     return {
@@ -436,9 +480,7 @@ export default function PurchaseEntry() {
       setNewSupplierAddress('');
       setNewSupplierEmail('');
       setShowSupplierModal(false);
-      void purchaseService.getSuppliers(user.tenantId).then(refreshed => {
-        if (refreshed.some(supplier => supplier.id === newId)) setSuppliers(refreshed);
-      });
+      void loadSuppliers(true);
     } catch (err) {
       console.error(err);
       showToast('Failed to create new supplier', 'danger');
@@ -614,7 +656,8 @@ export default function PurchaseEntry() {
         setAutofillModal(null);
         window.scrollTo({ top: 0, behavior: 'smooth' });
         window.requestAnimationFrame(() => {
-          supplierSelectRef.current?.focus();
+          supplierSearchInputRef.current?.focus();
+          supplierSearchInputRef.current?.select();
         });
       } else {
         navigate('/purchases');
@@ -695,8 +738,22 @@ export default function PurchaseEntry() {
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             {/* Supplier select */}
-            <div>
+            <div className="space-y-2">
               <label className="block text-xs font-bold text-text/60 uppercase tracking-wider mb-2">Select Supplier <RequiredMark /></label>
+              <input
+                ref={supplierSearchInputRef}
+                type="text"
+                value={supplierSearch}
+                onChange={(e) => setSupplierSearch(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    supplierSelectRef.current?.focus();
+                  }
+                }}
+                placeholder="Search supplier by name"
+                className="w-full h-11 px-3 border border-border rounded-xl bg-surface focus:border-primary/50 outline-none text-text text-sm font-semibold transition-all"
+              />
               <select
                 ref={supplierSelectRef}
                 value={selectedSupplierId}
@@ -715,6 +772,24 @@ export default function PurchaseEntry() {
                   <option key={s.id} value={s.id}>{s.name} {s.phone ? `(${s.phone})` : ''}</option>
                 ))}
               </select>
+              <div className="flex items-center justify-between text-[11px] font-semibold text-text/45">
+                <span>
+                  {loadingSuppliers
+                    ? 'Loading suppliers...'
+                    : debouncedSupplierSearch.trim().length >= 2
+                      ? `${Math.max(0, suppliers.length - (selectedSupplierId ? 1 : 0))} matches loaded`
+                      : `${suppliers.length} suppliers loaded`}
+                </span>
+                {hasMoreSuppliers && debouncedSupplierSearch.trim().length < 2 && (
+                  <button
+                    type="button"
+                    onClick={() => void loadSuppliers(false)}
+                    className="text-primary hover:underline"
+                  >
+                    Load more
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Supplier invoice # */}

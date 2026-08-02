@@ -3,14 +3,22 @@ import {
   addDoc, 
   getDocs, 
   query, 
+  orderBy,
+  limit,
+  startAt,
+  endAt,
   where, 
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Brand } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { getSearchVariants, normalizeSearchIndex } from '../utils/search';
 
 const COLLECTION_NAME = 'brands';
+const buildBrandSearchFields = (name: string) => ({
+  nameSearch: normalizeSearchIndex(name),
+});
 
 export const brandService = {
   async getBrands(tenantId: string): Promise<Brand[]> {
@@ -47,6 +55,7 @@ export const brandService = {
 
       const docRef = await addDoc(collection(db, COLLECTION_NAME), {
         name: trimmedName,
+        ...buildBrandSearchFields(trimmedName),
         tenantId,
         createdAt: serverTimestamp(),
       });
@@ -54,6 +63,43 @@ export const brandService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, COLLECTION_NAME);
       return null;
+    }
+  },
+
+  async searchBrands(tenantId: string, searchTerm: string, pageSize: number = 12): Promise<string[]> {
+    if (!tenantId) return [];
+    const rawQuery = searchTerm.trim();
+    const normalizedVariants = Array.from(new Set(
+      getSearchVariants(searchTerm).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+    ));
+    if (!rawQuery || normalizedVariants.length === 0) return [];
+
+    try {
+      const snapshots = await Promise.all([
+        ...normalizedVariants.map(variant => getDocs(query(
+          collection(db, COLLECTION_NAME),
+          where('tenantId', '==', tenantId),
+          orderBy('nameSearch'),
+          startAt(variant),
+          endAt(`${variant}\uf8ff`),
+          limit(pageSize)
+        ))),
+        ...getSearchVariants(rawQuery).map(variant => getDocs(query(
+          collection(db, COLLECTION_NAME),
+          where('tenantId', '==', tenantId),
+          orderBy('name'),
+          startAt(variant),
+          endAt(`${variant}\uf8ff`),
+          limit(pageSize)
+        ))),
+      ]);
+
+      return Array.from(new Set(
+        snapshots.flatMap(snapshot => snapshot.docs.map(doc => String(doc.data().name || '').trim()).filter(Boolean))
+      )).slice(0, pageSize);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+      return [];
     }
   }
 };

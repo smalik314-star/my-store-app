@@ -9,7 +9,7 @@ import {
 import { Product, ProductBatch } from '../../types';
 import { Button } from '../common/Button';
 import { Card } from '../common/Card';
-import { Timestamp, collection, query, where, getDocs } from 'firebase/firestore';
+import { Timestamp } from 'firebase/firestore';
 import { uploadProductImage } from '../../utils/storage';
 import { cn } from '../../utils/cn';
 import { formatCurrency } from '../../utils/currency';
@@ -17,7 +17,6 @@ import { toJsDate } from '../../utils/date';
 import { useAuth } from '../../context/AuthContext';
 import { brandService } from '../../services/brandService';
 import { productService } from '../../services/productService';
-import { db } from '../../firebase/config';
 import { medicineMasterService, MasterMedicine } from '../../services/medicineMasterService';
 import { MedicineAutocomplete } from '../common/MedicineAutocomplete';
 import { RequiredMark } from '../common/RequiredMark';
@@ -171,7 +170,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
 
   const { user } = useAuth();
   const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [allBrands, setAllBrands] = useState<string[]>([]);
+  const [tenantBrandSuggestions, setTenantBrandSuggestions] = useState<string[]>([]);
   
   // Custom inputs for productName and brandName
   const [productNameInput, setProductNameInput] = useState(product?.name || '');
@@ -218,13 +217,21 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   // Search local IndexedDB Master Medicine database for brands when brand input changes
   useEffect(() => {
     if (debouncedBrandName.trim().length >= 2) {
-      medicineMasterService.searchBrands(debouncedBrandName).then(results => {
+      void medicineMasterService.searchBrands(debouncedBrandName).then(results => {
         setMasterBrandSuggestions(results);
       });
+      if (user?.tenantId) {
+        void brandService.searchBrands(user.tenantId, debouncedBrandName, 12).then(results => {
+          setTenantBrandSuggestions(results);
+        }).catch(() => {
+          setTenantBrandSuggestions([]);
+        });
+      }
     } else {
       setMasterBrandSuggestions([]);
+      setTenantBrandSuggestions([]);
     }
-  }, [debouncedBrandName]);
+  }, [debouncedBrandName, user?.tenantId]);
 
   const resolveSelectedBrand = (medicineName: string, selectedBrand?: string) => {
     const directBrand = selectedBrand?.trim();
@@ -275,27 +282,6 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     setFormData(prev => ({ ...prev, brand: brandNameInput }));
   }, [brandNameInput]);
 
-  // Fetch products and brands on mount / tenantId change
-  useEffect(() => {
-    if (!user?.tenantId) return;
-
-    const loadData = async () => {
-      try {
-        const brandsQuery = query(
-          collection(db, 'brands'),
-          where('tenantId', '==', user.tenantId)
-        );
-        const brandsSnap = await getDocs(brandsQuery);
-        const brandsList = brandsSnap.docs.map(doc => doc.data().name) as string[];
-        setAllBrands(Array.from(new Set(brandsList)));
-      } catch (err) {
-        console.error('Error fetching autocomplete data:', err);
-      }
-    };
-
-    loadData();
-  }, [user?.tenantId]);
-
   const handleSelectProductSuggestion = (selectedProd: Product) => {
     const resolvedBrand = resolveSelectedBrand(selectedProd.name, selectedProd.brand);
     const resolvedManufacturer = selectedProd.manufacturer?.trim() || '';
@@ -333,7 +319,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
   const brandSuggestions = useMemo(() => {
     if (debouncedBrandName.trim() === '') return [];
     
-    const localMatch = allBrands.filter(brandName => 
+    const localMatch = tenantBrandSuggestions.filter(brandName => 
       brandName.toLowerCase().includes(debouncedBrandName.toLowerCase()) &&
       brandName.toLowerCase() !== brandNameInput.toLowerCase()
     );
@@ -341,7 +327,7 @@ export function ProductForm({ product, onSave, onClose, loading: saveLoading }: 
     // Combine local brand suggestions with master database brand suggestions and keep unique values
     const combined = Array.from(new Set([...localMatch, ...masterBrandSuggestions]));
     return combined;
-  }, [allBrands, debouncedBrandName, brandNameInput, masterBrandSuggestions]);
+  }, [tenantBrandSuggestions, debouncedBrandName, brandNameInput, masterBrandSuggestions]);
 
   const combinedSuggestions = [
     ...uniqueProductsSuggestions.slice(0, 5).map(p => ({ type: 'inventory' as const, data: p })),

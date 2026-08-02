@@ -32,6 +32,9 @@ const PURCHASE_ITEMS_COLL = 'purchaseItems';
 const MOVEMENTS_COLL = 'stockMovements';
 const PRODUCTS_COLL = 'products';
 const PURCHASE_KEYS_COLL = 'purchaseKeys';
+const buildSupplierSearchFields = (data: Partial<Supplier>) => ({
+  nameSearch: normalizeSearchIndex(data.name),
+});
 
 type PurchaseEntryItem = Omit<PurchaseItem, 'id' | 'purchaseId'> & {
   isNewProduct?: boolean;
@@ -73,6 +76,7 @@ export const purchaseService = {
       });
       const docRef = await addDoc(collection(db, SUPPLIERS_COLL), {
         ...cleanData,
+        ...buildSupplierSearchFields(cleanData),
         tenantId,
         totalPurchases: Number(cleanData.totalPurchases) || 0,
         totalPaid: Number(cleanData.totalPaid) || 0,
@@ -151,6 +155,73 @@ export const purchaseService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, PURCHASES_COLL);
       return { purchases: [], lastDoc: null };
+    }
+  },
+
+  async listSuppliersPage(tenantId: string, pageSize: number = 50, lastSupplier?: any) {
+    if (!tenantId) return { suppliers: [], lastDoc: null, hasMore: false };
+    try {
+      let q = query(
+        collection(db, SUPPLIERS_COLL),
+        where('tenantId', '==', tenantId),
+        orderBy('name', 'asc'),
+        limit(pageSize)
+      );
+      if (lastSupplier) {
+        q = query(q, startAfter(lastSupplier));
+      }
+      const snap = await getDocs(q);
+      return {
+        suppliers: snap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        } as Supplier)),
+        lastDoc: snap.docs[snap.docs.length - 1] ?? null,
+        hasMore: snap.docs.length === pageSize,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, SUPPLIERS_COLL);
+      return { suppliers: [], lastDoc: null, hasMore: false };
+    }
+  },
+
+  async searchSuppliers(tenantId: string, searchTerm: string, pageSize: number = 20): Promise<Supplier[]> {
+    if (!tenantId) return [];
+    const rawQuery = searchTerm.trim();
+    const normalizedVariants = Array.from(new Set(
+      getSearchVariants(searchTerm).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+    ));
+    if (!rawQuery || normalizedVariants.length === 0) return [];
+
+    try {
+      const snapshots = await Promise.all([
+        ...normalizedVariants.map(variant => getDocs(query(
+          collection(db, SUPPLIERS_COLL),
+          where('tenantId', '==', tenantId),
+          orderBy('nameSearch'),
+          startAt(variant),
+          endAt(`${variant}\uf8ff`),
+          limit(pageSize)
+        ))),
+        ...getSearchVariants(rawQuery).map(variant => getDocs(query(
+          collection(db, SUPPLIERS_COLL),
+          where('tenantId', '==', tenantId),
+          orderBy('name'),
+          startAt(variant),
+          endAt(`${variant}\uf8ff`),
+          limit(pageSize)
+        ))),
+      ]);
+
+      return dedupeById(
+        snapshots.flatMap(snapshot => snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        } as Supplier)))
+      ).slice(0, pageSize);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, SUPPLIERS_COLL);
+      return [];
     }
   },
 

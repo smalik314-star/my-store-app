@@ -65,6 +65,11 @@ export default function ReorderManagement() {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [supplierId, setSupplierId] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState('');
+  const [supplierCursor, setSupplierCursor] = useState<any>(null);
+  const [hasMoreSuppliers, setHasMoreSuppliers] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [notes, setNotes] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -81,6 +86,11 @@ export default function ReorderManagement() {
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSupplierSearch(supplierSearch), 250);
+    return () => window.clearTimeout(timer);
+  }, [supplierSearch]);
 
   const reloadOrders = async (reset: boolean = true) => {
     if (!user?.tenantId) return;
@@ -137,13 +147,53 @@ export default function ReorderManagement() {
     }
   };
 
+  const loadSuppliers = async (reset: boolean = true) => {
+    if (!user?.tenantId) return;
+    setLoadingSuppliers(true);
+    try {
+      const trimmedSearch = debouncedSupplierSearch.trim();
+      if (trimmedSearch.length >= 2) {
+        const rows = await purchaseService.searchSuppliers(user.tenantId, trimmedSearch, 20);
+        setSuppliers(current => {
+          const selectedSupplier = current.find(supplier => supplier.id === supplierId);
+          if (selectedSupplier && !rows.some(supplier => supplier.id === selectedSupplier.id)) {
+            return [selectedSupplier, ...rows];
+          }
+          return rows;
+        });
+        setSupplierCursor(null);
+        setHasMoreSuppliers(false);
+      } else {
+        const result = await purchaseService.listSuppliersPage(
+          user.tenantId,
+          50,
+          reset ? undefined : supplierCursor
+        );
+        setSuppliers(current => {
+          const merged = reset
+            ? result.suppliers
+            : Array.from(new Map([...current, ...result.suppliers].map(supplier => [supplier.id, supplier])).values());
+          const selectedSupplier = current.find(supplier => supplier.id === supplierId);
+          if (selectedSupplier && !merged.some(supplier => supplier.id === selectedSupplier.id)) {
+            return [selectedSupplier, ...merged];
+          }
+          return merged;
+        });
+        setSupplierCursor(result.lastDoc);
+        setHasMoreSuppliers(result.hasMore);
+      }
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  };
+
   useEffect(() => {
     if (!user?.tenantId) return;
-    void purchaseService.getSuppliers(user.tenantId).then(setSuppliers);
+    void loadSuppliers(true);
     void reloadOrders(true);
     setCursorId(null);
     void loadProducts(true);
-  }, [debouncedSearch, user?.tenantId]);
+  }, [debouncedSearch, debouncedSupplierSearch, user?.tenantId]);
 
   const lowProducts = useMemo(() => products, [products]);
   const draftLines: ReorderLine[] = lowProducts
@@ -265,18 +315,44 @@ export default function ReorderManagement() {
             placeholder="Search low-stock product"
             className="rounded-lg border p-3"
           />
-          <select
-            value={supplierId}
-            onChange={event => setSupplierId(event.target.value)}
-            className="rounded-lg border p-3"
-          >
-            <option value="">Select supplier *</option>
-            {suppliers.map(row => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
+          <div className="space-y-2">
+            <input
+              value={supplierSearch}
+              onChange={event => setSupplierSearch(event.target.value)}
+              placeholder="Search supplier by name"
+              className="w-full rounded-lg border p-3"
+            />
+            <select
+              value={supplierId}
+              onChange={event => setSupplierId(event.target.value)}
+              className="w-full rounded-lg border p-3"
+            >
+              <option value="">Select supplier *</option>
+              {suppliers.map(row => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-text/45">
+              <span>
+                {loadingSuppliers
+                  ? 'Loading suppliers...'
+                  : debouncedSupplierSearch.trim().length >= 2
+                    ? `${Math.max(0, suppliers.length - (supplierId ? 1 : 0))} matches loaded`
+                    : `${suppliers.length} suppliers loaded`}
+              </span>
+              {hasMoreSuppliers && debouncedSupplierSearch.trim().length < 2 && (
+                <button
+                  type="button"
+                  onClick={() => void loadSuppliers(false)}
+                  className="text-primary hover:underline"
+                >
+                  Load more
+                </button>
+              )}
+            </div>
+          </div>
           <input
             value={notes}
             onChange={event => setNotes(event.target.value)}
