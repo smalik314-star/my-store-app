@@ -19,23 +19,20 @@ import { db, auth } from '../firebase/config';
 import { Product, Tenant, StockMovement } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { getEffectiveLimits } from '../config/subscription';
+import { dedupeById, getSearchVariants, normalizeSearchIndex } from '../utils/search';
 
 const COLLECTION_NAME = 'products';
 const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const resolveApiPath = (path: string) => apiBaseUrl ? `${apiBaseUrl}${path}` : path;
 const mapProductDoc = (snapshot: any) => ({ ...snapshot.data(), id: snapshot.id } as Product);
-const dedupeProducts = (products: Product[]) => Array.from(new Map(products.map(product => [product.id, product])).values());
-const getSearchVariants = (term: string) => {
-  const trimmed = String(term || '').trim();
-  if (!trimmed) return [];
-  const titleCase = trimmed.replace(/\b\w/g, char => char.toUpperCase());
-  return Array.from(new Set([
-    trimmed,
-    trimmed.toLowerCase(),
-    trimmed.toUpperCase(),
-    titleCase,
-  ]));
-};
+const buildProductSearchFields = (data: Partial<Product>) => ({
+  nameSearch: normalizeSearchIndex(data.name),
+  brandSearch: normalizeSearchIndex(data.brand),
+  genericNameSearch: normalizeSearchIndex(data.genericName),
+  manufacturerSearch: normalizeSearchIndex(data.manufacturer),
+  skuSearch: normalizeSearchIndex(data.sku),
+  barcodeSearch: normalizeSearchIndex(data.barcode),
+});
 
 // Helper to sanitize product data
 const sanitizeProduct = (data: any) => {
@@ -105,6 +102,7 @@ export const productService = {
 
         transaction.set(productRef, {
           ...sanitized,
+          ...buildProductSearchFields(sanitized),
           id: productRef.id,
           tenantId,
           recordStatus: sanitized.recordStatus || 'active',
@@ -187,6 +185,7 @@ export const productService = {
 
       return await updateDoc(productRef, {
         ...sanitized,
+        ...buildProductSearchFields({ ...currentProduct, ...sanitized }),
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
@@ -311,9 +310,14 @@ export const productService = {
     const trimmed = searchTerm.trim();
     if (trimmed.length < 2) return [];
 
-    const variants = getSearchVariants(trimmed);
+    const normalizedQuery = normalizeSearchIndex(trimmed);
+    const variants = Array.from(new Set(
+      getSearchVariants(trimmed).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+    ));
     const numericOrCodeQuery = /^[A-Za-z0-9\-_/]+$/.test(trimmed);
-    const fields = numericOrCodeQuery ? ['barcode', 'sku', 'name'] : ['name', 'sku', 'barcode'];
+    const fields = numericOrCodeQuery
+      ? ['barcodeSearch', 'skuSearch', 'nameSearch']
+      : ['nameSearch', 'brandSearch', 'manufacturerSearch', 'skuSearch'];
 
     try {
       const snapshots = await Promise.all(
@@ -331,11 +335,15 @@ export const productService = {
         )
       );
 
-      return dedupeProducts(
+      let rows = dedupeById(
         snapshots.flatMap(snapshot => snapshot.docs.map(mapProductDoc))
       )
         .filter(product => product.recordStatus !== 'inactive')
         .slice(0, pageSize);
+      if (rows.length === 0 && normalizedQuery !== trimmed.toLowerCase()) {
+        rows = await this.searchInventoryProducts(tenantId, normalizedQuery, pageSize);
+      }
+      return rows;
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
       return [];

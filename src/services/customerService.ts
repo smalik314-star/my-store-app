@@ -17,8 +17,14 @@ import {
 import { db, auth } from '../firebase/config';
 import { Customer } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { dedupeById, getSearchVariants, normalizeSearchIndex } from '../utils/search';
 
 const COLLECTION_NAME = 'customers';
+const buildCustomerSearchFields = (data: Partial<Customer>) => ({
+  nameSearch: normalizeSearchIndex(data.name),
+  phoneSearch: normalizeSearchIndex(data.phone),
+  emailSearch: normalizeSearchIndex(data.email),
+});
 
 const sanitizeCustomer = (data: any) => {
   const sanitized: any = {};
@@ -85,18 +91,21 @@ export const customerService = {
     if (!tenantId) return [];
     const term = searchTerm.trim();
     if (term.length < 2) return [];
+    const normalizedVariants = Array.from(new Set(
+      getSearchVariants(term).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+    ));
 
     try {
-      const nameQuery = query(
-        collection(db, COLLECTION_NAME),
-        where('tenantId', '==', tenantId),
-        orderBy('name'),
-        startAt(term),
-        endAt(`${term}\uf8ff`),
-        limit(pageSize)
+      const queries = normalizedVariants.map(variant =>
+        getDocs(query(
+          collection(db, COLLECTION_NAME),
+          where('tenantId', '==', tenantId),
+          orderBy('nameSearch'),
+          startAt(variant),
+          endAt(`${variant}\uf8ff`),
+          limit(pageSize)
+        ))
       );
-
-      const queries = [getDocs(nameQuery)];
       if (/^\d+$/.test(term)) {
         const phoneQuery = query(
           collection(db, COLLECTION_NAME),
@@ -110,17 +119,13 @@ export const customerService = {
       }
 
       const snapshots = await Promise.all(queries);
-      const deduped = new Map<string, Customer>();
-      snapshots.forEach(snapshot => {
-        snapshot.docs.forEach(row => {
-          const customer = { id: row.id, ...row.data() } as Customer;
-          if (customer.recordStatus !== 'inactive') {
-            deduped.set(customer.id, customer);
-          }
-        });
-      });
-
-      return Array.from(deduped.values()).slice(0, pageSize);
+      return dedupeById(
+        snapshots.flatMap(snapshot =>
+          snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Customer))
+        )
+      )
+        .filter(customer => customer.recordStatus !== 'inactive')
+        .slice(0, pageSize);
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, `${COLLECTION_NAME}:search`);
       return [];
@@ -165,6 +170,7 @@ export const customerService = {
 
       const docRef = await addDoc(collection(db, COLLECTION_NAME), {
         ...sanitized,
+        ...buildCustomerSearchFields(sanitized),
         tenantId,
         outstandingBalance: sanitized.outstandingBalance || 0,
         totalPurchases: sanitized.totalPurchases || 0,
@@ -193,6 +199,7 @@ export const customerService = {
 
       await updateDoc(docRef, {
         ...sanitized,
+        ...buildCustomerSearchFields({ ...(currentDoc.data() as Customer), ...sanitized }),
         updatedAt: serverTimestamp(),
       });
     } catch (error) {

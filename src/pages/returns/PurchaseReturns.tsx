@@ -18,7 +18,6 @@ import type {
 } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
-import { matchesSearchQuery } from '../../utils/search';
 
 type DraftLine = { quantity: number; reason: PurchaseReturnLine['reason'] };
 
@@ -44,48 +43,103 @@ export default function PurchaseReturns() {
   const [loadError, setLoadError] = useState('');
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [returns, setReturns] = useState<PurchaseReturnRecord[]>([]);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [purchaseCursor, setPurchaseCursor] = useState<any>(null);
+  const [returnsCursor, setReturnsCursor] = useState<any>(null);
+  const [hasMorePurchases, setHasMorePurchases] = useState(false);
+  const [hasMoreReturns, setHasMoreReturns] = useState(false);
+  const [loadingMorePurchases, setLoadingMorePurchases] = useState(false);
+  const [loadingMoreReturns, setLoadingMoreReturns] = useState(false);
   const [selected, setSelected] = useState<Purchase | null>(null);
   const [items, setItems] = useState<PurchaseItem[]>([]);
   const [returnedByItem, setReturnedByItem] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState<Record<string, DraftLine>>({});
-
-  const load = async () => {
+  const loadPurchaseLookup = async (term: string, append: boolean = false) => {
     if (!user?.tenantId) return;
-    setLoading(true);
-    setLoadError('');
+    const searching = term.trim().length >= 2;
+    if (append) {
+      setLoadingMorePurchases(true);
+    } else {
+      setLoading(true);
+      setLoadError('');
+    }
+
     try {
-      const [purchaseRows, returnRows] = await Promise.all([
-        purchaseService.getPurchases(user.tenantId),
-        purchaseReturnService.listReturns(user.tenantId),
-      ]);
-      setPurchases(
-        purchaseRows.filter(
+      if (searching) {
+        const rows = await purchaseService.searchPurchases(user.tenantId, term, 20);
+        setPurchases(rows.filter(
           row =>
             row.status !== 'cancelled'
             && row.supplierLedgerTracked === true
             && roundMoney(row.returnAmount || 0) < roundMoney(row.totalAmount)
-        )
+        ));
+        setPurchaseCursor(null);
+        setHasMorePurchases(false);
+        return;
+      }
+
+      const result = await purchaseService.getPurchasesPage(user.tenantId, 20, append ? purchaseCursor : null);
+      const visibleRows = result.purchases.filter(
+        row =>
+          row.status !== 'cancelled'
+          && row.supplierLedgerTracked === true
+          && roundMoney(row.returnAmount || 0) < roundMoney(row.totalAmount)
       );
-      setReturns(returnRows);
+      setPurchases(current => append ? [...current, ...visibleRows] : visibleRows);
+      setPurchaseCursor(result.lastDoc);
+      setHasMorePurchases(Boolean(result.lastDoc));
     } catch (error: any) {
       const message = error.message || 'Purchase returns could not be loaded.';
       setLoadError(message);
       showToast(message, 'danger');
     } finally {
       setLoading(false);
+      setLoadingMorePurchases(false);
     }
   };
 
+  const loadReturnHistory = async (append: boolean = false) => {
+    if (!user?.tenantId) return;
+    if (append) setLoadingMoreReturns(true);
+    try {
+      const result = await purchaseReturnService.listReturnsPage(user.tenantId, 20, append ? returnsCursor : null);
+      setReturns(current => append ? [...current, ...result.returns] : result.returns);
+      setReturnsCursor(result.lastDoc);
+      setHasMoreReturns(Boolean(result.lastDoc));
+    } catch (error: any) {
+      const message = error.message || 'Purchase return history could not be loaded.';
+      setLoadError(message);
+      showToast(message, 'danger');
+    } finally {
+      setLoadingMoreReturns(false);
+    }
+  };
+
+  const load = async (term: string = search) => {
+    await Promise.all([
+      loadPurchaseLookup(term, false),
+      loadReturnHistory(false),
+    ]);
+  };
+
   useEffect(() => {
-    load();
+    void load('');
   }, [user?.tenantId]);
 
-  const filtered = useMemo(() => {
-    return purchases.filter(row =>
-      matchesSearchQuery(search, row.purchaseNumber, row.invoiceNumber, row.supplierName)
-    );
-  }, [purchases, search]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    void loadPurchaseLookup(search, false);
+  }, [search, user?.tenantId]);
+
+  const filtered = useMemo(() => purchases, [purchases]);
 
   const selectPurchase = async (purchase: Purchase) => {
     if (!user?.tenantId) return;
@@ -211,7 +265,9 @@ export default function PurchaseReturns() {
       setItems([]);
       setReturnedByItem({});
       setDraft({});
-      await load();
+      setSearchInput('');
+      setSearch('');
+      await load('');
     } catch (error: any) {
       showToast(error.message || 'Purchase return could not be posted.', 'danger');
     } finally {
@@ -228,7 +284,7 @@ export default function PurchaseReturns() {
           description="Return stock against its original supplier bill and exact batch."
           breadcrumbs={[{ label: 'Purchases' }, { label: 'Purchase Returns' }]}
           actions={
-            <Button variant="outline" onClick={load} disabled={loading}>
+            <Button variant="outline" onClick={() => void load(search)} disabled={loading}>
               <RefreshCw className="h-4 w-4" /> Refresh
             </Button>
           }
@@ -241,8 +297,8 @@ export default function PurchaseReturns() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text/40" />
                 <input
                   ref={searchInputRef}
-                  value={search}
-                  onChange={event => setSearch(event.target.value)}
+                  value={searchInput}
+                  onChange={event => setSearchInput(event.target.value)}
                   onKeyDown={event => {
                     if (event.key === 'Enter' && filtered[0]) {
                       event.preventDefault();
@@ -255,7 +311,7 @@ export default function PurchaseReturns() {
                 />
               </div>
               <p className="mt-3 text-xs font-semibold text-text/45">
-                Ctrl+F focuses search. Enter opens the first result. F2 posts the current return.
+                Ctrl+F focuses search. Results load in small batches; Enter opens the first result. F2 posts the current return.
               </p>
             </div>
             {loading ? (
@@ -264,40 +320,56 @@ export default function PurchaseReturns() {
               <div className="p-6 text-center">
                 <AlertCircle className="mx-auto h-10 w-10 text-danger" />
                 <p className="mt-3 text-sm text-danger">{loadError}</p>
-                <Button variant="outline" className="mt-4" onClick={load}>
+                <Button variant="outline" className="mt-4" onClick={() => void load(search)}>
                   Retry
                 </Button>
               </div>
             ) : filtered.length === 0 ? (
               <EmptyState
                 icon={<RotateCcw className="h-12 w-12" />}
-                title="No returnable purchases"
-                description="Posted purchases with a remaining return value will appear here."
+                title={search ? 'No matching purchases' : 'No returnable purchases'}
+                description={search
+                  ? 'Try a different purchase number, invoice number, or supplier name.'
+                  : 'Posted purchases with a remaining return value will appear here.'}
               />
             ) : (
-              <div className="max-h-[640px] divide-y divide-border overflow-y-auto">
-                {filtered.map(row => (
-                  <button
-                    key={row.id}
-                    type="button"
-                    onClick={() => selectPurchase(row)}
-                    disabled={selectedLoading}
-                    className={`min-h-24 w-full p-4 text-left transition hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
-                      selected?.id === row.id ? 'bg-primary/[0.07]' : ''
-                    }`}
-                  >
-                    <div className="flex justify-between gap-3">
-                      <span className="font-mono font-bold text-primary">{row.purchaseNumber}</span>
-                      <span className="font-bold">{formatCurrency(row.totalAmount)}</span>
-                    </div>
-                    <div className="mt-1 font-semibold">{row.supplierName}</div>
-                    <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-text/50">
-                      <span>Invoice {row.invoiceNumber}</span>
-                      <span>Returned {formatCurrency(row.returnAmount || 0)}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="max-h-[640px] divide-y divide-border overflow-y-auto">
+                  {filtered.map(row => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => selectPurchase(row)}
+                      disabled={selectedLoading}
+                      className={`min-h-24 w-full p-4 text-left transition hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+                        selected?.id === row.id ? 'bg-primary/[0.07]' : ''
+                      }`}
+                    >
+                      <div className="flex justify-between gap-3">
+                        <span className="font-mono font-bold text-primary">{row.purchaseNumber}</span>
+                        <span className="font-bold">{formatCurrency(row.totalAmount)}</span>
+                      </div>
+                      <div className="mt-1 font-semibold">{row.supplierName}</div>
+                      <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-text/50">
+                        <span>Invoice {row.invoiceNumber}</span>
+                        <span>Returned {formatCurrency(row.returnAmount || 0)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {!search && hasMorePurchases && (
+                  <div className="border-t border-border p-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void loadPurchaseLookup('', true)}
+                      disabled={loadingMorePurchases}
+                    >
+                      {loadingMorePurchases ? 'Loading more…' : 'Load More Purchases'}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </Card>
 
@@ -543,6 +615,18 @@ export default function PurchaseReturns() {
                   </tbody>
                 </table>
               </div>
+              {hasMoreReturns && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={() => void loadReturnHistory(true)}
+                    disabled={loadingMoreReturns}
+                  >
+                    {loadingMoreReturns ? 'Loading more…' : 'Load More Return History'}
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </Card>

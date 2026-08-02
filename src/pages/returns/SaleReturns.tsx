@@ -14,7 +14,6 @@ import type { Invoice, InvoiceItem, SaleReturnRecord } from '../../types';
 import { formatCurrency, roundMoney } from '../../utils/currency';
 import { toJsDate } from '../../utils/date';
 import { isBatchExpired } from '../../utils/stock';
-import { matchesSearchQuery } from '../../utils/search';
 
 interface ReturnDraft {
   quantity: number;
@@ -42,45 +41,98 @@ export default function SaleReturns() {
   const [returns, setReturns] = useState<SaleReturnRecord[]>([]);
   const [selected, setSelected] = useState<Invoice | null>(null);
   const [returnedByLine, setReturnedByLine] = useState<Record<string, number>>({});
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [invoiceCursor, setInvoiceCursor] = useState<any>(null);
+  const [returnsCursor, setReturnsCursor] = useState<any>(null);
+  const [hasMoreInvoices, setHasMoreInvoices] = useState(false);
+  const [hasMoreReturns, setHasMoreReturns] = useState(false);
+  const [loadingMoreInvoices, setLoadingMoreInvoices] = useState(false);
+  const [loadingMoreReturns, setLoadingMoreReturns] = useState(false);
   const [drafts, setDrafts] = useState<Record<number, ReturnDraft>>({});
 
-  const load = async () => {
+  const loadInvoiceLookup = async (term: string, append: boolean = false) => {
     if (!user?.tenantId) return;
-    setLoading(true);
-    setLoadError('');
+    const searching = term.trim().length >= 2;
+    if (append) {
+      setLoadingMoreInvoices(true);
+    } else {
+      setLoading(true);
+      setLoadError('');
+    }
     try {
-      const [invoiceResult, returnRows] = await Promise.all([
-        invoiceService.getInvoicesPaginated(user.tenantId, 200),
-        saleReturnService.list(user.tenantId),
-      ]);
-      setInvoices(
-        (invoiceResult?.invoices || []).filter(invoice =>
+      if (searching) {
+        const rows = await invoiceService.searchInvoices(user.tenantId, term, 20);
+        setInvoices(rows.filter(invoice =>
           invoice.status !== 'cancelled'
           && !invoice.isQuickBill
           && roundMoney(invoice.returnedAmount || 0) < roundMoney(invoice.grandTotal)
-        )
+        ));
+        setInvoiceCursor(null);
+        setHasMoreInvoices(false);
+        return;
+      }
+
+      const invoiceResult = await invoiceService.getInvoicesPaginated(user.tenantId, 20, append ? invoiceCursor : null);
+      const visibleRows = (invoiceResult?.invoices || []).filter(invoice =>
+        invoice.status !== 'cancelled'
+        && !invoice.isQuickBill
+        && roundMoney(invoice.returnedAmount || 0) < roundMoney(invoice.grandTotal)
       );
-      setReturns(returnRows);
+      setInvoices(current => append ? [...current, ...visibleRows] : visibleRows);
+      setInvoiceCursor(invoiceResult?.lastDoc || null);
+      setHasMoreInvoices(Boolean(invoiceResult?.lastDoc));
     } catch (error: any) {
       const message = error.message || 'Sales invoices could not be loaded.';
       setLoadError(message);
       showToast(message, 'danger');
     } finally {
       setLoading(false);
+      setLoadingMoreInvoices(false);
     }
   };
 
+  const loadReturnHistory = async (append: boolean = false) => {
+    if (!user?.tenantId) return;
+    if (append) setLoadingMoreReturns(true);
+    try {
+      const result = await saleReturnService.listPage(user.tenantId, 20, append ? returnsCursor : null);
+      setReturns(current => append ? [...current, ...result.returns] : result.returns);
+      setReturnsCursor(result.lastDoc);
+      setHasMoreReturns(Boolean(result.lastDoc));
+    } catch (error: any) {
+      const message = error.message || 'Sale return history could not be loaded.';
+      setLoadError(message);
+      showToast(message, 'danger');
+    } finally {
+      setLoadingMoreReturns(false);
+    }
+  };
+
+  const load = async (term: string = search) => {
+    await Promise.all([
+      loadInvoiceLookup(term, false),
+      loadReturnHistory(false),
+    ]);
+  };
+
   useEffect(() => {
-    load();
+    void load('');
   }, [user?.tenantId]);
 
-  const filtered = useMemo(() => {
-    return invoices.filter(invoice =>
-      matchesSearchQuery(search, invoice.invoiceNumber, invoice.customerName)
-      || invoice.items.some(item => matchesSearchQuery(search, item.name))
-    );
-  }, [invoices, search]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    void loadInvoiceLookup(search, false);
+  }, [search, user?.tenantId]);
+
+  const filtered = useMemo(() => invoices, [invoices]);
 
   const selectInvoice = async (invoice: Invoice) => {
     if (!user?.tenantId) return;
@@ -208,7 +260,9 @@ export default function SaleReturns() {
       setSelected(null);
       setReturnedByLine({});
       setDrafts({});
-      await load();
+      setSearchInput('');
+      setSearch('');
+      await load('');
     } catch (error: any) {
       showToast(error.message || 'Sale return could not be posted.', 'danger');
     } finally {
@@ -225,7 +279,7 @@ export default function SaleReturns() {
           description="Return against the original invoice and restore only the exact valid sold batch."
           breadcrumbs={[{ label: 'Sales' }, { label: 'Sale Returns' }]}
           actions={
-            <Button variant="outline" onClick={load} disabled={loading}>
+            <Button variant="outline" onClick={() => void load(search)} disabled={loading}>
               <RefreshCw className="h-4 w-4" /> Refresh
             </Button>
           }
@@ -238,8 +292,8 @@ export default function SaleReturns() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text/40" />
                 <input
                   ref={searchInputRef}
-                  value={search}
-                  onChange={event => setSearch(event.target.value)}
+                  value={searchInput}
+                  onChange={event => setSearchInput(event.target.value)}
                   onKeyDown={event => {
                     if (event.key === 'Enter' && filtered[0]) {
                       event.preventDefault();
@@ -252,7 +306,7 @@ export default function SaleReturns() {
                 />
               </div>
               <p className="mt-3 text-xs font-semibold text-text/45">
-                Ctrl+F focuses search. Enter opens the first result. F2 posts the current sale return.
+                Ctrl+F focuses search. Results stay paged; Enter opens the first result. F2 posts the current sale return.
               </p>
             </div>
             {loading ? (
@@ -261,38 +315,54 @@ export default function SaleReturns() {
               <div className="p-6 text-center">
                 <AlertCircle className="mx-auto h-10 w-10 text-danger" />
                 <p className="mt-3 text-sm text-danger">{loadError}</p>
-                <Button variant="outline" className="mt-4" onClick={load}>Retry</Button>
+                <Button variant="outline" className="mt-4" onClick={() => void load(search)}>Retry</Button>
               </div>
             ) : filtered.length === 0 ? (
               <EmptyState
                 icon={<RotateCcw className="h-12 w-12" />}
-                title="No returnable invoices"
-                description="Posted stock invoices with returnable items will appear here."
+                title={search ? 'No matching invoices' : 'No returnable invoices'}
+                description={search
+                  ? 'Try a different invoice number or customer name.'
+                  : 'Posted stock invoices with returnable items will appear here.'}
               />
             ) : (
-              <div className="max-h-[640px] divide-y divide-border overflow-y-auto">
-                {filtered.map(invoice => (
-                  <button
-                    key={invoice.id}
-                    type="button"
-                    onClick={() => selectInvoice(invoice)}
-                    disabled={selectedLoading}
-                    className={`min-h-24 w-full p-4 text-left transition hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
-                      selected?.id === invoice.id ? 'bg-primary/[0.07]' : ''
-                    }`}
-                  >
-                    <div className="flex justify-between gap-3">
-                      <span className="font-mono font-bold text-primary">{invoice.invoiceNumber}</span>
-                      <span className="font-bold">{formatCurrency(invoice.grandTotal)}</span>
-                    </div>
-                    <div className="mt-1 font-semibold">{invoice.customerName}</div>
-                    <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-text/50">
-                      <span>{toJsDate(invoice.invoiceDate || invoice.createdAt).toLocaleDateString('en-IN')}</span>
-                      <span>Returned {formatCurrency(invoice.returnedAmount || 0)}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="max-h-[640px] divide-y divide-border overflow-y-auto">
+                  {filtered.map(invoice => (
+                    <button
+                      key={invoice.id}
+                      type="button"
+                      onClick={() => selectInvoice(invoice)}
+                      disabled={selectedLoading}
+                      className={`min-h-24 w-full p-4 text-left transition hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+                        selected?.id === invoice.id ? 'bg-primary/[0.07]' : ''
+                      }`}
+                    >
+                      <div className="flex justify-between gap-3">
+                        <span className="font-mono font-bold text-primary">{invoice.invoiceNumber}</span>
+                        <span className="font-bold">{formatCurrency(invoice.grandTotal)}</span>
+                      </div>
+                      <div className="mt-1 font-semibold">{invoice.customerName}</div>
+                      <div className="mt-1 flex flex-wrap justify-between gap-2 text-xs text-text/50">
+                        <span>{toJsDate(invoice.invoiceDate || invoice.createdAt).toLocaleDateString('en-IN')}</span>
+                        <span>Returned {formatCurrency(invoice.returnedAmount || 0)}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {!search && hasMoreInvoices && (
+                  <div className="border-t border-border p-4">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void loadInvoiceLookup('', true)}
+                      disabled={loadingMoreInvoices}
+                    >
+                      {loadingMoreInvoices ? 'Loading more…' : 'Load More Invoices'}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </Card>
 
@@ -531,6 +601,18 @@ export default function SaleReturns() {
                   </tbody>
                 </table>
               </div>
+              {hasMoreReturns && (
+                <div className="border-t border-border p-4">
+                  <Button
+                    variant="outline"
+                    className="w-full sm:w-auto"
+                    onClick={() => void loadReturnHistory(true)}
+                    disabled={loadingMoreReturns}
+                  >
+                    {loadingMoreReturns ? 'Loading more…' : 'Load More Return History'}
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </Card>

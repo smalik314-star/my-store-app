@@ -17,6 +17,8 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const emailAttempts = new Map<string, { count: number; resetAt: number }>();
   const normalizeSearchTerm = (value: unknown) => String(value ?? '').trim();
+  const normalizeSearchIndex = (value: unknown) =>
+    normalizeSearchTerm(value).toLowerCase().replace(/\s+/g, ' ');
   const dedupeById = <T extends { id: string }>(rows: T[]): T[] =>
     Array.from(new Map(rows.map(row => [row.id, row])).values());
   const getSearchVariants = (term: string): string[] => {
@@ -187,6 +189,7 @@ async function startServer() {
     if (!session) return;
     const { tenantId } = session;
     const searchTerm = normalizeSearchTerm(req.query.q);
+    const normalizedSearch = normalizeSearchIndex(req.query.q);
     const numericOrCodeQuery = /^[A-Za-z0-9\-_/]+$/.test(searchTerm);
 
     if (searchTerm.length < 2) {
@@ -224,16 +227,23 @@ async function startServer() {
     };
 
     try {
-      const productFields = numericOrCodeQuery ? ['barcode', 'sku'] : ['name', 'sku', 'barcode'];
-      const invoiceFields = numericOrCodeQuery ? ['invoiceNumber'] : ['invoiceNumber'];
-      const customerFields = numericOrCodeQuery ? ['phone'] : ['name', 'phone'];
+      const productFields = numericOrCodeQuery
+        ? ['barcodeSearch', 'skuSearch', 'barcode', 'sku']
+        : ['nameSearch', 'brandSearch', 'name', 'sku', 'barcode'];
+      const invoiceFields = ['invoiceNumberSearch', 'customerNameSearch', 'invoiceNumber', 'customerName'];
+      const customerFields = numericOrCodeQuery
+        ? ['phone', 'phoneSearch']
+        : ['nameSearch', 'name', 'phone'];
       const variants = getSearchVariants(searchTerm);
+      const normalizedVariants = Array.from(new Set(
+        getSearchVariants(normalizedSearch).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+      ));
 
       const [products, invoices, customers] = await Promise.all([
         prefixSearch(
           'products',
           productFields,
-          variants,
+          [...normalizedVariants, ...variants],
           5,
           row => row.recordStatus === 'inactive' ? null : {
             id: String(row.id),
@@ -249,7 +259,7 @@ async function startServer() {
         prefixSearch(
           'invoices',
           invoiceFields,
-          variants,
+          [...normalizedVariants, ...variants],
           5,
           row => ({
             id: String(row.id),
@@ -262,7 +272,7 @@ async function startServer() {
         prefixSearch(
           'customers',
           customerFields,
-          variants,
+          [...normalizedVariants, ...variants],
           5,
           row => row.recordStatus === 'inactive' ? null : {
             id: String(row.id),
@@ -286,6 +296,7 @@ async function startServer() {
     if (!session) return;
     const { tenantId } = session;
     const searchTerm = normalizeSearchTerm(req.query.q);
+    const normalizedSearch = normalizeSearchIndex(req.query.q);
     const pageSize = Math.min(50, Math.max(5, Number(req.query.pageSize) || 10));
     const cursorId = normalizeSearchTerm(req.query.cursorId);
     const requestedMode = normalizeSearchTerm(req.query.mode).toLowerCase();
@@ -298,12 +309,14 @@ async function startServer() {
     }
 
     try {
+      const indexedField = mode === 'name' ? 'nameSearch' : mode === 'sku' ? 'skuSearch' : 'barcodeSearch';
+      const rawField = mode;
       let productQuery = adminDb
         .collection('products')
         .where('tenantId', '==', tenantId)
-        .orderBy(mode)
-        .startAt(searchTerm)
-        .endAt(`${searchTerm}\uf8ff`)
+        .orderBy(indexedField)
+        .startAt(normalizedSearch)
+        .endAt(`${normalizedSearch}\uf8ff`)
         .limit(pageSize);
 
       if (cursorId) {
@@ -312,14 +325,24 @@ async function startServer() {
           productQuery = adminDb
             .collection('products')
             .where('tenantId', '==', tenantId)
-            .orderBy(mode)
+            .orderBy(indexedField)
             .startAfter(cursorSnap)
-            .endAt(`${searchTerm}\uf8ff`)
+            .endAt(`${normalizedSearch}\uf8ff`)
             .limit(pageSize);
         }
       }
 
-      const snapshot = await productQuery.get();
+      let snapshot = await productQuery.get();
+      if (snapshot.empty && !cursorId) {
+        snapshot = await adminDb
+          .collection('products')
+          .where('tenantId', '==', tenantId)
+          .orderBy(rawField)
+          .startAt(searchTerm)
+          .endAt(`${searchTerm}\uf8ff`)
+          .limit(pageSize)
+          .get();
+      }
       const products = snapshot.docs
         .map(doc => ({
           id: doc.id,

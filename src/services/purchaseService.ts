@@ -12,7 +12,11 @@ import {
   increment,
   runTransaction,
   orderBy,
-  Timestamp
+  Timestamp,
+  limit,
+  startAfter,
+  startAt,
+  endAt
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Purchase, PurchaseItem, Supplier, StockMovement, Product, ProductBatch, Tenant } from '../types';
@@ -20,6 +24,7 @@ import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 import { getEffectiveLimits } from '../config/subscription';
 import { toJsDate } from '../utils/date';
 import { roundMoney } from '../utils/currency';
+import { dedupeById, getSearchVariants, normalizeSearchIndex } from '../utils/search';
 
 const SUPPLIERS_COLL = 'suppliers';
 const PURCHASES_COLL = 'purchases';
@@ -39,6 +44,11 @@ type PurchaseEntryItem = Omit<PurchaseItem, 'id' | 'purchaseId'> & {
 
 const normalizedBatch = (value: string) => value.trim().toUpperCase();
 const normalizedInvoice = (value: string) => value.trim().toUpperCase().replace(/\s+/g, ' ');
+const buildPurchaseSearchFields = (data: Partial<Purchase>) => ({
+  purchaseNumberSearch: normalizeSearchIndex(data.purchaseNumber),
+  invoiceNumberSearch: normalizeSearchIndex(data.invoiceNumber),
+  supplierNameSearch: normalizeSearchIndex(data.supplierName),
+});
 
 const stableHash = (value: string): string => {
   let hash = 2166136261;
@@ -115,6 +125,71 @@ export const purchaseService = {
         const timeB = b.createdAt ? (typeof b.createdAt.toMillis === 'function' ? b.createdAt.toMillis() : new Date(b.createdAt as any).getTime()) : 0;
         return timeB - timeA;
       });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, PURCHASES_COLL);
+      return [];
+    }
+  },
+
+  async getPurchasesPage(tenantId: string, pageSize: number = 20, lastPurchase?: any) {
+    if (!tenantId) return { purchases: [], lastDoc: null };
+    try {
+      let q = query(
+        collection(db, PURCHASES_COLL),
+        where('tenantId', '==', tenantId),
+        orderBy('createdAt', 'desc'),
+        limit(pageSize)
+      );
+      if (lastPurchase) {
+        q = query(q, startAfter(lastPurchase));
+      }
+      const snap = await getDocs(q);
+      return {
+        purchases: snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Purchase)),
+        lastDoc: snap.docs[snap.docs.length - 1] ?? null,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, PURCHASES_COLL);
+      return { purchases: [], lastDoc: null };
+    }
+  },
+
+  async searchPurchases(tenantId: string, searchTerm: string, pageSize: number = 20): Promise<Purchase[]> {
+    if (!tenantId) return [];
+    const rawQuery = String(searchTerm || '').trim();
+    const normalizedVariants = Array.from(new Set(
+      getSearchVariants(searchTerm).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+    ));
+    if (!rawQuery || normalizedVariants.length === 0) return [];
+
+    const searchPlans: Array<{ field: string; variants: string[] }> = [
+      { field: 'purchaseNumberSearch', variants: normalizedVariants },
+      { field: 'invoiceNumberSearch', variants: normalizedVariants },
+      { field: 'supplierNameSearch', variants: normalizedVariants },
+      { field: 'purchaseNumber', variants: [rawQuery, rawQuery.toUpperCase()] },
+      { field: 'invoiceNumber', variants: [rawQuery, rawQuery.toUpperCase()] },
+      { field: 'supplierName', variants: getSearchVariants(searchTerm) },
+    ];
+
+    try {
+      const snapshots = await Promise.all(
+        searchPlans.flatMap(plan =>
+          plan.variants.map(variant =>
+            getDocs(query(
+              collection(db, PURCHASES_COLL),
+              where('tenantId', '==', tenantId),
+              orderBy(plan.field),
+              startAt(variant),
+              endAt(`${variant}\uf8ff`),
+              limit(pageSize)
+            ))
+          )
+        )
+      );
+
+      return dedupeById(
+        snapshots.flatMap(snapshot => snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Purchase)))
+      ).slice(0, pageSize);
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, PURCHASES_COLL);
       return [];
@@ -254,6 +329,10 @@ export const purchaseService = {
           id: purchaseId,
           tenantId,
           purchaseNumber,
+          ...buildPurchaseSearchFields({
+            ...purchaseData,
+            purchaseNumber,
+          }),
           status: purchaseData.status || 'posted',
           createdBy: actorId,
           createdAt: serverTimestamp() as any

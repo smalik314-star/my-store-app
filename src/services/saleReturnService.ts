@@ -4,9 +4,12 @@ import {
   getDoc,
   getDocs,
   increment,
+  limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
@@ -286,5 +289,27 @@ export const saleReturnService = {
         const right = b.createdAt?.toMillis?.() ?? b.createdAt?.seconds * 1000 ?? 0;
         return right - left;
       });
+  },
+
+  async listPage(tenantId: string, pageSize: number = 20, lastReturn?: any) {
+    if (!tenantId) return { returns: [], lastDoc: null };
+    try {
+      let returnsQuery = query(
+        collection(db, 'saleReturns'),
+        where('tenantId', '==', tenantId),
+        orderBy('createdAt', 'desc'),
+        limit(pageSize)
+      );
+      if (lastReturn) {
+        returnsQuery = query(returnsQuery, startAfter(lastReturn));
+      }
+      const snapshot = await getDocs(returnsQuery);
+      return {
+        returns: snapshot.docs.map(row => ({ id: row.id, ...row.data() } as SaleReturnRecord)),
+        lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+      };
+    } catch (error: any) {
+      throw new Error(error.message || 'Sale returns could not be loaded.');
+    }
   },
 };

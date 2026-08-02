@@ -96,6 +96,7 @@ export default function PurchaseEntry() {
   const [catalogSuggestions, setCatalogSuggestions] = useState<Record<string, MasterMedicine[]>>({});
   const [activeSuggestionByRow, setActiveSuggestionByRow] = useState<Record<string, number>>({});
   const searchRequestRef = useRef<Record<string, number>>({});
+  const searchTimerRef = useRef<Record<string, number>>({});
 
   // Inline Supplier Add Modal State
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -236,39 +237,46 @@ export default function PurchaseEntry() {
     const requestId = (searchRequestRef.current[rowId] || 0) + 1;
     searchRequestRef.current[rowId] = requestId;
     if (queryStr.trim().length < 2) {
+      const pendingTimer = searchTimerRef.current[rowId];
+      if (pendingTimer) {
+        window.clearTimeout(pendingTimer);
+        delete searchTimerRef.current[rowId];
+      }
       setCatalogSuggestions(current => ({ ...current, [rowId]: [] }));
       setInventorySuggestions(current => ({ ...current, [rowId]: [] }));
       return;
     }
-    if (user?.tenantId) {
-      void productService.searchProducts(user.tenantId, queryStr, { pageSize: 8, mode: 'name' }).then(result => {
+
+    const pendingTimer = searchTimerRef.current[rowId];
+    if (pendingTimer) {
+      window.clearTimeout(pendingTimer);
+    }
+    searchTimerRef.current[rowId] = window.setTimeout(() => {
+      if (user?.tenantId) {
+        void productService.searchProducts(user.tenantId, queryStr, { pageSize: 8, mode: 'name' }).then(result => {
+          if (searchRequestRef.current[rowId] !== requestId) return;
+          setInventorySuggestions(current => ({ ...current, [rowId]: result.products }));
+        }).catch(() => {
+          if (searchRequestRef.current[rowId] !== requestId) return;
+          setInventorySuggestions(current => ({ ...current, [rowId]: [] }));
+        });
+      }
+      void medicineMasterService.search(queryStr, 20).then(results => {
         if (searchRequestRef.current[rowId] !== requestId) return;
-        setInventorySuggestions(current => ({ ...current, [rowId]: result.products }));
+        setCatalogSuggestions(current => ({ ...current, [rowId]: results }));
       }).catch(() => {
         if (searchRequestRef.current[rowId] !== requestId) return;
-        setInventorySuggestions(current => ({ ...current, [rowId]: [] }));
+        setCatalogSuggestions(current => ({ ...current, [rowId]: [] }));
       });
-    }
-    void medicineMasterService.search(queryStr, 20).then(results => {
-      if (searchRequestRef.current[rowId] !== requestId) return;
-      setCatalogSuggestions(current => ({ ...current, [rowId]: results }));
-    }).catch(() => {
-      if (searchRequestRef.current[rowId] !== requestId) return;
-      setCatalogSuggestions(current => ({ ...current, [rowId]: [] }));
-    });
+    }, 180);
   };
 
   const handleSelectProduct = (idx: number, product: Product) => {
     const updated = [...items];
-    // Autofill metadata immediately
+    // Only brand may auto-fill. Purchase-specific operational fields stay manual.
     updated[idx].productId = product.id;
     updated[idx].productName = product.name;
     updated[idx].brand = product.brand || '';
-    updated[idx].category = product.category || '';
-    updated[idx].manufacturer = product.manufacturer || '';
-    updated[idx].unit = product.unit || 'Units';
-    updated[idx].gstPercentage = product.gstPercentage ?? 0;
-    updated[idx].minimumStock = product.minimumStock ?? 0;
     updated[idx].isNewProduct = false;
     
     updated[idx].searchQuery = product.name;
@@ -293,9 +301,6 @@ export default function PurchaseEntry() {
     updated[idx].productName = medicine.name;
     updated[idx].searchQuery = medicine.name;
     updated[idx].brand = medicine.brand || '';
-    updated[idx].manufacturer = medicine.manufacturer || '';
-    updated[idx].category = medicine.category || 'Others';
-    updated[idx].unit = medicine.unit || 'Units';
     updated[idx].isNewProduct = true;
     updated[idx].showSuggestions = false;
     setItems(updated);

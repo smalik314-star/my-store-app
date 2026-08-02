@@ -13,7 +13,9 @@ import {
   getDocs,
   orderBy,
   limit,
-  startAfter
+  startAfter,
+  startAt,
+  endAt
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { Invoice, Product, Customer, Tenant } from '../types';
@@ -24,8 +26,13 @@ import { allocateFefo, getValidBatchQuantity, isBatchExpired } from '../utils/st
 import { addMoney, calculateLineTax, roundMoney, subtractMoney } from '../utils/currency';
 import { getEffectiveLimits } from '../config/subscription';
 import { formatDocumentNumber, getIndianFinancialYear } from '../utils/financialYear';
+import { dedupeById, getSearchVariants, normalizeSearchIndex } from '../utils/search';
 
 const COLLECTION_NAME = 'invoices';
+const buildInvoiceSearchFields = (data: Partial<Invoice>) => ({
+  invoiceNumberSearch: normalizeSearchIndex(data.invoiceNumber),
+  customerNameSearch: normalizeSearchIndex(data.customerName),
+});
 
 function sanitizeForFirestore(obj: any): any {
   if (obj === undefined) {
@@ -245,6 +252,10 @@ export const invoiceService = {
         const invoice = {
           ...invoiceData,
           invoiceNumber: generatedInvoiceNumber,
+          ...buildInvoiceSearchFields({
+            ...invoiceData,
+            invoiceNumber: generatedInvoiceNumber,
+          }),
           requestId,
           tenantId,
           createdBy: actorId,
@@ -488,6 +499,41 @@ export const invoiceService = {
       };
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+    }
+  },
+
+  async searchInvoices(tenantId: string, searchTerm: string, pageSize: number = 20): Promise<Invoice[]> {
+    if (!tenantId) return [];
+    const variants = Array.from(new Set(
+      getSearchVariants(searchTerm).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+    ));
+    if (variants.length === 0) return [];
+
+    const fields = ['invoiceNumberSearch', 'customerNameSearch', 'invoiceNumber', 'customerName'];
+
+    try {
+      const snapshots = await Promise.all(
+        fields.flatMap(field =>
+          variants.map(variant =>
+            getDocs(query(
+              collection(db, COLLECTION_NAME),
+              where('tenantId', '==', tenantId),
+              orderBy(field),
+              startAt(field.endsWith('Search') ? variant : searchTerm.trim()),
+              endAt(`${field.endsWith('Search') ? variant : searchTerm.trim()}\uf8ff`),
+              limit(pageSize)
+            ))
+          )
+        )
+      );
+
+      return dedupeById(
+        snapshots.flatMap(snapshot => snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)))
+      )
+        .slice(0, pageSize);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, COLLECTION_NAME);
+      return [];
     }
   },
 

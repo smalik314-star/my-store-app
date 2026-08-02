@@ -799,7 +799,7 @@ export default function Billing() {
   };
 
   // Save the invoice to backend database
-  const handleSaveInvoice = async () => {
+  const handleSaveInvoice = async (startNew: boolean = false) => {
     if (!user?.tenantId) return;
     if (saveInProgressRef.current) return;
 
@@ -868,25 +868,31 @@ export default function Billing() {
       };
 
       const saved = await invoiceService.saveInvoice(user.tenantId, invoiceData, prefix);
-      
-      // Store saved invoice details for the instant WhatsApp sharing flow
-      setSavedInvoice({
-        id: saved!.id,
-        invoiceNumber: saved!.invoiceNumber,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        grandTotal: totals.grandTotal,
-        items: validItems,
-        paymentStatus,
-        amountReceived: parsedAmtReceived,
-        outstandingAmount: parsedAmtDue,
-      });
+      if (startNew) {
+        showToast(`Invoice ${saved!.invoiceNumber} saved. New bill ready.`, 'success');
+        resetBill();
+        window.setTimeout(() => {
+          barcodeInputRef.current?.focus();
+          barcodeInputRef.current?.select();
+        }, 0);
+      } else {
+        // Store saved invoice details for the instant WhatsApp sharing flow
+        setSavedInvoice({
+          id: saved!.id,
+          invoiceNumber: saved!.invoiceNumber,
+          customerName: selectedCustomer.name,
+          customerPhone: selectedCustomer.phone,
+          grandTotal: totals.grandTotal,
+          items: validItems,
+          paymentStatus,
+          amountReceived: parsedAmtReceived,
+          outstandingAmount: parsedAmtDue,
+        });
 
-      setShowSuccessModal(true);
-      showToast('Bill successfully generated & saved to Khata records!', 'success');
-      
-      // Reset POS form
-      resetBill();
+        setShowSuccessModal(true);
+        showToast('Bill successfully generated & saved to Khata records!', 'success');
+        resetBill();
+      }
     } catch (error: any) {
       console.error('Save failed:', error);
       showToast(error.message || 'Failed to process transaction', 'danger');
@@ -911,7 +917,10 @@ export default function Billing() {
         navigate('/invoices');
       } else if (event.key === 'F2') {
         event.preventDefault();
-        handleSaveInvoice();
+        void handleSaveInvoice(false);
+      } else if (event.key === 'F3') {
+        event.preventDefault();
+        void handleSaveInvoice(true);
       }
     };
     window.addEventListener('keydown', handleBillingShortcuts);
@@ -1039,7 +1048,7 @@ _Powered by PharmaFlow_`;
               <FileText className="h-3.5 w-3.5" /> Bill List <kbd>Alt+M</kbd>
             </button>
             <span className="ml-auto hidden lg:flex items-center gap-1.5 text-[10px] font-bold text-text/40">
-              <Keyboard className="h-3.5 w-3.5" /> Enter/Tab moves forward • F2 saves
+                <Keyboard className="h-3.5 w-3.5" /> Enter/Tab moves forward • F2 saves • F3 saves & new
             </span>
           </div>
         </div>
@@ -1702,6 +1711,12 @@ _Powered by PharmaFlow_`;
                             max={totals.grandTotal}
                             value={amountReceived}
                             onChange={(e) => setAmountReceived(e.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void handleSaveInvoice(false);
+                              }
+                            }}
                             className="w-full px-4 py-3 rounded-xl border border-border bg-background text-sm font-black outline-none focus:border-primary text-text"
                           />
                         </div>
@@ -1744,11 +1759,20 @@ _Powered by PharmaFlow_`;
               </div>
 
               {/* SAVE AND SHARE CTA BUTTON */}
-              <div className="pt-6">
+              <div className="space-y-3 pt-6">
+                <Button
+                  variant="outline"
+                  type="button"
+                  onClick={() => void handleSaveInvoice(true)}
+                  disabled={loading}
+                  className="w-full py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest border-primary/30 text-primary hover:bg-primary/5"
+                >
+                  Save & New
+                </Button>
                 <Button
                   variant="primary"
                   type="button"
-                  onClick={handleSaveInvoice}
+                  onClick={() => void handleSaveInvoice(false)}
                   isLoading={loading}
                   className="w-full py-4.5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-primary/20 flex items-center justify-center gap-2 bg-success text-white border-transparent hover:bg-success/95"
                 >
