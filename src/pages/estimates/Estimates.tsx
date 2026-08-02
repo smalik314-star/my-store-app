@@ -26,6 +26,9 @@ export default function Estimates() {
   const navigate = useNavigate();
 
   const [estimates, setEstimates] = useState<Estimate[]>([]);
+  const [estimatesCursor, setEstimatesCursor] = useState<any>(null);
+  const [hasMoreEstimates, setHasMoreEstimates] = useState(false);
+  const [loadingEstimates, setLoadingEstimates] = useState(true);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -47,15 +50,26 @@ export default function Estimates() {
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [productSuggestions, setProductSuggestions] = useState<Record<number, Product[]>>({});
 
-  const reload = async () => {
+  const reload = async (reset: boolean = true) => {
     if (!user?.tenantId) return;
-    const rows = await estimateService.list(user.tenantId);
-    setEstimates(rows);
+    setLoadingEstimates(true);
+    try {
+      const result = await estimateService.listPage(
+        user.tenantId,
+        20,
+        reset ? undefined : estimatesCursor
+      );
+      setEstimates(current => (reset ? result.estimates : [...current, ...result.estimates]));
+      setEstimatesCursor(result.lastDoc);
+      setHasMoreEstimates(result.hasMore);
+    } finally {
+      setLoadingEstimates(false);
+    }
   };
 
   useEffect(() => {
     if (!user?.tenantId) return;
-    void reload();
+    void reload(true);
   }, [user?.tenantId]);
 
   useEffect(() => {
@@ -204,22 +218,33 @@ export default function Estimates() {
           </Button>
         </div>
         <div className="rounded-2xl border border-border bg-white overflow-hidden">
-          {estimates.length === 0 ? (
+          {loadingEstimates ? (
+            <p className="p-10 text-center text-text/50">Loading estimates...</p>
+          ) : estimates.length === 0 ? (
             <p className="p-10 text-center text-text/50">No estimates created yet.</p>
           ) : (
-            estimates.map(row => (
-              <Link
-                key={row.id}
-                to={`/estimate/${row.id}`}
-                className="flex items-center justify-between gap-4 border-b border-border p-4 last:border-0 hover:bg-background/40"
-              >
-                <div>
-                  <p className="font-black text-primary">{row.estimateNumber}</p>
-                  <p className="text-sm text-text/55">{row.customerName} | {row.status.toUpperCase()}</p>
+            <>
+              {estimates.map(row => (
+                <Link
+                  key={row.id}
+                  to={`/estimate/${row.id}`}
+                  className="flex items-center justify-between gap-4 border-b border-border p-4 last:border-0 hover:bg-background/40"
+                >
+                  <div>
+                    <p className="font-black text-primary">{row.estimateNumber}</p>
+                    <p className="text-sm text-text/55">{row.customerName} | {row.status.toUpperCase()}</p>
+                  </div>
+                  <p className="font-black">{formatCurrency(row.grandTotal)}</p>
+                </Link>
+              ))}
+              {hasMoreEstimates && (
+                <div className="p-4 text-center">
+                  <Button variant="outline" onClick={() => void reload(false)} disabled={loadingEstimates}>
+                    Load more estimates
+                  </Button>
                 </div>
-                <p className="font-black">{formatCurrency(row.grandTotal)}</p>
-              </Link>
-            ))
+              )}
+            </>
           )}
         </div>
       </div>

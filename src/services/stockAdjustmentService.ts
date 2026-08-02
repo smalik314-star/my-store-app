@@ -2,9 +2,12 @@ import {
   collection,
   doc,
   getDocs,
+  limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
@@ -173,7 +176,7 @@ export const stockAdjustmentService = {
         newStock: newProductStock,
         userId: actorId,
         reason: input.reason,
-        notes: [input.reasonNote.trim(), input.notes?.trim()].filter(Boolean).join(' · '),
+        notes: [input.reasonNote.trim(), input.notes?.trim()].filter(Boolean).join(' | '),
         createdAt: serverTimestamp(),
       } satisfies StockMovement);
       transaction.update(productRef, {
@@ -206,19 +209,24 @@ export const stockAdjustmentService = {
     });
   },
 
-  async list(tenantId: string): Promise<StockAdjustmentRecord[]> {
-    if (!tenantId) return [];
-    const snapshot = await getDocs(
-      query(collection(db, 'stockAdjustments'), where('tenantId', '==', tenantId))
+  async listPage(tenantId: string, pageSize: number = 25, lastRecord?: any) {
+    if (!tenantId) return { records: [], lastDoc: null, hasMore: false };
+
+    let adjustmentsQuery = query(
+      collection(db, 'stockAdjustments'),
+      where('tenantId', '==', tenantId),
+      orderBy('createdAt', 'desc'),
+      limit(pageSize)
     );
-    return snapshot.docs
-      .map(row => ({ id: row.id, ...row.data() }) as StockAdjustmentRecord)
-      .sort((left, right) => {
-        const leftTime =
-          typeof left.createdAt?.toMillis === 'function' ? left.createdAt.toMillis() : 0;
-        const rightTime =
-          typeof right.createdAt?.toMillis === 'function' ? right.createdAt.toMillis() : 0;
-        return rightTime - leftTime;
-      });
+    if (lastRecord) {
+      adjustmentsQuery = query(adjustmentsQuery, startAfter(lastRecord));
+    }
+
+    const snapshot = await getDocs(adjustmentsQuery);
+    return {
+      records: snapshot.docs.map(row => ({ id: row.id, ...row.data() }) as StockAdjustmentRecord),
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+      hasMore: snapshot.docs.length === pageSize,
+    };
   },
 };

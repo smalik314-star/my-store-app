@@ -1,6 +1,6 @@
 import {
-  collection, doc, getDoc, getDocs, orderBy, query, runTransaction,
-  serverTimestamp, updateDoc, where,
+  collection, doc, getDoc, getDocs, limit, orderBy, query, runTransaction,
+  serverTimestamp, startAfter, updateDoc, where,
 } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import type { Estimate, EstimateItem } from '../types';
@@ -69,11 +69,22 @@ export const estimateService = {
     });
   },
 
-  async list(tenantId: string): Promise<Estimate[]> {
-    const snapshot = await getDocs(query(
-      collection(db, 'estimates'), where('tenantId', '==', tenantId), orderBy('createdAt', 'desc'),
-    ));
-    return snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Estimate));
+  async listPage(tenantId: string, pageSize: number = 20, lastEstimate?: any) {
+    let estimateQuery = query(
+      collection(db, 'estimates'),
+      where('tenantId', '==', tenantId),
+      orderBy('createdAt', 'desc'),
+      limit(pageSize),
+    );
+    if (lastEstimate) {
+      estimateQuery = query(estimateQuery, startAfter(lastEstimate));
+    }
+    const snapshot = await getDocs(estimateQuery);
+    return {
+      estimates: snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Estimate)),
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+      hasMore: snapshot.docs.length === pageSize,
+    };
   },
 
   async get(tenantId: string, id: string): Promise<Estimate | null> {

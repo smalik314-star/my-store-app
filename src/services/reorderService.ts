@@ -1,4 +1,15 @@
-import { collection, doc, getDocs, orderBy, query, runTransaction, serverTimestamp, where } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  startAfter,
+  where,
+} from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import type { ReorderLine, ReorderOrder, Supplier } from '../types';
 import { formatDocumentNumber, getIndianFinancialYear } from '../utils/financialYear';
@@ -20,9 +31,22 @@ export const suggestedReorderQuantity = (currentStock: number, minimumStock: num
 };
 
 export const reorderService = {
-  async list(tenantId: string): Promise<ReorderOrder[]> {
-    const snapshot = await getDocs(query(collection(db, 'reorderOrders'), where('tenantId', '==', tenantId), orderBy('createdAt', 'desc')));
-    return snapshot.docs.map(row => ({ id: row.id, ...row.data() } as ReorderOrder));
+  async listPage(tenantId: string, pageSize: number = 20, lastOrder?: any) {
+    let reorderQuery = query(
+      collection(db, 'reorderOrders'),
+      where('tenantId', '==', tenantId),
+      orderBy('createdAt', 'desc'),
+      limit(pageSize)
+    );
+    if (lastOrder) {
+      reorderQuery = query(reorderQuery, startAfter(lastOrder));
+    }
+    const snapshot = await getDocs(reorderQuery);
+    return {
+      orders: snapshot.docs.map(row => ({ id: row.id, ...row.data() } as ReorderOrder)),
+      lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+      hasMore: snapshot.docs.length === pageSize,
+    };
   },
 
   async save(tenantId: string, draft: ReorderDraft) {

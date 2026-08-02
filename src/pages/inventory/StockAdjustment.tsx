@@ -53,6 +53,8 @@ export default function StockAdjustment() {
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [historyCursor, setHistoryCursor] = useState<any>(null);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [cursorId, setCursorId] = useState<string | null>(null);
@@ -81,12 +83,19 @@ export default function StockAdjustment() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const loadHistory = async () => {
+  const loadHistory = async (reset: boolean = true) => {
     if (!user?.tenantId) return;
     setHistoryLoading(true);
     setLoadError('');
     try {
-      setAdjustments(await stockAdjustmentService.list(user.tenantId));
+      const result = await stockAdjustmentService.listPage(
+        user.tenantId,
+        25,
+        reset ? undefined : historyCursor
+      );
+      setAdjustments(current => (reset ? result.records : [...current, ...result.records]));
+      setHistoryCursor(result.lastDoc);
+      setHasMoreHistory(result.hasMore);
     } catch (error: any) {
       setLoadError(error.message || 'Stock adjustment history could not be loaded.');
     } finally {
@@ -97,7 +106,7 @@ export default function StockAdjustment() {
   useEffect(() => {
     if (!user?.tenantId) return;
     setLoading(true);
-    loadHistory();
+    void loadHistory(true);
     const loadProducts = async () => {
       const trimmed = debouncedSearch.trim();
       const result = trimmed.length >= 2
@@ -129,7 +138,9 @@ export default function StockAdjustment() {
     try {
       const result = await productService.getProductsPaginated(user.tenantId, 50, cursorId);
       const nextRows = result?.products || [];
-      setProducts(current => Array.from(new Map([...current, ...nextRows].map(product => [product.id, product])).values()));
+      setProducts(current =>
+        Array.from(new Map([...current, ...nextRows].map(product => [product.id, product])).values())
+      );
       setCursorId(result?.nextCursor || null);
       setHasMoreProducts(Boolean(result?.hasMore));
     } finally {
@@ -215,7 +226,7 @@ export default function StockAdjustment() {
       setReason('correction');
       setReasonNote('');
       setNotes('');
-      await loadHistory();
+      await loadHistory(true);
     } catch (error: any) {
       showToast(error.message || 'Stock adjustment could not be posted.', 'danger');
     } finally {
@@ -247,7 +258,7 @@ export default function StockAdjustment() {
           description="Correct an existing batch through an idempotent, auditable stock movement."
           breadcrumbs={[{ label: 'Inventory' }, { label: 'Stock Adjustment' }]}
           actions={
-            <Button variant="outline" onClick={loadHistory} disabled={historyLoading}>
+            <Button variant="outline" onClick={() => void loadHistory(true)} disabled={historyLoading}>
               <RefreshCw className="h-4 w-4" /> Refresh history
             </Button>
           }
@@ -300,7 +311,7 @@ export default function StockAdjustment() {
                       <div>
                         <div className="font-semibold">{product.name}</div>
                         <div className="mt-1 text-xs text-text/50">
-                          {product.brand || 'No brand'} · {product.sku || 'No SKU'}
+                          {product.brand || 'No brand'} | {product.sku || 'No SKU'}
                         </div>
                       </div>
                       <span className="rounded-full bg-background px-2 py-1 text-xs font-bold">
@@ -332,7 +343,7 @@ export default function StockAdjustment() {
                 <div className="border-b border-border p-4 sm:p-5">
                   <div className="text-lg font-bold">{selectedProduct.name}</div>
                   <div className="mt-1 text-sm text-text/55">
-                    Total stock: <strong>{selectedProduct.stockQuantity || 0}</strong> · Select the
+                    Total stock: <strong>{selectedProduct.stockQuantity || 0}</strong> | Select the
                     batch counted physically.
                   </div>
                 </div>
@@ -500,7 +511,7 @@ export default function StockAdjustment() {
           ) : loadError ? (
             <div className="p-6 text-center">
               <p className="text-sm text-danger">{loadError}</p>
-              <Button variant="outline" className="mt-4" onClick={loadHistory}>
+              <Button variant="outline" className="mt-4" onClick={() => void loadHistory(true)}>
                 Retry
               </Button>
             </div>
@@ -513,7 +524,7 @@ export default function StockAdjustment() {
           ) : (
             <>
               <div className="divide-y divide-border md:hidden">
-                {adjustments.slice(0, 50).map(row => (
+                {adjustments.map(row => (
                   <div key={row.id} className="space-y-2 p-4">
                     <div className="flex justify-between gap-3">
                       <span className="font-mono text-sm font-bold text-primary">
@@ -530,8 +541,8 @@ export default function StockAdjustment() {
                     </div>
                     <div className="font-semibold">{row.productName}</div>
                     <div className="text-xs text-text/55">
-                      Batch {row.batchNumber} · {row.previousBatchQuantity} →{' '}
-                      {row.newBatchQuantity} · {reasonLabels[row.reason]}
+                      Batch {row.batchNumber} | {row.previousBatchQuantity} {'->'} {row.newBatchQuantity} |{' '}
+                      {reasonLabels[row.reason]}
                     </div>
                     <div className="text-xs">{row.reasonNote}</div>
                   </div>
@@ -552,7 +563,7 @@ export default function StockAdjustment() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {adjustments.slice(0, 50).map(row => (
+                    {adjustments.map(row => (
                       <tr key={row.id}>
                         <td className="px-4 py-3 font-mono font-semibold text-primary">
                           {row.adjustmentNumber}
@@ -578,6 +589,17 @@ export default function StockAdjustment() {
                   </tbody>
                 </table>
               </div>
+              {hasMoreHistory && (
+                <div className="border-t border-border p-4 text-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => void loadHistory(false)}
+                    disabled={historyLoading}
+                  >
+                    Load more adjustments
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </Card>
@@ -601,7 +623,7 @@ export default function StockAdjustment() {
             ? `${selectedProduct.name}, batch ${selectedBatch.batchNumber}: change ${currentQuantity} to ${targetQuantity} units (${difference > 0 ? '+' : ''}${difference}). This creates a permanent audit entry and cannot be deleted.`
             : ''
         }
-        confirmText={saving ? 'Posting…' : 'Confirm & Post'}
+        confirmText={saving ? 'Posting...' : 'Confirm & Post'}
         variant="danger"
         isLoading={saving}
       />

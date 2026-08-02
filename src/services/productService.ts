@@ -6,7 +6,6 @@ import {
   query, 
   where, 
   serverTimestamp,
-  onSnapshot,
   orderBy,
   limit,
   startAfter,
@@ -522,37 +521,33 @@ export const productService = {
     };
   },
 
-  subscribeToStockMovements(
-    tenantId: string,
-    callback: (movements: StockMovement[]) => void,
-    limitCount: number = 50
-  ) {
-    if (!tenantId) return () => {};
-    
-    const q = query(
-      collection(db, 'stockMovements'),
-      where('tenantId', '==', tenantId)
-    );
-    
-    return onSnapshot(q, (snapshot) => {
-      try {
-        const movements = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as StockMovement[];
-        
-        movements.sort((a, b) => {
-          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
-          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
-          return dateB.getTime() - dateA.getTime();
-        });
-        
-        callback(movements.slice(0, limitCount));
-      } catch (err) {
-        console.error('Stock Movements Subscription Processing Error:', err);
+  async getStockMovementsPage(tenantId: string, pageSize: number = 50, lastMovement?: any) {
+    if (!tenantId) return { movements: [], lastDoc: null, hasMore: false };
+
+    try {
+      let movementQuery = query(
+        collection(db, 'stockMovements'),
+        where('tenantId', '==', tenantId),
+        orderBy('createdAt', 'desc'),
+        limit(pageSize)
+      );
+
+      if (lastMovement) {
+        movementQuery = query(movementQuery, startAfter(lastMovement));
       }
-    }, (error) => {
-      console.error('Stock Movements Subscription Error:', error);
-    });
+
+      const snapshot = await getDocs(movementQuery);
+      return {
+        movements: snapshot.docs.map(row => ({
+          id: row.id,
+          ...row.data(),
+        })) as StockMovement[],
+        lastDoc: snapshot.docs[snapshot.docs.length - 1] ?? null,
+        hasMore: snapshot.docs.length === pageSize,
+      };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'stockMovements');
+      return { movements: [], lastDoc: null, hasMore: false };
+    }
   }
 };

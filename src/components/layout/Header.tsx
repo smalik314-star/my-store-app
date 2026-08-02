@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../common/Button';
-import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 import { auth, db } from '../../firebase/config';
 import { toJsDate } from '../../utils/date';
 import { Product, Invoice, Customer } from '../../types';
@@ -253,7 +253,7 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
     };
   }, [apiBaseUrl, searchOpen, searchQuery, user?.tenantId]);
 
-  // Limited live alert sources so the header never subscribes to the full catalog.
+  // Limited alert refreshes so the header never subscribes to the full catalog.
   useEffect(() => {
     if (!user?.tenantId) {
       setStockAlertProducts([]);
@@ -261,43 +261,48 @@ export function Header({ onMenuClick, pageTitle }: HeaderProps) {
       return;
     }
 
-    const expiryCutoff = new Date();
-    expiryCutoff.setDate(expiryCutoff.getDate() + 60);
+    let active = true;
+    const refreshAlerts = async () => {
+      const expiryCutoff = new Date();
+      expiryCutoff.setDate(expiryCutoff.getDate() + 60);
 
-    const stockQuery = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId),
-      orderBy('stockQuantity', 'asc'),
-      limit(100)
-    );
+      const [stockSnapshot, expirySnapshot] = await Promise.all([
+        getDocs(query(
+          collection(db, 'products'),
+          where('tenantId', '==', user.tenantId),
+          orderBy('stockQuantity', 'asc'),
+          limit(100)
+        )),
+        getDocs(query(
+          collection(db, 'products'),
+          where('tenantId', '==', user.tenantId),
+          where('expiryDate', '<=', expiryCutoff),
+          orderBy('expiryDate', 'asc'),
+          limit(100)
+        )),
+      ]);
 
-    const expiryQuery = query(
-      collection(db, 'products'),
-      where('tenantId', '==', user.tenantId),
-      where('expiryDate', '<=', expiryCutoff),
-      orderBy('expiryDate', 'asc'),
-      limit(100)
-    );
-
-    const unsubscribeStock = onSnapshot(stockQuery, snapshot => {
+      if (!active) return;
       setStockAlertProducts(
-        snapshot.docs
+        stockSnapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() } as Product))
           .filter(product => product.recordStatus !== 'inactive')
       );
-    });
-
-    const unsubscribeExpiry = onSnapshot(expiryQuery, snapshot => {
       setExpiryAlertProducts(
-        snapshot.docs
+        expirySnapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() } as Product))
           .filter(product => product.recordStatus !== 'inactive')
       );
-    });
+    };
+
+    void refreshAlerts();
+    const intervalId = window.setInterval(() => {
+      void refreshAlerts();
+    }, 60000);
 
     return () => {
-      unsubscribeStock();
-      unsubscribeExpiry();
+      active = false;
+      window.clearInterval(intervalId);
     };
   }, [user?.tenantId]);
 

@@ -57,24 +57,31 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
   const { settings } = useSettings();
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(true);
+  const [movementCursor, setMovementCursor] = useState<any>(null);
+  const [hasMoreMovements, setHasMoreMovements] = useState(false);
   const [movementSearch, setMovementSearch] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState<string>('all');
 
-  // Fetch real-time stock movements
+  const loadMovements = async (reset: boolean = true) => {
+    if (!user?.tenantId) return;
+    setLoadingMovements(true);
+    try {
+      const result = await productService.getStockMovementsPage(
+        user.tenantId,
+        50,
+        reset ? undefined : movementCursor
+      );
+      setMovements(current => (reset ? result.movements : [...current, ...result.movements]));
+      setMovementCursor(result.lastDoc);
+      setHasMoreMovements(result.hasMore);
+    } finally {
+      setLoadingMovements(false);
+    }
+  };
+
   useEffect(() => {
     if (!user?.tenantId) return;
-
-    setLoadingMovements(true);
-    const unsub = productService.subscribeToStockMovements(
-      user.tenantId,
-      (newMovements) => {
-        setMovements(newMovements);
-        setLoadingMovements(false);
-      },
-      150 // Fetch recent 150 movements
-    );
-
-    return () => unsub();
+    void loadMovements(true);
   }, [user?.tenantId]);
 
   // --- KPI CALCULATIONS ---
@@ -818,6 +825,17 @@ export function InventoryDashboard({ products, intelligence, onViewProduct, onEd
                 })
               )}
             </div>
+            {hasMoreMovements && (
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => void loadMovements(false)}
+                  disabled={loadingMovements}
+                >
+                  Load more ledger entries
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </Card>
