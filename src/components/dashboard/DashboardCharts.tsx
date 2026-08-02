@@ -202,3 +202,4 @@ function ChartEmptyState({ message }: { message: string }) {
     </div>
   );
 }
+

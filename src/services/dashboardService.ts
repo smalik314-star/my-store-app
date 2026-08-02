@@ -1,13 +1,17 @@
 import { 
   collection, 
+  getAggregateFromServer,
+  getDocs,
+  limit,
+  orderBy,
   query, 
-  onSnapshot,
+  sum,
+  Timestamp,
   where,
   getCountFromServer
 } from 'firebase/firestore';
-import { db, auth } from '../firebase/config';
-import { Product, Invoice, Purchase, Supplier } from '../types';
-import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
+import { db } from '../firebase/config';
+import { Product, Invoice, Purchase } from '../types';
 import { productService } from './productService';
 
 export interface DashboardStats {
@@ -36,10 +40,6 @@ export const dashboardService = {
     onError?: (error: any) => void,
     onInvoices?: (invoices: Invoice[]) => void
   ) {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
     let stats: DashboardStats = {
       totalProducts: 0,
       totalCustomers: 0,
@@ -59,15 +59,48 @@ export const dashboardService = {
       inventorySummaryReady: false,
     };
 
-    const refreshInventoryStats = async () => {
+    const refreshStats = async () => {
       try {
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const sixMonthsStart = new Date(now.getFullYear(), now.getMonth() - 5, 1);
         const twoMonthsFromNow = new Date();
         twoMonthsFromNow.setMonth(twoMonthsFromNow.getMonth() + 2);
-        const [totalProductsCount, outOfStockCount, criticalCount, expiryCount] = await Promise.all([
+        const [totalProductsCount, outOfStockCount, criticalCount, expiryCount, totalCustomersCount, totalReceivableAgg, totalInvoicesCount, cancelledInvoicesCount, supplierPayableAgg, todayInvoicesSnapshot, sixMonthInvoicesSnapshot, todayPurchasesSnapshot] = await Promise.all([
           getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId))),
           getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId), where('stockQuantity', '==', 0))),
           getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId), where('stockQuantity', '>', 0), where('stockQuantity', '<=', 2))),
           getCountFromServer(query(collection(db, 'products'), where('tenantId', '==', tenantId), where('expiryDate', '>=', now), where('expiryDate', '<=', twoMonthsFromNow))),
+          getCountFromServer(query(collection(db, 'customers'), where('tenantId', '==', tenantId))),
+          getAggregateFromServer(
+            query(collection(db, 'customers'), where('tenantId', '==', tenantId)),
+            { totalReceivable: sum('outstandingBalance') }
+          ),
+          getCountFromServer(query(collection(db, 'invoices'), where('tenantId', '==', tenantId))),
+          getCountFromServer(query(collection(db, 'invoices'), where('tenantId', '==', tenantId), where('status', '==', 'cancelled'))),
+          getAggregateFromServer(
+            query(collection(db, 'suppliers'), where('tenantId', '==', tenantId)),
+            { totalPayable: sum('payableBalance') }
+          ),
+          getDocs(query(
+            collection(db, 'invoices'),
+            where('tenantId', '==', tenantId),
+            where('createdAt', '>=', Timestamp.fromDate(todayStart)),
+            orderBy('createdAt', 'desc')
+          )),
+          getDocs(query(
+            collection(db, 'invoices'),
+            where('tenantId', '==', tenantId),
+            where('createdAt', '>=', Timestamp.fromDate(sixMonthsStart)),
+            orderBy('createdAt', 'desc')
+          )),
+          getDocs(query(
+            collection(db, 'purchases'),
+            where('tenantId', '==', tenantId),
+            where('createdAt', '>=', Timestamp.fromDate(todayStart)),
+            orderBy('createdAt', 'desc')
+          )),
         ]);
 
         stats.totalProducts = Number(totalProductsCount.data().count) || 0;
@@ -75,166 +108,88 @@ export const dashboardService = {
         stats.criticalStockItems = Number(criticalCount.data().count) || 0;
         stats.expiryAlerts = Number(expiryCount.data().count) || 0;
         stats.lowStockItems = stats.criticalStockItems + stats.outOfStockItems;
+        stats.totalCustomers = Number(totalCustomersCount.data().count) || 0;
+        stats.totalReceivable = Math.max(0, Number(totalReceivableAgg.data().totalReceivable) || 0);
+        stats.totalPayable = Math.max(0, Number(supplierPayableAgg.data().totalPayable) || 0);
+        stats.totalInvoices = Math.max(
+          0,
+          (Number(totalInvoicesCount.data().count) || 0) - (Number(cancelledInvoicesCount.data().count) || 0)
+        );
         stats.stockValue = 0;
         stats.inventorySummaryReady = false;
+        const todayInvoices = todayInvoicesSnapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Invoice))
+          .filter(invoice => invoice.status !== 'cancelled');
+        const sixMonthInvoices = sixMonthInvoicesSnapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Invoice))
+          .filter(invoice => invoice.status !== 'cancelled');
+        const todayPurchases = todayPurchasesSnapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Purchase))
+          .filter(purchase => purchase.status !== 'cancelled');
+
+        onInvoices?.(sixMonthInvoices);
+        stats.todaySales = todayInvoices.reduce((sum, invoice) => sum + (Number(invoice.grandTotal) || 0), 0);
+        stats.todayInvoiceCount = todayInvoices.length;
+        stats.todayGrossProfit = todayInvoices.reduce((invoiceTotal, invoice) => (
+          invoiceTotal + invoice.items.reduce((lineTotal, item) => (
+            lineTotal + ((Number(item.price) || 0) - (Number(item.purchaseCost) || 0)) * (Number(item.quantity) || 0)
+          ), 0)
+        ), 0);
+        stats.monthlyRevenue = sixMonthInvoices
+          .filter(invoice => {
+            const createdAt = typeof invoice.createdAt?.toDate === 'function'
+              ? invoice.createdAt.toDate()
+              : new Date(invoice.createdAt);
+            return createdAt >= monthStart;
+          })
+          .reduce((sum, invoice) => sum + (Number(invoice.grandTotal) || 0), 0);
+        stats.todayPurchases = todayPurchases.reduce(
+          (sum, purchase) => sum + (Number(purchase.totalAmount) || 0),
+          0
+        );
         callback({ ...stats });
       } catch (error) {
-        console.error('Stats Products Error:', error);
+        console.error('Stats Refresh Error:', error);
         onError?.(error);
       }
     };
 
-    void refreshInventoryStats();
-    const inventoryStatsInterval = window.setInterval(() => {
-      void refreshInventoryStats();
+    void refreshStats();
+    const statsInterval = window.setInterval(() => {
+      void refreshStats();
     }, 60_000);
 
-    // Customers Stats
-    const unsubCustomers = onSnapshot(
-      query(collection(db, 'customers'), where('tenantId', '==', tenantId)), 
-      (snapshot) => {
-        const customers = snapshot.docs
-          .map(row => row.data() as { outstandingBalance?: number; recordStatus?: string })
-          .filter(customer => customer.recordStatus !== 'inactive');
-        stats.totalCustomers = customers.length;
-        stats.totalReceivable = customers.reduce(
-          (total, customer) => total + Math.max(0, Number(customer.outstandingBalance) || 0),
-          0
-        );
-        callback({ ...stats });
-      },
-      (error) => {
-        console.error('Stats Customers Error:', error);
-        if (onError) onError(error);
-      }
-    );
-
-    // Invoices Stats
-    const unsubInvoices = onSnapshot(
-      query(collection(db, 'invoices'), where('tenantId', '==', tenantId)), 
-      (snapshot) => {
-        try {
-          const invoices = snapshot.docs
-            .map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }) as Invoice)
-            .filter(invoice => (invoice as Invoice & { status?: string }).status !== 'cancelled');
-
-          invoices.sort((a, b) => {
-            const dateA = typeof a.createdAt?.toDate === 'function' ? a.createdAt.toDate() : new Date(a.createdAt);
-            const dateB = typeof b.createdAt?.toDate === 'function' ? b.createdAt.toDate() : new Date(b.createdAt);
-            return dateB.getTime() - dateA.getTime();
-          });
-
-          onInvoices?.(invoices);
-          stats.totalInvoices = invoices.length;
-          
-          stats.todaySales = invoices
-            .filter(inv => {
-              const date = typeof inv.createdAt?.toDate === 'function' ? inv.createdAt.toDate() : new Date(inv.createdAt);
-              return date >= todayStart;
-            })
-            .reduce((sum, inv) => sum + inv.grandTotal, 0);
-          const todayInvoices = invoices.filter(inv => {
-            const date = typeof inv.createdAt?.toDate === 'function' ? inv.createdAt.toDate() : new Date(inv.createdAt);
-            return date >= todayStart;
-          });
-          stats.todayInvoiceCount = todayInvoices.length;
-          stats.todayGrossProfit = todayInvoices.reduce((invoiceTotal, invoice) => (
-            invoiceTotal + invoice.items.reduce((lineTotal, item) => (
-              lineTotal + ((Number(item.price) || 0) - (Number(item.purchaseCost) || 0)) * (Number(item.quantity) || 0)
-            ), 0)
-          ), 0);
-
-          stats.monthlyRevenue = invoices
-            .filter(inv => {
-              const date = typeof inv.createdAt?.toDate === 'function' ? inv.createdAt.toDate() : new Date(inv.createdAt);
-              return date >= monthStart;
-            })
-            .reduce((sum, inv) => sum + inv.grandTotal, 0);
-
-          callback({ ...stats });
-        } catch (error) {
-          console.error('Stats Invoices Processing Error:', error);
-          if (onError) onError(error);
-        }
-      },
-      (error) => {
-        console.error('Stats Invoices Error:', error);
-        if (onError) onError(error);
-      }
-    );
-
-    const unsubPurchases = onSnapshot(
-      query(collection(db, 'purchases'), where('tenantId', '==', tenantId)),
-      snapshot => {
-        stats.todayPurchases = snapshot.docs
-          .map(row => row.data() as Purchase)
-          .filter(purchase => {
-            if ((purchase as Purchase & { status?: string }).status === 'cancelled') return false;
-            const date = typeof purchase.createdAt?.toDate === 'function'
-              ? purchase.createdAt.toDate()
-              : new Date(purchase.createdAt);
-            return date >= todayStart;
-          })
-          .reduce((sum, purchase) => sum + (Number(purchase.totalAmount) || 0), 0);
-        callback({ ...stats });
-      },
-      error => onError?.(error)
-    );
-
-    const unsubSuppliers = onSnapshot(
-      query(collection(db, 'suppliers'), where('tenantId', '==', tenantId)),
-      snapshot => {
-        stats.totalPayable = snapshot.docs
-          .map(row => row.data() as Supplier)
-          .reduce((total, supplier) => total + Math.max(
-            0,
-            Number((supplier as Supplier & { payableBalance?: number }).payableBalance) || 0
-          ), 0);
-        callback({ ...stats });
-      },
-      error => onError?.(error)
-    );
-
     return () => {
-      window.clearInterval(inventoryStatsInterval);
-      unsubCustomers();
-      unsubInvoices();
-      unsubPurchases();
-      unsubSuppliers();
+      window.clearInterval(statsInterval);
     };
   },
 
   subscribeToRecentInvoices(tenantId: string, callback: (invoices: Invoice[]) => void, onError?: (error: any) => void) {
     const q = query(
-      collection(db, 'invoices'), 
-      where('tenantId', '==', tenantId)
+      collection(db, 'invoices'),
+      where('tenantId', '==', tenantId),
+      orderBy('createdAt', 'desc'),
+      limit(10)
     );
 
-    return onSnapshot(q, (snapshot) => {
-      try {
+    let cancelled = false;
+    void getDocs(q)
+      .then(snapshot => {
+        if (cancelled) return;
         const invoices = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Invoice[];
-        
-        invoices.sort((a, b) => {
-          const dateA = typeof a.createdAt?.toDate === 'function' ? a.createdAt.toDate() : new Date(a.createdAt);
-          const dateB = typeof b.createdAt?.toDate === 'function' ? b.createdAt.toDate() : new Date(b.createdAt);
-          return dateB.getTime() - dateA.getTime();
-        });
+        callback(invoices);
+      })
+      .catch(error => {
+        console.error('Recent Invoices Query Error:', error);
+        onError?.(error);
+      });
 
-        callback(invoices.slice(0, 10));
-      } catch (err) {
-        console.error('Recent Invoices Processing Error:', err);
-        if (onError) onError(err);
-      }
-    }, (error) => {
-      console.error('Recent Invoices Subscription Error:', error);
-      if (onError) onError(error);
-    });
+    return () => {
+      cancelled = true;
+    };
   },
 
   subscribeToAlerts(tenantId: string, callback: (alerts: { lowStock: Product[], expiring: Product[], allProducts: Product[] }) => void, onError?: (error: any) => void) {
