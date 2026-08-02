@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  startAfter,
+  where,
+} from 'firebase/firestore';
 import {
   ArrowLeft,
   CreditCard,
@@ -43,78 +53,84 @@ export default function CustomerProfile() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [invoiceCursor, setInvoiceCursor] = useState<any>(null);
+  const [ledgerCursor, setLedgerCursor] = useState<any>(null);
+  const [hasMoreInvoices, setHasMoreInvoices] = useState(false);
+  const [hasMoreLedger, setHasMoreLedger] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const loadInvoices = async (reset: boolean = true) => {
+    if (!id || !user?.tenantId) return;
+    const invoiceQuery = query(
+      collection(db, 'invoices'),
+      where('tenantId', '==', user.tenantId),
+      where('customerId', '==', id),
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
+    const snapshot = await getDocs(
+      reset || !invoiceCursor ? invoiceQuery : query(invoiceQuery, startAfter(invoiceCursor))
+    );
+    const rows = snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Invoice));
+    setInvoices(current => (reset ? rows : [...current, ...rows]));
+    setInvoiceCursor(snapshot.docs[snapshot.docs.length - 1] ?? null);
+    setHasMoreInvoices(snapshot.docs.length === 20);
+  };
+
+  const loadLedger = async (reset: boolean = true) => {
+    if (!id || !user?.tenantId) return;
+    const ledgerQuery = query(
+      collection(db, 'ledgerEntries'),
+      where('tenantId', '==', user.tenantId),
+      where('partyId', '==', id),
+      where('partyType', '==', 'customer'),
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
+    const snapshot = await getDocs(
+      reset || !ledgerCursor ? ledgerQuery : query(ledgerQuery, startAfter(ledgerCursor))
+    );
+    const rows = snapshot.docs.map(row => ({ id: row.id, ...row.data() } as LedgerEntry));
+    setLedgerEntries(current => (reset ? rows : [...current, ...rows]));
+    setLedgerCursor(snapshot.docs[snapshot.docs.length - 1] ?? null);
+    setHasMoreLedger(snapshot.docs.length === 20);
+  };
+
   useEffect(() => {
     if (!id || !user?.tenantId) return;
     setLoading(true);
+    setHistoryLoading(true);
     setLoadError('');
-    let customerReady = false;
-    let invoicesReady = false;
-    let ledgerReady = false;
-    const finishLoading = () => {
-      if (customerReady && invoicesReady && ledgerReady) setLoading(false);
-    };
+
     const fail = (error: Error) => {
       setLoadError(error.message || 'Customer records could not be loaded.');
       setLoading(false);
+      setHistoryLoading(false);
     };
 
     const unsubCustomer = onSnapshot(
       doc(db, 'customers', id),
       snapshot => {
-        customerReady = true;
         if (!snapshot.exists() || snapshot.data().tenantId !== user.tenantId) {
           setCustomer(null);
         } else {
           setCustomer({ id: snapshot.id, ...snapshot.data() } as Customer);
         }
-        finishLoading();
+        setLoading(false);
       },
       fail
     );
 
-    const unsubInvoices = onSnapshot(
-      query(
-        collection(db, 'invoices'),
-        where('tenantId', '==', user.tenantId),
-        where('customerId', '==', id)
-      ),
-      snapshot => {
-        invoicesReady = true;
-        const rows = snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Invoice));
-        rows.sort((a, b) => toJsDate(b.createdAt).getTime() - toJsDate(a.createdAt).getTime());
-        setInvoices(rows);
-        finishLoading();
-      },
-      fail
-    );
-
-    const unsubLedger = onSnapshot(
-      query(
-        collection(db, 'ledgerEntries'),
-        where('tenantId', '==', user.tenantId),
-        where('partyId', '==', id)
-      ),
-      snapshot => {
-        ledgerReady = true;
-        setLedgerEntries(
-          snapshot.docs
-            .map(row => ({ id: row.id, ...row.data() } as LedgerEntry))
-            .filter(row => row.partyType === 'customer')
-        );
-        finishLoading();
-      },
-      fail
-    );
+    void Promise.all([loadInvoices(true), loadLedger(true)])
+      .catch(fail)
+      .finally(() => setHistoryLoading(false));
 
     return () => {
       unsubCustomer();
-      unsubInvoices();
-      unsubLedger();
     };
   }, [id, user?.tenantId, reloadKey]);
 
@@ -185,7 +201,7 @@ export default function CustomerProfile() {
                 {stats.credit > 0 && <Badge variant="success">Credit available</Badge>}
               </div>
               <p className="mt-1 text-xs text-text/50">
-                Customer since {customer.createdAt ? toJsDate(customer.createdAt).toLocaleDateString('en-IN') : '—'}
+                Customer since {customer.createdAt ? toJsDate(customer.createdAt).toLocaleDateString('en-IN') : '-'}
               </p>
             </div>
           </div>
@@ -266,16 +282,18 @@ export default function CustomerProfile() {
               <div className="flex items-center justify-between border-b border-border p-4">
                 <div>
                   <h2 className="font-bold">Invoices</h2>
-                  <p className="mt-1 text-xs text-text/50">{invoices.length} linked transaction(s)</p>
+                  <p className="mt-1 text-xs text-text/50">{invoices.length} loaded transaction(s)</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => navigate('/invoices')}>View All</Button>
               </div>
-              {invoices.length === 0 ? (
+              {historyLoading ? (
+                <div className="p-8 text-center text-sm text-text/50">Loading invoice history...</div>
+              ) : invoices.length === 0 ? (
                 <EmptyState icon={<Receipt className="h-10 w-10" />} title="No invoices" description="This customer has no linked invoices yet." />
               ) : (
                 <>
                   <div className="divide-y divide-border md:hidden">
-                    {invoices.slice(0, 20).map(invoice => (
+                    {invoices.map(invoice => (
                       <button
                         key={invoice.id}
                         type="button"
@@ -308,7 +326,7 @@ export default function CustomerProfile() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {invoices.slice(0, 30).map(invoice => (
+                        {invoices.map(invoice => (
                           <tr key={invoice.id}>
                             <td className="px-4 py-3 font-mono font-bold text-primary">{invoice.invoiceNumber}</td>
                             <td className="px-4 py-3">{toJsDate(invoice.createdAt).toLocaleDateString('en-IN')}</td>
@@ -334,6 +352,13 @@ export default function CustomerProfile() {
                       </tbody>
                     </table>
                   </div>
+                  {hasMoreInvoices && (
+                    <div className="border-t border-border p-4 text-center">
+                      <Button variant="outline" onClick={() => void loadInvoices(false)}>
+                        Load more invoices
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
             </Card>
@@ -343,7 +368,9 @@ export default function CustomerProfile() {
                 <h2 className="font-bold">Customer Ledger</h2>
                 <p className="mt-1 text-xs text-text/50">Debit increases receivable; credit reduces it or creates customer credit.</p>
               </div>
-              {ledger.length === 0 ? (
+              {historyLoading ? (
+                <div className="p-8 text-center text-sm text-text/50">Loading ledger history...</div>
+              ) : ledger.length === 0 ? (
                 <EmptyState
                   icon={<CreditCard className="h-10 w-10" />}
                   title="No linked ledger entries"
@@ -352,7 +379,7 @@ export default function CustomerProfile() {
               ) : (
                 <>
                   <div className="divide-y divide-border md:hidden">
-                    {ledger.slice(0, 30).map(row => (
+                    {ledger.map(row => (
                       <div key={row.id} className="p-4">
                         <div className="flex justify-between gap-3">
                           <div>
@@ -366,7 +393,7 @@ export default function CustomerProfile() {
                         </div>
                         <div className="mt-2 flex justify-between text-xs text-text/55">
                           <span>{toJsDate(row.createdAt).toLocaleDateString('en-IN')}</span>
-                          <span>Dr {formatCurrency(row.debit)} · Cr {formatCurrency(row.credit)}</span>
+                          <span>Dr {formatCurrency(row.debit)} | Cr {formatCurrency(row.credit)}</span>
                         </div>
                       </div>
                     ))}
@@ -384,7 +411,7 @@ export default function CustomerProfile() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {ledger.slice(0, 50).map(row => (
+                        {ledger.map(row => (
                           <tr key={row.id}>
                             <td className="px-4 py-3">{toJsDate(row.createdAt).toLocaleDateString('en-IN')}</td>
                             <td className="px-4 py-3 font-semibold capitalize">{voucherLabel(row.voucherType)}</td>
@@ -397,6 +424,13 @@ export default function CustomerProfile() {
                       </tbody>
                     </table>
                   </div>
+                  {hasMoreLedger && (
+                    <div className="border-t border-border p-4 text-center">
+                      <Button variant="outline" onClick={() => void loadLedger(false)}>
+                        Load more ledger entries
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
             </Card>

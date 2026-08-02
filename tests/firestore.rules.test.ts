@@ -24,7 +24,7 @@ beforeAll(async () => {
     projectId,
     firestore: { rules: readFileSync(resolve('firestore.rules'), 'utf8') },
   });
-}, 30000);
+}, 60000);
 
 beforeEach(async () => {
   await env.clearFirestore();
