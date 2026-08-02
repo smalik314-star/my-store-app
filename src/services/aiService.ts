@@ -1,44 +1,82 @@
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  orderBy, 
-  limit, 
-  Timestamp,
-  startAt,
-  endAt,
+import {
+  collection,
   doc,
-  getDoc
+  endAt,
+  getAggregateFromServer,
+  getCountFromServer,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  startAt,
+  sum,
+  Timestamp,
+  where,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
-import { AIIntent, AIResponse, AIAction } from '../types/ai';
+import { AIIntent, AIResponse } from '../types/ai';
 import { toJsDate } from '../utils/date';
+import { formatCurrency } from '../utils/currency';
+import { sumInvoiceProfit } from '../utils/aiMetrics';
 
 const COLLECTION_INVOICES = 'invoices';
 const COLLECTION_PRODUCTS = 'products';
 const COLLECTION_CUSTOMERS = 'customers';
+const MAX_AI_PROFIT_INVOICES = 500;
+
+const createResponseId = () => crypto.randomUUID?.() || Math.random().toString(36).slice(2, 11);
+const createResponse = (
+  queryText: string,
+  intent: AIIntent,
+  answer: string,
+  type: AIResponse['type'],
+  data?: unknown,
+  actions: AIResponse['actions'] = []
+): AIResponse => ({
+  id: createResponseId(),
+  query: queryText,
+  answer,
+  intent,
+  data,
+  type,
+  timestamp: new Date(),
+  actions,
+});
+
+const postedInvoicesQuery = (tenantId: string) => query(
+  collection(db, COLLECTION_INVOICES),
+  where('tenantId', '==', tenantId),
+  where('status', '==', 'posted')
+);
+
+const postedInvoicesSinceQuery = (tenantId: string, startDate: Date) => query(
+  collection(db, COLLECTION_INVOICES),
+  where('tenantId', '==', tenantId),
+  where('status', '==', 'posted'),
+  where('createdAt', '>=', Timestamp.fromDate(startDate)),
+  orderBy('createdAt', 'desc')
+);
+
+const trimTime = (date: Date) => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
 
 export const aiService = {
   parseIntent(queryText: string): AIIntent {
     const q = queryText.toLowerCase();
 
-    // Revenue Intents
     if (q.includes('today') && q.includes('revenue')) return 'REVENUE_TODAY';
     if (q.includes('monthly') && q.includes('revenue')) return 'REVENUE_MONTHLY';
     if (q.includes('total') && (q.includes('sales') || q.includes('revenue'))) return 'SALES_TOTAL';
-
-    // Inventory Intents
     if (q.includes('low stock')) return 'LOW_STOCK';
     if (q.includes('out of stock')) return 'OUT_OF_STOCK';
     if (q.includes('expiry') || q.includes('expired')) return 'EXPIRY_ITEMS';
-
-    // Customer Intents
     if (q.includes('top customers')) return 'TOP_CUSTOMERS';
     if (q.includes('pending dues') || q.includes('highest dues')) return 'PENDING_DUES';
     if (q.includes('new customers')) return 'NEW_CUSTOMERS';
-
-    // Profit Intents
     if (q.includes('total profit')) return 'TOTAL_PROFIT';
     if (q.includes('profit') && q.includes('7 days')) return 'PROFIT_7DAYS';
     if (q.includes('high margin') || q.includes('highest margin')) return 'HIGH_MARGIN_PRODUCTS';
@@ -77,6 +115,8 @@ export const aiService = {
           return await this.getPendingDues(tenantId, queryText);
         case 'TOP_CUSTOMERS':
           return await this.getTopCustomers(tenantId, queryText);
+        case 'NEW_CUSTOMERS':
+          return await this.getNewCustomers(tenantId, queryText);
         case 'TOTAL_PROFIT':
           return await this.getTotalProfit(tenantId, queryText);
         case 'PROFIT_7DAYS':
@@ -90,280 +130,287 @@ export const aiService = {
     }
   },
 
-  createFallbackResponse(query: string, message?: string): AIResponse {
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query,
-      answer: message || "I'm not sure I understand that query. Try asking about revenue, low stock, or pending dues.",
-      intent: 'UNKNOWN',
-      type: 'text',
-      timestamp: new Date(),
-      actions: [
+  createFallbackResponse(queryText: string, message?: string): AIResponse {
+    return createResponse(
+      queryText,
+      'UNKNOWN',
+      message || "I'm not sure I understand that query. Try asking about revenue, low stock, or pending dues.",
+      'text',
+      undefined,
+      [
         { label: 'View Inventory', path: '/inventory' },
-        { label: 'Check Reports', path: '/reports' }
+        { label: 'Check Reports', path: '/reports' },
       ]
-    };
+    );
   },
 
-  // Revenue Queries
   async getTodayRevenue(tenantId: string, queryText: string): Promise<AIResponse> {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    
-    const q = query(
-      collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId)
-    );
-    
-    const snapshot = await getDocs(q);
-    let total = 0;
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const date = toJsDate(data.createdAt);
-      if (date >= startOfToday) {
-        total += data.grandTotal || 0;
-      }
-    });
+    const startOfToday = trimTime(new Date());
+    const revenueQuery = postedInvoicesSinceQuery(tenantId, startOfToday);
+    const [aggregate, invoiceCount] = await Promise.all([
+      getAggregateFromServer(revenueQuery, { totalRevenue: sum('grandTotal') }),
+      getCountFromServer(revenueQuery),
+    ]);
+    const total = Number(aggregate.data().totalRevenue) || 0;
+    const count = Number(invoiceCount.data().count) || 0;
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Today's total revenue is ₹${total.toLocaleString('en-IN')}.`,
-      intent: 'REVENUE_TODAY',
-      data: total,
-      type: 'number',
-      timestamp: new Date(),
-      actions: [{ label: "View Today's Invoices", path: '/invoices' }]
-    };
+    return createResponse(
+      queryText,
+      'REVENUE_TODAY',
+      count === 0
+        ? 'No posted invoices have been recorded today yet.'
+        : `Today's posted revenue is ${formatCurrency(total)} across ${count} invoice${count === 1 ? '' : 's'}.`,
+      'number',
+      total,
+      [{ label: "View Today's Invoices", path: '/invoices' }]
+    );
   },
 
   async getMonthlyRevenue(tenantId: string, queryText: string): Promise<AIResponse> {
-    const firstDayOfMonth = new Date();
-    firstDayOfMonth.setDate(1);
-    firstDayOfMonth.setHours(0, 0, 0, 0);
-    
-    const q = query(
-      collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId)
-    );
-    
-    const snapshot = await getDocs(q);
-    let total = 0;
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const date = toJsDate(data.createdAt);
-      if (date >= firstDayOfMonth) {
-        total += data.grandTotal || 0;
-      }
-    });
+    const firstDayOfMonth = trimTime(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    const revenueQuery = postedInvoicesSinceQuery(tenantId, firstDayOfMonth);
+    const [aggregate, invoiceCount] = await Promise.all([
+      getAggregateFromServer(revenueQuery, { totalRevenue: sum('grandTotal') }),
+      getCountFromServer(revenueQuery),
+    ]);
+    const total = Number(aggregate.data().totalRevenue) || 0;
+    const count = Number(invoiceCount.data().count) || 0;
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Your total revenue for this month is ₹${total.toLocaleString('en-IN')}.`,
-      intent: 'REVENUE_MONTHLY',
-      data: total,
-      type: 'number',
-      timestamp: new Date(),
-      actions: [{ label: 'Detailed Reports', path: '/reports' }]
-    };
+    return createResponse(
+      queryText,
+      'REVENUE_MONTHLY',
+      count === 0
+        ? 'No posted invoices have been recorded this month yet.'
+        : `This month's posted revenue is ${formatCurrency(total)} across ${count} invoice${count === 1 ? '' : 's'}.`,
+      'number',
+      total,
+      [{ label: 'Detailed Reports', path: '/reports' }]
+    );
   },
 
-  // Inventory Queries
   async getLowStock(tenantId: string, queryText: string): Promise<AIResponse> {
-    const q = query(
+    const snapshot = await getDocs(query(
       collection(db, COLLECTION_PRODUCTS),
-      where('tenantId', '==', tenantId)
-    );
-    
-    const snapshot = await getDocs(q);
-    const items: any[] = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.stockQuantity <= 10 && data.stockQuantity > 0) {
-        items.push({ id: doc.id, ...data });
-      }
-    });
+      where('tenantId', '==', tenantId),
+      where('stockQuantity', '>', 0),
+      where('stockQuantity', '<=', 10),
+      orderBy('stockQuantity', 'asc'),
+      limit(25)
+    ));
+    const items = snapshot.docs
+      .map(row => ({ id: row.id, ...row.data() }))
+      .map(row => row as Record<string, any>)
+      .filter(row => row.recordStatus !== 'inactive');
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Found ${items.length} items with low stock (below 10 units).`,
-      intent: 'LOW_STOCK',
-      data: items,
-      type: 'list',
-      timestamp: new Date(),
-      actions: [{ label: 'Manage Inventory', path: '/low-stock' }]
-    };
+    return createResponse(
+      queryText,
+      'LOW_STOCK',
+      items.length === 0
+        ? 'No active products are currently below the 10-unit low-stock threshold.'
+        : `Showing ${items.length} low-stock product${items.length === 1 ? '' : 's'} below 10 units.`,
+      'list',
+      items,
+      [{ label: 'Manage Inventory', path: '/low-stock' }]
+    );
   },
 
   async getOutOfStock(tenantId: string, queryText: string): Promise<AIResponse> {
-    const q = query(
+    const snapshot = await getDocs(query(
       collection(db, COLLECTION_PRODUCTS),
       where('tenantId', '==', tenantId),
-      where('stockQuantity', '==', 0)
-    );
-    
-    const snapshot = await getDocs(q);
-    const items: any[] = [];
-    snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
+      where('stockQuantity', '==', 0),
+      limit(25)
+    ));
+    const items = snapshot.docs
+      .map(row => ({ id: row.id, ...row.data() }))
+      .map(row => row as Record<string, any>)
+      .filter(row => row.recordStatus !== 'inactive');
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `There are ${items.length} products currently out of stock.`,
-      intent: 'OUT_OF_STOCK',
-      data: items,
-      type: 'list',
-      timestamp: new Date(),
-      actions: [{ label: 'Restock Now', path: '/inventory' }]
-    };
+    return createResponse(
+      queryText,
+      'OUT_OF_STOCK',
+      items.length === 0
+        ? 'No active products are currently out of stock.'
+        : `Showing ${items.length} out-of-stock product${items.length === 1 ? '' : 's'}.`,
+      'list',
+      items,
+      [{ label: 'Restock Now', path: '/inventory' }]
+    );
   },
 
   async getExpiryItems(tenantId: string, queryText: string): Promise<AIResponse> {
     const next30Days = new Date();
     next30Days.setDate(next30Days.getDate() + 30);
-    
-    const q = query(
-      collection(db, COLLECTION_PRODUCTS),
-      where('tenantId', '==', tenantId)
-    );
-    
-    const snapshot = await getDocs(q);
-    const items: any[] = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const expiry = toJsDate(data.expiryDate);
-      if (expiry <= next30Days) {
-        items.push({ id: doc.id, ...data });
-      }
-    });
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Found ${items.length} products expiring within the next 30 days.`,
-      intent: 'EXPIRY_ITEMS',
-      data: items,
-      type: 'list',
-      timestamp: new Date(),
-      actions: [{ label: 'View Expiry Alerts', path: '/expiry-alerts' }]
-    };
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTION_PRODUCTS),
+      where('tenantId', '==', tenantId),
+      where('expiryDate', '<=', Timestamp.fromDate(next30Days)),
+      orderBy('expiryDate', 'asc'),
+      limit(25)
+    ));
+    const items = snapshot.docs
+      .map(row => ({ id: row.id, ...row.data() }))
+      .map(row => row as Record<string, any>)
+      .filter(row => row.recordStatus !== 'inactive');
+
+    return createResponse(
+      queryText,
+      'EXPIRY_ITEMS',
+      items.length === 0
+        ? 'No active products are due to expire within the next 30 days.'
+        : `Showing ${items.length} active product${items.length === 1 ? '' : 's'} expiring within the next 30 days.`,
+      'list',
+      items,
+      [{ label: 'View Expiry Alerts', path: '/expiry-alerts' }]
+    );
   },
 
-  // Customer Queries
   async getPendingDues(tenantId: string, queryText: string): Promise<AIResponse> {
-    const q = query(
+    const snapshot = await getDocs(query(
       collection(db, COLLECTION_CUSTOMERS),
-      where('tenantId', '==', tenantId)
+      where('tenantId', '==', tenantId),
+      where('outstandingBalance', '>', 0),
+      orderBy('outstandingBalance', 'desc'),
+      limit(5)
+    ));
+    const items = snapshot.docs.map(row => ({ id: row.id, ...row.data() }));
+
+    return createResponse(
+      queryText,
+      'PENDING_DUES',
+      items.length === 0
+        ? 'No customers currently have pending dues.'
+        : `Here are the ${items.length} customers with the highest pending dues.`,
+      'list',
+      items,
+      [{ label: 'View All Customers', path: '/customers' }]
     );
-    
-    const snapshot = await getDocs(q);
-    const items: any[] = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.outstandingBalance && data.outstandingBalance > 0) {
-        items.push({ id: doc.id, ...data });
-      }
-    });
-
-    items.sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
-    const limitedItems = items.slice(0, 5);
-
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Found ${limitedItems.length} customers with pending dues. Here are the top ones.`,
-      intent: 'PENDING_DUES',
-      data: limitedItems,
-      type: 'list',
-      timestamp: new Date(),
-      actions: [{ label: 'View All Customers', path: '/customers' }]
-    };
   },
 
   async getTopCustomers(tenantId: string, queryText: string): Promise<AIResponse> {
-    const q = query(
+    const snapshot = await getDocs(query(
       collection(db, COLLECTION_CUSTOMERS),
-      where('tenantId', '==', tenantId)
+      where('tenantId', '==', tenantId),
+      orderBy('totalPurchases', 'desc'),
+      limit(5)
+    ));
+    const items = snapshot.docs.map(row => ({ id: row.id, ...row.data() }));
+
+    return createResponse(
+      queryText,
+      'TOP_CUSTOMERS',
+      items.length === 0
+        ? 'No customer purchase history is available yet.'
+        : 'Here are your top customers by recorded lifetime purchases.',
+      'list',
+      items,
+      [{ label: 'All Customers', path: '/customers' }]
     );
-    
-    const snapshot = await getDocs(q);
-    const items: any[] = [];
-    snapshot.forEach(doc => items.push({ id: doc.id, ...doc.data() }));
-
-    items.sort((a, b) => (b.totalPurchases || 0) - (a.totalPurchases || 0));
-    const limitedItems = items.slice(0, 5);
-
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Here are your top 5 customers by lifetime purchases.`,
-      intent: 'TOP_CUSTOMERS',
-      data: limitedItems,
-      type: 'list',
-      timestamp: new Date(),
-      actions: [{ label: 'All Customers', path: '/customers' }]
-    };
   },
 
-  // Profit Queries
-  async getTotalProfit(tenantId: string, queryText: string): Promise<AIResponse> {
-    // This requires calculating from invoices/products
-    // For simplicity, we'll fetch invoices and sum grandTotal - estimatedCost
-    const q = query(
-      collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId)
-    );
-    
-    const snapshot = await getDocs(q);
-    let totalRevenue = 0;
-    // In a real app, you'd store profit per invoice. 
-    // Assuming for now we calculate a rough 20% margin if not explicitly stored
-    snapshot.forEach(doc => totalRevenue += doc.data().grandTotal || 0);
-    const estimatedProfit = totalRevenue * 0.2; 
+  async getNewCustomers(tenantId: string, queryText: string): Promise<AIResponse> {
+    const firstDayOfMonth = trimTime(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+    const snapshot = await getDocs(query(
+      collection(db, COLLECTION_CUSTOMERS),
+      where('tenantId', '==', tenantId),
+      where('createdAt', '>=', Timestamp.fromDate(firstDayOfMonth)),
+      orderBy('createdAt', 'desc'),
+      limit(10)
+    ));
+    const items = snapshot.docs.map(row => ({ id: row.id, ...row.data() }));
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Your total estimated profit is ₹${estimatedProfit.toLocaleString('en-IN')} (based on 20% average margin).`,
-      intent: 'TOTAL_PROFIT',
-      data: estimatedProfit,
-      type: 'number',
-      timestamp: new Date(),
-      actions: [{ label: 'Financial Reports', path: '/reports' }]
-    };
+    return createResponse(
+      queryText,
+      'NEW_CUSTOMERS',
+      items.length === 0
+        ? 'No new customers have been added this month yet.'
+        : `Showing ${items.length} customer${items.length === 1 ? '' : 's'} added this month.`,
+      'list',
+      items,
+      [{ label: 'All Customers', path: '/customers' }]
+    );
+  },
+
+  async getTotalProfit(tenantId: string, queryText: string): Promise<AIResponse> {
+    const baseQuery = postedInvoicesQuery(tenantId);
+    const totalCount = Number((await getCountFromServer(baseQuery)).data().count) || 0;
+
+    if (totalCount === 0) {
+      return createResponse(
+        queryText,
+        'TOTAL_PROFIT',
+        'No posted invoices are available yet, so there is no recorded profit to calculate.',
+        'number',
+        0,
+        [{ label: 'Financial Reports', path: '/reports' }]
+      );
+    }
+
+    if (totalCount > MAX_AI_PROFIT_INVOICES) {
+      return createResponse(
+        queryText,
+        'TOTAL_PROFIT',
+        `All-time profit is not shown here because it would require scanning ${totalCount} posted invoices. Use Reports with a date range for an exact result.`,
+        'text',
+        { invoiceCount: totalCount },
+        [{ label: 'Financial Reports', path: '/reports' }]
+      );
+    }
+
+    const snapshot = await getDocs(query(baseQuery, orderBy('createdAt', 'desc'), limit(MAX_AI_PROFIT_INVOICES)));
+    const invoices = snapshot.docs.map(row => ({ id: row.id, ...row.data() })) as Array<Record<string, any>>;
+    const totalProfit = sumInvoiceProfit(invoices);
+
+    return createResponse(
+      queryText,
+      'TOTAL_PROFIT',
+      `Recorded profit across ${totalCount} posted invoice${totalCount === 1 ? '' : 's'} is ${formatCurrency(totalProfit)}.`,
+      'number',
+      totalProfit,
+      [{ label: 'Financial Reports', path: '/reports' }]
+    );
   },
 
   async getProfit7Days(tenantId: string, queryText: string): Promise<AIResponse> {
-    const last7Days = new Date();
-    last7Days.setDate(last7Days.getDate() - 7);
-    
-    const q = query(
-      collection(db, COLLECTION_INVOICES),
-      where('tenantId', '==', tenantId)
-    );
-    
-    const snapshot = await getDocs(q);
-    let totalRevenue = 0;
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const date = toJsDate(data.createdAt);
-      if (date >= last7Days) {
-        totalRevenue += data.grandTotal || 0;
-      }
-    });
-    const estimatedProfit = totalRevenue * 0.2;
+    const last7Days = trimTime(new Date());
+    last7Days.setDate(last7Days.getDate() - 6);
+    const profitQuery = postedInvoicesSinceQuery(tenantId, last7Days);
+    const invoiceCount = Number((await getCountFromServer(profitQuery)).data().count) || 0;
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      query: queryText,
-      answer: `Estimated profit over the last 7 days is ₹${estimatedProfit.toLocaleString('en-IN')}.`,
-      intent: 'PROFIT_7DAYS',
-      data: estimatedProfit,
-      type: 'number',
-      timestamp: new Date(),
-      actions: [{ label: 'View Sales Report', path: '/reports' }]
-    };
-  }
+    if (invoiceCount === 0) {
+      return createResponse(
+        queryText,
+        'PROFIT_7DAYS',
+        'No posted invoices were recorded in the last 7 days.',
+        'number',
+        0,
+        [{ label: 'View Sales Report', path: '/reports' }]
+      );
+    }
+
+    if (invoiceCount > MAX_AI_PROFIT_INVOICES) {
+      return createResponse(
+        queryText,
+        'PROFIT_7DAYS',
+        `The last 7 days contain ${invoiceCount} posted invoices, so inline profit is deferred to Reports to avoid scanning too much data here.`,
+        'text',
+        { invoiceCount },
+        [{ label: 'View Sales Report', path: '/reports' }]
+      );
+    }
+
+    const snapshot = await getDocs(query(profitQuery, limit(MAX_AI_PROFIT_INVOICES)));
+    const invoices = snapshot.docs.map(row => ({ id: row.id, ...row.data() })) as Array<Record<string, any>>;
+    const totalProfit = sumInvoiceProfit(invoices);
+
+    return createResponse(
+      queryText,
+      'PROFIT_7DAYS',
+      `Recorded profit over the last 7 days is ${formatCurrency(totalProfit)}.`,
+      'number',
+      totalProfit,
+      [{ label: 'View Sales Report', path: '/reports' }]
+    );
+  },
 };
