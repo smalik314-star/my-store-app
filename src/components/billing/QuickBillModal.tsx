@@ -130,7 +130,7 @@ export function QuickBillModal({ isOpen, onClose }: QuickBillModalProps) {
       }
       activeRows.set(index, true);
       const timer = window.setTimeout(() => {
-        void productService.searchProducts(user.tenantId!, term, { pageSize: 6, mode: 'name' })
+        void productService.searchProducts(user.tenantId!, term, { pageSize: 6 })
           .then(result => {
             if (!activeRows.get(index)) return;
             cacheProducts(result.products);

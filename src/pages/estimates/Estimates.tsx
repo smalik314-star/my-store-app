@@ -112,7 +112,7 @@ export default function Estimates() {
 
     let active = true;
     const timer = window.setTimeout(() => {
-      void productService.searchProducts(user.tenantId!, term, { pageSize: 8, mode: 'name' })
+      void productService.searchProducts(user.tenantId!, term, { pageSize: 8 })
         .then(result => {
           if (!active) return;
           setProductSuggestions(current => ({ ...current, [focusedRowIndex]: result.products }));

@@ -88,7 +88,7 @@ export default function Inventory() {
     setLoading(true);
     try {
       const result = debouncedSearch.trim().length >= 2
-        ? await productService.searchProducts(user.tenantId, debouncedSearch.trim(), { pageSize: 40, mode: 'name' })
+        ? await productService.searchProducts(user.tenantId, debouncedSearch.trim(), { pageSize: 40 })
         : await productService.getProductsPaginated(user.tenantId, 40, reset ? null : cursorId, selectedCategory);
 
       let filtered = [...(result?.products || [])];

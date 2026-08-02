@@ -81,7 +81,7 @@ export default function ExpiryAlerts() {
     setLoading(true);
     try {
       const result = searchTerm.length >= 2
-        ? await productService.searchProducts(user.tenantId, searchTerm, { pageSize: 50, mode: 'name' })
+        ? await productService.searchProducts(user.tenantId, searchTerm, { pageSize: 50 })
         : await productService.getExpiryProductsPage(user.tenantId, 40, reset ? null : cursorId);
       const nextItems = (result?.products || [])
         .filter(product => product.expiryDate)

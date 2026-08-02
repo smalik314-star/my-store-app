@@ -303,12 +303,85 @@ async function startServer() {
     const mode = ['name', 'sku', 'barcode'].includes(requestedMode)
       ? requestedMode
       : (/^\d+$/.test(searchTerm) ? 'barcode' : /^[A-Za-z0-9\-_/.]+$/.test(searchTerm) ? 'sku' : 'name');
+    const numericOrCodeQuery = /^[A-Za-z0-9\-_/.]+$/.test(searchTerm);
 
     if (searchTerm.length < 2) {
       return res.status(400).json({ error: 'Search term must contain at least 2 characters.' });
     }
 
     try {
+      const normalizedVariants = Array.from(new Set(
+        getSearchVariants(normalizedSearch).map(variant => normalizeSearchIndex(variant)).filter(Boolean)
+      ));
+      const rawVariants = Array.from(new Set(
+        getSearchVariants(searchTerm).map(variant => normalizeSearchTerm(variant)).filter(Boolean)
+      ));
+
+      const prefixSearchProducts = async (
+        plans: Array<{ field: string; variants: string[] }>
+      ) => {
+        const snapshots = await Promise.all(
+          plans.flatMap(plan =>
+            plan.variants.map(variant =>
+              adminDb
+                .collection('products')
+                .where('tenantId', '==', tenantId)
+                .orderBy(plan.field)
+                .startAt(variant)
+                .endAt(`${variant}\uf8ff`)
+                .limit(pageSize)
+                .get()
+            )
+          )
+        );
+
+        const rows = dedupeById(
+          snapshots.flatMap(snapshot => snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+          })))
+        ) as Array<{ id: string } & Record<string, any>>;
+
+        return rows.filter(row => row.recordStatus !== 'inactive');
+      };
+
+      if (mode === 'name') {
+        const searchPlans = numericOrCodeQuery
+          ? [
+              { field: 'barcodeSearch', variants: normalizedVariants },
+              { field: 'skuSearch', variants: normalizedVariants },
+              { field: 'nameSearch', variants: normalizedVariants },
+            ]
+          : [
+              { field: 'nameSearch', variants: normalizedVariants },
+              { field: 'brandSearch', variants: normalizedVariants },
+              { field: 'genericNameSearch', variants: normalizedVariants },
+              { field: 'manufacturerSearch', variants: normalizedVariants },
+              { field: 'skuSearch', variants: normalizedVariants },
+            ];
+
+        let products = (await prefixSearchProducts(searchPlans)).slice(0, pageSize);
+
+        if (products.length === 0 && !cursorId) {
+          const legacyPlans = numericOrCodeQuery
+            ? [
+                { field: 'barcode', variants: rawVariants },
+                { field: 'sku', variants: rawVariants },
+                { field: 'name', variants: rawVariants },
+              ]
+            : [
+                { field: 'name', variants: rawVariants },
+              ];
+          products = (await prefixSearchProducts(legacyPlans)).slice(0, pageSize);
+        }
+
+        return res.json({
+          products,
+          nextCursor: null,
+          hasMore: false,
+        });
+      }
+
       const indexedField = mode === 'name' ? 'nameSearch' : mode === 'sku' ? 'skuSearch' : 'barcodeSearch';
       const rawField = mode;
       let productQuery = adminDb

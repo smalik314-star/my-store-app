@@ -110,7 +110,7 @@ export default function StockAdjustment() {
     const loadProducts = async () => {
       const trimmed = debouncedSearch.trim();
       const result = trimmed.length >= 2
-        ? await productService.searchProducts(user.tenantId!, trimmed, { pageSize: 50, mode: 'name' })
+        ? await productService.searchProducts(user.tenantId!, trimmed, { pageSize: 50 })
         : await productService.getProductsPaginated(user.tenantId!, 50, null);
       setProducts(result?.products || []);
       setCursorId(result?.nextCursor || null);

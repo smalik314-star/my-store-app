@@ -250,7 +250,7 @@ export default function Billing() {
 
       activeRequests.set(index, true);
       const timer = window.setTimeout(() => {
-        void productService.searchProducts(user.tenantId!, term, { pageSize: 8, mode: 'name' })
+        void productService.searchProducts(user.tenantId!, term, { pageSize: 8 })
           .then(result => {
             if (!activeRequests.get(index)) return;
             cacheProducts(result.products);

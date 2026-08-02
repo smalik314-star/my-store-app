@@ -105,7 +105,7 @@ export default function ReorderManagement() {
     try {
       const trimmedSearch = debouncedSearch.trim();
       const result = trimmedSearch.length >= 2
-        ? await productService.searchProducts(user.tenantId, trimmedSearch, { pageSize: 50, mode: 'name' })
+        ? await productService.searchProducts(user.tenantId, trimmedSearch, { pageSize: 50 })
         : await productService.getLowStockProductsPage(user.tenantId, 40, reset ? null : cursorId);
       const rows = (result?.products || []).filter(
         product =>

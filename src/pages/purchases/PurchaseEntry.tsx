@@ -253,7 +253,7 @@ export default function PurchaseEntry() {
     }
     searchTimerRef.current[rowId] = window.setTimeout(() => {
       if (user?.tenantId) {
-        void productService.searchProducts(user.tenantId, queryStr, { pageSize: 8, mode: 'name' }).then(result => {
+        void productService.searchProducts(user.tenantId, queryStr, { pageSize: 8 }).then(result => {
           if (searchRequestRef.current[rowId] !== requestId) return;
           setInventorySuggestions(current => ({ ...current, [rowId]: result.products }));
         }).catch(() => {

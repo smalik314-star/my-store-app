@@ -74,7 +74,7 @@ export default function LowStock() {
     setLoading(true);
     try {
       const result = searchTerm.length >= 2
-        ? await productService.searchProducts(user.tenantId, searchTerm, { pageSize: 50, mode: 'name' })
+        ? await productService.searchProducts(user.tenantId, searchTerm, { pageSize: 50 })
         : await productService.getLowStockProductsPage(user.tenantId, 40, reset ? null : cursorId);
       const nextItems = (result?.products || []).map(classifyProduct).filter(item => item.status !== 'IN_STOCK');
       const outOfStockCount = nextItems.filter(item => item.status === 'OUT_OF_STOCK').length;
