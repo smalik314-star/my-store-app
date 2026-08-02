@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, onSnapshot, where } from 'firebase/firestore';
+import { Timestamp, collection, getDocs, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { Invoice, Customer, Purchase, SaleReturnRecord } from '../../types';
+import { Invoice, Purchase, SaleReturnRecord } from '../../types';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
@@ -54,14 +54,53 @@ import { Logo } from '../../components/common/Logo';
 
 type DateRange = 'today' | 'yesterday' | 'thisWeek' | 'thisMonth' | 'previousMonth' | 'custom';
 
+const resolveDateWindow = (
+  dateRange: DateRange,
+  customRange: { start: Date; end: Date }
+) => {
+  const now = new Date();
+  let start: Date;
+  let end: Date = endOfDay(now);
+
+  switch (dateRange) {
+    case 'today':
+      start = startOfDay(now);
+      break;
+    case 'yesterday':
+      start = startOfDay(subDays(now, 1));
+      end = endOfDay(subDays(now, 1));
+      break;
+    case 'thisWeek':
+      start = startOfWeek(now, { weekStartsOn: 1 });
+      end = endOfWeek(now, { weekStartsOn: 1 });
+      break;
+    case 'thisMonth':
+      start = startOfMonth(now);
+      break;
+    case 'previousMonth':
+      start = startOfMonth(subMonths(now, 1));
+      end = endOfMonth(subMonths(now, 1));
+      break;
+    case 'custom':
+      start = startOfDay(customRange.start);
+      end = endOfDay(customRange.end);
+      break;
+    default:
+      start = startOfDay(subDays(now, 30));
+  }
+
+  return { start, end };
+};
+
 export default function Reports() {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [saleReturns, setSaleReturns] = useState<SaleReturnRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
   const [dateRange, setDateRange] = useState<DateRange>('thisMonth');
   const [customRange, setCustomRange] = useState<{ start: Date; end: Date }>({
     start: subDays(new Date(), 30),
@@ -70,99 +109,64 @@ export default function Reports() {
 
   const { user } = useAuth();
 
+  const activeWindow = useMemo(() => {
+    return resolveDateWindow(dateRange, customRange);
+  }, [dateRange, customRange]);
+
   useEffect(() => {
     if (!user?.tenantId) {
       setLoading(false);
       return;
     }
+
+    let active = true;
+    const startTimestamp = Timestamp.fromDate(activeWindow.start);
+    const endTimestamp = Timestamp.fromDate(activeWindow.end);
     setLoading(true);
+    setLoadError('');
 
-    const qInvoices = query(
-      collection(db, 'invoices'),
-      where('tenantId', '==', user.tenantId)
-    );
-    const unsubInvoices = onSnapshot(qInvoices, (snapshot) => {
-      try {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Invoice));
-        // Client-side sort: Recent first
-        items.sort((a, b) => {
-          const dateA = toJsDate(a.createdAt);
-          const dateB = toJsDate(b.createdAt);
-          return dateB.getTime() - dateA.getTime();
-        });
-        setInvoices(items);
-      } catch (err) {
-        console.error('Reports Invoices Processing Error:', err);
-      }
-    }, (error) => {
-      console.error('Reports Invoices Error:', error);
-    });
-
-    const qCustomers = query(
-      collection(db, 'customers'),
-      where('tenantId', '==', user.tenantId)
-    );
-    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer)));
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'customers');
-      setLoading(false);
-    });
-
-    const unsubPurchases = onSnapshot(
-      query(collection(db, 'purchases'), where('tenantId', '==', user.tenantId)),
-      snapshot => setPurchases(snapshot.docs.map(row => ({ id: row.id, ...row.data() } as Purchase))),
-      error => handleFirestoreError(error, OperationType.LIST, 'purchases')
-    );
-    const unsubReturns = onSnapshot(
-      query(collection(db, 'saleReturns'), where('tenantId', '==', user.tenantId)),
-      snapshot => setSaleReturns(snapshot.docs.map(row => ({ id: row.id, ...row.data() } as SaleReturnRecord))),
-      error => handleFirestoreError(error, OperationType.LIST, 'saleReturns')
-    );
+    Promise.all([
+      getDocs(query(
+        collection(db, 'invoices'),
+        where('tenantId', '==', user.tenantId),
+        where('createdAt', '>=', startTimestamp),
+        where('createdAt', '<=', endTimestamp),
+        orderBy('createdAt', 'desc')
+      )),
+      getDocs(query(
+        collection(db, 'purchases'),
+        where('tenantId', '==', user.tenantId),
+        where('createdAt', '>=', startTimestamp),
+        where('createdAt', '<=', endTimestamp),
+        orderBy('createdAt', 'desc')
+      )),
+      getDocs(query(
+        collection(db, 'saleReturns'),
+        where('tenantId', '==', user.tenantId),
+        where('createdAt', '>=', startTimestamp),
+        where('createdAt', '<=', endTimestamp),
+        orderBy('createdAt', 'desc')
+      )),
+    ])
+      .then(([invoiceSnapshot, purchaseSnapshot, saleReturnSnapshot]) => {
+        if (!active) return;
+        setInvoices(invoiceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)));
+        setPurchases(purchaseSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Purchase)));
+        setSaleReturns(saleReturnSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SaleReturnRecord)));
+      })
+      .catch(error => {
+        if (!active) return;
+        handleFirestoreError(error, OperationType.LIST, 'reports');
+        setLoadError(error instanceof Error ? error.message : 'Reports could not be loaded for this date range.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
     return () => {
-      unsubInvoices();
-      unsubCustomers();
-      unsubPurchases();
-      unsubReturns();
+      active = false;
     };
-  }, [user?.tenantId]);
-
-  const activeWindow = useMemo(() => {
-    const now = new Date();
-    let start: Date;
-    let end: Date = endOfDay(now);
-
-    switch (dateRange) {
-      case 'today':
-        start = startOfDay(now);
-        break;
-      case 'yesterday':
-        start = startOfDay(subDays(now, 1));
-        end = endOfDay(subDays(now, 1));
-        break;
-      case 'thisWeek':
-        start = startOfWeek(now, { weekStartsOn: 1 });
-        end = endOfWeek(now, { weekStartsOn: 1 });
-        break;
-      case 'thisMonth':
-        start = startOfMonth(now);
-        break;
-      case 'previousMonth':
-        start = startOfMonth(subMonths(now, 1));
-        end = endOfMonth(subMonths(now, 1));
-        break;
-      case 'custom':
-        start = startOfDay(customRange.start);
-        end = endOfDay(customRange.end);
-        break;
-      default:
-        start = startOfDay(subDays(now, 30));
-    }
-
-    return { start, end };
-  }, [dateRange, customRange]);
+  }, [activeWindow.end.getTime(), activeWindow.start.getTime(), reloadToken, user?.tenantId]);
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
@@ -489,7 +493,19 @@ export default function Reports() {
         </div>
       </div>
 
-      {invoices.length === 0 ? (
+      {loadError ? (
+        <Card className="rounded-[3rem] border border-danger/20 bg-surface px-8 py-16 text-center">
+          <p className="text-lg font-black text-danger">Reports could not be loaded.</p>
+          <p className="mt-2 text-sm font-semibold text-text/50">{loadError}</p>
+          <Button
+            variant="outline"
+            className="mt-6 h-11 px-6 text-[10px] font-black uppercase tracking-widest"
+            onClick={() => setReloadToken(current => current + 1)}
+          >
+            Retry
+          </Button>
+        </Card>
+      ) : filteredInvoices.length === 0 && filteredPurchases.length === 0 && filteredSaleReturns.length === 0 ? (
         <EmptyState 
           title="No analytics data" 
           description="Start generating invoices to view insights into your sales, revenue, and profit performance."
