@@ -64,6 +64,7 @@ export const customerService = {
       let q = query(
         collection(db, COLLECTION_NAME),
         where('tenantId', '==', tenantId),
+        orderBy('nameSearch'),
         limit(pageSize)
       );
 
@@ -107,12 +108,13 @@ export const customerService = {
         ))
       );
       if (/^\d+$/.test(term)) {
+        const normalizedPhoneTerm = normalizeSearchIndex(term);
         const phoneQuery = query(
           collection(db, COLLECTION_NAME),
           where('tenantId', '==', tenantId),
-          orderBy('phone'),
-          startAt(term),
-          endAt(`${term}\uf8ff`),
+          orderBy('phoneSearch'),
+          startAt(normalizedPhoneTerm),
+          endAt(`${normalizedPhoneTerm}\uf8ff`),
           limit(pageSize)
         );
         queries.push(getDocs(phoneQuery));

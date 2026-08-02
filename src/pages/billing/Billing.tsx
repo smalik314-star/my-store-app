@@ -170,6 +170,14 @@ export default function Billing() {
   // Focus references
   const customerInputRef = useRef<HTMLInputElement>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const discountInputRef = useRef<HTMLInputElement>(null);
+  const amountReceivedInputRef = useRef<HTMLInputElement>(null);
+  const paymentStatusRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const paymentMethodRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const saveNewButtonRef = useRef<HTMLButtonElement>(null);
+  const saveShareButtonRef = useRef<HTMLButtonElement>(null);
+  const paymentStatuses = ['paid', 'due', 'partial'] as const;
+  const paymentMethods = ['cash', 'upi', 'card'] as const;
   const cacheProducts = useCallback((rows: Product[]) => {
     if (rows.length === 0) return;
     setProductCache(current => {
@@ -366,6 +374,78 @@ export default function Billing() {
     setCustomerSearch('');
     setShowCustomerDropdown(false);
     setCustomerActiveIndex(-1);
+  };
+
+  const updatePaymentStatusSelection = (status: 'paid' | 'due' | 'partial') => {
+    setPaymentStatus(status);
+    if (status === 'paid') {
+      setPaymentMethod('cash');
+    } else if (status === 'due') {
+      setPaymentMethod('credit');
+    }
+  };
+
+  const handlePaymentStatusKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    status: 'paid' | 'due' | 'partial'
+  ) => {
+    const index = paymentStatuses.indexOf(status);
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = (index + 1) % paymentStatuses.length;
+      paymentStatusRefs.current[nextIndex]?.focus();
+      updatePaymentStatusSelection(paymentStatuses[nextIndex]);
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = (index - 1 + paymentStatuses.length) % paymentStatuses.length;
+      paymentStatusRefs.current[nextIndex]?.focus();
+      updatePaymentStatusSelection(paymentStatuses[nextIndex]);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      updatePaymentStatusSelection(status);
+      window.setTimeout(() => {
+        if (status === 'partial') {
+          amountReceivedInputRef.current?.focus();
+          amountReceivedInputRef.current?.select();
+          return;
+        }
+        if (status === 'due') {
+          saveNewButtonRef.current?.focus();
+          return;
+        }
+        paymentMethodRefs.current[0]?.focus();
+      }, 0);
+    }
+  };
+
+  const handlePaymentMethodKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    method: 'cash' | 'upi' | 'card'
+  ) => {
+    const index = paymentMethods.indexOf(method);
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = (index + 1) % paymentMethods.length;
+      paymentMethodRefs.current[nextIndex]?.focus();
+      setPaymentMethod(paymentMethods[nextIndex]);
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = (index - 1 + paymentMethods.length) % paymentMethods.length;
+      paymentMethodRefs.current[nextIndex]?.focus();
+      setPaymentMethod(paymentMethods[nextIndex]);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      setPaymentMethod(method);
+      saveNewButtonRef.current?.focus();
+    }
   };
 
   const handleCustomerSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -720,7 +800,7 @@ export default function Billing() {
           handleRowInputChange(index, 'name', selected.medicine.name);
           setFocusedRowIndex(null);
           setProductActiveIndex(-1);
-          showToast(`${selected.medicine.name} catalogue mein hai, lekin sale ke liye pehle stock add karein.`, 'warning');
+          showToast(`${selected.medicine.name} is only in the master catalogue. Add stock before billing it.`, 'warning');
         }
         window.setTimeout(() => {
           document.querySelector<HTMLInputElement>(`[data-billing-quantity="${index}"]`)?.focus();
@@ -935,31 +1015,30 @@ export default function Billing() {
     const cleanPhone = savedInvoice.customerPhone.replace(/\D/g, '');
     const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
     
-    // Format individual medicine lines nicely
-    const itemLines = savedInvoice.items.map((item: any) => 
-      `• ${item.name} (${item.quantity} x ₹${item.price}) = ₹${(item.total).toFixed(1)}`
+    const itemLines = savedInvoice.items.map((item: any) =>
+      `- ${item.name} (${item.quantity} x Rs.${Number(item.price).toFixed(2)}) = Rs.${Number(item.total).toFixed(2)}`
     ).join('\n');
 
-    const paymentText = savedInvoice.paymentStatus === 'paid' 
-      ? `✅ FULLY PAID via ${paymentMethod.toUpperCase()}`
+    const paymentText = savedInvoice.paymentStatus === 'paid'
+      ? `FULLY PAID via ${paymentMethod.toUpperCase()}`
       : savedInvoice.paymentStatus === 'due'
-        ? `⚠️ OUTSTANDING CREDIT: ₹${savedInvoice.grandTotal}`
-        : `🔸 PARTIAL: Received ₹${savedInvoice.amountReceived}, Due ₹${savedInvoice.outstandingAmount}`;
+        ? `OUTSTANDING CREDIT: Rs.${Number(savedInvoice.grandTotal).toFixed(2)}`
+        : `PARTIAL: Received Rs.${Number(savedInvoice.amountReceived).toFixed(2)}, Due Rs.${Number(savedInvoice.outstandingAmount).toFixed(2)}`;
 
     const textMessage = 
 `*Bill from ${storeName}*
 -----------------------------
-🧾 *Invoice:* ${savedInvoice.invoiceNumber}
-👤 *Customer:* ${savedInvoice.customerName}
-📱 *Phone:* ${savedInvoice.customerPhone}
+*Invoice:* ${savedInvoice.invoiceNumber}
+*Customer:* ${savedInvoice.customerName}
+*Phone:* ${savedInvoice.customerPhone}
 -----------------------------
 *Items:*
 ${itemLines}
 
-*Grand Total:* ₹${savedInvoice.grandTotal.toFixed(1)}
+*Grand Total:* Rs.${Number(savedInvoice.grandTotal).toFixed(2)}
 *Payment:* ${paymentText}
 -----------------------------
-Thank you for your visit! 🙏
+Thank you for your visit!
 _Powered by PharmaFlow_`;
 
     const encodedText = encodeURIComponent(textMessage);
@@ -1048,7 +1127,7 @@ _Powered by PharmaFlow_`;
               <FileText className="h-3.5 w-3.5" /> Bill List <kbd>Alt+M</kbd>
             </button>
             <span className="ml-auto hidden lg:flex items-center gap-1.5 text-[10px] font-bold text-text/40">
-                <Keyboard className="h-3.5 w-3.5" /> Enter/Tab moves forward • F2 saves • F3 saves & new
+                <Keyboard className="h-3.5 w-3.5" /> Enter/Tab moves forward | F2 saves | F3 saves and resets
             </span>
           </div>
         </div>
@@ -1091,7 +1170,7 @@ _Powered by PharmaFlow_`;
                 </div>
                 {selectedCustomer.id !== 'walk-in' && (
                   <Badge variant="warning" className="text-[10px] font-black uppercase py-0.5">
-                    Credit Active (Udhaar Mode)
+                    Credit Active
                   </Badge>
                 )}
               </div>
@@ -1167,7 +1246,7 @@ _Powered by PharmaFlow_`;
                             </div>
                             {cust.outstandingBalance > 0 && (
                               <Badge variant="danger" className="text-[9px]">
-                                Due: ₹{cust.outstandingBalance}
+                                Due: {formatCurrency(cust.outstandingBalance)}
                               </Badge>
                             )}
                           </button>
@@ -1203,7 +1282,7 @@ _Powered by PharmaFlow_`;
                     onSubmit={handleSaveCustomerInline}
                     className="mt-4 p-4 rounded-2xl bg-primary/5 border border-primary/10 space-y-3 overflow-hidden"
                   >
-                    <p className="text-[10px] font-black text-primary uppercase tracking-widest">Add New customer</p>
+                    <p className="text-[10px] font-black text-primary uppercase tracking-widest">Add New Customer</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <input
                         type="text"
@@ -1253,7 +1332,7 @@ _Powered by PharmaFlow_`;
                   type="button"
                   onClick={() => {
                     setSelectedCustomer(WALK_IN_CUSTOMER);
-                    showToast('Counter Sale selected', 'info');
+                    showToast('Counter walk-in selected', 'info');
                   }}
                   className={cn(
                     "px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5",
@@ -1262,7 +1341,7 @@ _Powered by PharmaFlow_`;
                       : "bg-background border-border text-text/60 hover:border-text/20"
                   )}
                 >
-                  🏪 Counter Walk-In
+                  Counter Walk-In
                 </button>
                 {recentCustomers.map(cust => (
                   <button
@@ -1279,7 +1358,7 @@ _Powered by PharmaFlow_`;
                         : "bg-background border-border text-text/60 hover:border-text/20"
                     )}
                   >
-                    👤 {cust.name}
+                    {cust.name}
                   </button>
                 ))}
               </div>
@@ -1305,8 +1384,8 @@ _Powered by PharmaFlow_`;
                       <th className="px-4 py-3 text-left text-[10px] font-black text-text/40 uppercase tracking-widest w-12 text-center">#</th>
                       <th className="px-4 py-3 text-left text-[10px] font-black text-text/40 uppercase tracking-widest min-w-[200px]">Medicine / Item Name</th>
                       <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-40">Quantity / Pack</th>
-                      <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Rate (₹)</th>
-                      <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Amount (₹)</th>
+                      <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Rate (INR)</th>
+                      <th className="px-4 py-3 text-right text-[10px] font-black text-text/40 uppercase tracking-widest w-32">Amount (INR)</th>
                       <th className="px-4 py-3 text-center text-[10px] font-black text-text/40 uppercase tracking-widest w-12"></th>
                     </tr>
                   </thead>
@@ -1393,11 +1472,11 @@ _Powered by PharmaFlow_`;
                                           {isInventory ? (
                                             <>
                                               <span>Batch: {suggestion.product.batchNumber}</span>
-                                              <span>•</span>
+                                              <span>|</span>
                                               <span>Exp: {suggestion.product.expiryDate ? toJsDate(suggestion.product.expiryDate).toLocaleDateString() : 'N/A'}</span>
                                             </>
                                           ) : (
-                                            <span>Catalogue · Mfg: {suggestion.medicine.manufacturer || 'Not listed'} · Add stock before sale</span>
+                                            <span>Catalogue - Mfg: {suggestion.medicine.manufacturer || 'Not listed'} - Add stock before sale</span>
                                           )}
                                         </div>
                                       </div>
@@ -1405,7 +1484,7 @@ _Powered by PharmaFlow_`;
                                         {isInventory ? (
                                           <>
                                             <p className="text-xs font-black text-primary">
-                                              ₹{resolveSalePrice(suggestion.product, saleMode, selectedCustomer)}
+                                              {formatCurrency(resolveSalePrice(suggestion.product, saleMode, selectedCustomer))}
                                             </p>
                                             <p className={cn(
                                               "text-[9px] font-bold uppercase",
@@ -1528,7 +1607,7 @@ _Powered by PharmaFlow_`;
 
                           {/* Amount (GST calculated) */}
                           <td className="px-4 py-3.5 text-right font-black text-xs text-text">
-                            ₹{item.total ? item.total.toFixed(2) : '0.00'}
+                            {formatCurrency(item.total || 0)}
                           </td>
 
                           {/* Row Remove */}
@@ -1590,13 +1669,20 @@ _Powered by PharmaFlow_`;
                     className="p-6 border-t border-border bg-background/20 grid grid-cols-1 md:grid-cols-3 gap-4"
                   >
                     <div>
-                      <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest mb-1.5">Discount Value (₹)</label>
+                      <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest mb-1.5">Discount Value (INR)</label>
                       <input
+                        ref={discountInputRef}
                         type="number"
                         min={0}
                         placeholder="Enter direct discount in Rupees..."
                         value={discount || ''}
                         onChange={(e) => setDiscount(Number(e.target.value) || 0)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            paymentStatusRefs.current[0]?.focus();
+                          }
+                        }}
                         className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-xs font-bold outline-none"
                       />
                     </div>
@@ -1670,17 +1756,14 @@ _Powered by PharmaFlow_`;
                   <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest">Payment Status (Khata Entry)</label>
                   
                   <div className="grid grid-cols-3 gap-2">
-                    {(['paid', 'due', 'partial'] as const).map((status) => (
+                    {paymentStatuses.map((status) => (
                       <button
                         key={status}
                         type="button"
-                        onClick={() => {
-                          setPaymentStatus(status);
-                          if (status === 'paid') {
-                            setPaymentMethod('cash');
-                          } else if (status === 'due') {
-                            setPaymentMethod('credit');
-                          }
+                        onClick={() => updatePaymentStatusSelection(status)}
+                        onKeyDown={(event) => handlePaymentStatusKeyDown(event, status)}
+                        ref={node => {
+                          paymentStatusRefs.current[paymentStatuses.indexOf(status)] = node;
                         }}
                         className={cn(
                           "py-3 rounded-xl text-xs font-black uppercase tracking-wider border transition-all",
@@ -1704,8 +1787,9 @@ _Powered by PharmaFlow_`;
                         className="space-y-3 pt-2 overflow-hidden"
                       >
                         <div>
-                          <label className="block text-[9px] font-black text-text/30 uppercase tracking-widest mb-1">Amount Received (₹)</label>
+                          <label className="block text-[9px] font-black text-text/30 uppercase tracking-widest mb-1">Amount Received (INR)</label>
                           <input
+                            ref={amountReceivedInputRef}
                             type="number"
                             min={0}
                             max={totals.grandTotal}
@@ -1721,7 +1805,7 @@ _Powered by PharmaFlow_`;
                           />
                         </div>
                         <div className="flex justify-between items-center text-xs font-bold text-text/40 bg-background/50 p-2.5 rounded-xl border border-border">
-                          <span>Balance Due (Udhaar Ledger)</span>
+                          <span>Balance Due (Customer Ledger)</span>
                           <span className="text-danger font-black">
                             {formatCurrency(Math.max(0, totals.grandTotal - (Number(amountReceived) || 0)))}
                           </span>
@@ -1735,11 +1819,15 @@ _Powered by PharmaFlow_`;
                     <div className="space-y-2 pt-2">
                       <label className="block text-[9px] font-black text-text/40 uppercase tracking-widest">Payment Method</label>
                       <div className="grid grid-cols-3 gap-2">
-                        {(['cash', 'upi', 'card'] as const).map((method) => (
+                        {paymentMethods.map((method) => (
                           <button
                             key={method}
                             type="button"
                             onClick={() => setPaymentMethod(method)}
+                            onKeyDown={(event) => handlePaymentMethodKeyDown(event, method)}
+                            ref={node => {
+                              paymentMethodRefs.current[paymentMethods.indexOf(method)] = node;
+                            }}
                             className={cn(
                               "py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all flex flex-col items-center justify-center gap-1",
                               paymentMethod === method 
@@ -1763,6 +1851,7 @@ _Powered by PharmaFlow_`;
                 <Button
                   variant="outline"
                   type="button"
+                  ref={saveNewButtonRef}
                   onClick={() => void handleSaveInvoice(true)}
                   disabled={loading}
                   className="w-full py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest border-primary/30 text-primary hover:bg-primary/5"
@@ -1772,6 +1861,7 @@ _Powered by PharmaFlow_`;
                 <Button
                   variant="primary"
                   type="button"
+                  ref={saveShareButtonRef}
                   onClick={() => void handleSaveInvoice(false)}
                   isLoading={loading}
                   className="w-full py-4.5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-primary/20 flex items-center justify-center gap-2 bg-success text-white border-transparent hover:bg-success/95"
@@ -1816,7 +1906,7 @@ _Powered by PharmaFlow_`;
                           {inv.customerName}
                         </p>
                         <p className="text-[10px] font-bold text-text/30 uppercase tracking-wider">
-                          Invoice: {inv.invoiceNumber} • {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                          Invoice: {inv.invoiceNumber} | {toJsDate(inv.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                         </p>
                       </div>
                     </div>
@@ -1877,13 +1967,13 @@ _Powered by PharmaFlow_`;
                   <div className="flex justify-between text-xs font-bold text-text/40">
                     <span>Outstanding:</span>
                     <span className={cn("font-black", savedInvoice.outstandingAmount > 0 ? "text-danger" : "text-success")}>
-                      ₹{savedInvoice.outstandingAmount.toFixed(1)}
+                      {formatCurrency(savedInvoice.outstandingAmount)}
                     </span>
                   </div>
                   <div className="h-px bg-border my-2" />
                   <div className="flex justify-between items-baseline">
                     <span className="text-xs font-black text-text/60">Total Amount:</span>
-                    <span className="text-xl font-black text-primary">₹{savedInvoice.grandTotal.toFixed(1)}</span>
+                    <span className="text-xl font-black text-primary">{formatCurrency(savedInvoice.grandTotal)}</span>
                   </div>
                 </div>
 
