@@ -222,4 +222,6 @@ export interface AuthContextType {
   loading: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  syncError?: string | null;
+  retrySync?: () => Promise<void>;
 }

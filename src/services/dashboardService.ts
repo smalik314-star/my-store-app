@@ -41,6 +41,18 @@ export const dashboardService = {
       expiryAlerts: 0,
     };
 
+    // Track which subscriptions have delivered their first snapshot
+    // to avoid emitting partial stats to the UI.
+    let hasProducts = false;
+    let hasCustomers = false;
+    let hasInvoices = false;
+
+    function emitIfReady() {
+      if (hasProducts && hasCustomers && hasInvoices) {
+        callback({ ...stats });
+      }
+    }
+
     // Products Stats
     const unsubProducts = onSnapshot(
       query(collection(db, 'products'), where('tenantId', '==', tenantId)), 
@@ -65,7 +77,8 @@ export const dashboardService = {
             }
           }).length;
           
-          callback({ ...stats });
+          hasProducts = true;
+          emitIfReady();
         } catch (error) {
           console.error('Stats Products Processing Error:', error);
           if (onError) onError(error);
@@ -82,7 +95,8 @@ export const dashboardService = {
       query(collection(db, 'customers'), where('tenantId', '==', tenantId)), 
       (snapshot) => {
         stats.totalCustomers = snapshot.size;
-        callback({ ...stats });
+        hasCustomers = true;
+        emitIfReady();
       },
       (error) => {
         console.error('Stats Customers Error:', error);
@@ -112,7 +126,8 @@ export const dashboardService = {
             })
             .reduce((sum, inv) => sum + inv.grandTotal, 0);
 
-          callback({ ...stats });
+          hasInvoices = true;
+          emitIfReady();
         } catch (error) {
           console.error('Stats Invoices Processing Error:', error);
           if (onError) onError(error);

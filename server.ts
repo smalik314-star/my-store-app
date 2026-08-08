@@ -9,7 +9,8 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Configurable port via PORT env var (defaults to 3000)
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   // Set higher request body limit to accommodate PDF base64 payloads
   app.use(express.json({ limit: '15mb' }));

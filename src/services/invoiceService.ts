@@ -37,10 +37,21 @@ function sanitizeForFirestore(obj: any): any {
     return obj.map(sanitizeForFirestore);
   }
   if (typeof obj === 'object') {
-    if (typeof obj.toDate === 'function') {
+    // Only pass through real Firestore Timestamp instances (or serverTimestamp sentinels).
+    // Generic plain objects that merely expose a `toDate` method are serialized below.
+    if (obj.constructor && obj.constructor.name === 'Timestamp') {
       return obj;
     }
+    if (typeof obj.toDate === 'function') {
+      // Firestore serverTimestamp() sentinel (FieldValue) — keep as-is.
+      if (obj.constructor && obj.constructor.name === 'FieldValue') {
+        return obj;
+      }
+      // Generic object with toDate — fall through to serialize its enumerable fields.
+    }
     if (obj.constructor && obj.constructor.name !== 'Object') {
+      // Non-plain class instances (e.g., Date already handled above) — pass through
+      // only if they don't carry enumerable data worth sanitizing.
       return obj;
     }
     const result: any = {};
@@ -142,17 +153,18 @@ export const invoiceService = {
         }
 
         // Verify Product Stock and Ownership
-        if (!invoiceData.isQuickBill) {
-          for (const item of invoiceData.items) {
-            const productDoc = productDocsMap.get(item.productId);
-            if (!productDoc || !productDoc.exists() || productDoc.data().tenantId !== tenantId) {
-              throw new Error(`Product ${item.name} not found or unauthorized.`);
-            }
-            
-            const product = productDoc.data() as Product;
-            if (product.stockQuantity < item.quantity) {
-              throw new Error(`Insufficient stock for ${item.name}. Available: ${product.stockQuantity}`);
-            }
+        // For quick bills, only validate items that reference a real productId.
+        // Pure custom items (no productId) are skipped.
+        for (const item of invoiceData.items) {
+          if (!item.productId) continue;
+          const productDoc = productDocsMap.get(item.productId);
+          if (!productDoc || !productDoc.exists() || productDoc.data().tenantId !== tenantId) {
+            throw new Error(`Product ${item.name} not found or unauthorized.`);
+          }
+          
+          const product = productDoc.data() as Product;
+          if (product.stockQuantity < item.quantity) {
+            throw new Error(`Insufficient stock for ${item.name}. Available: ${product.stockQuantity}`);
           }
         }
 
@@ -174,9 +186,12 @@ export const invoiceService = {
         transaction.set(invoiceRef, sanitizeForFirestore(invoice));
 
         // 3. Deduct Stock and Log Stock Movements
+        // For quick bills, still track stock for items that have a productId,
+        // so inventory stays in sync. Pure custom items (no productId) are skipped.
         const updatedProducts = new Map<string, Product>();
-        if (!invoiceData.isQuickBill) {
-          for (const item of invoiceData.items) {
+        const stockTrackedItems = invoiceData.items.filter(item => !!item.productId);
+        if (stockTrackedItems.length > 0) {
+          for (const item of stockTrackedItems) {
             const productDoc = productDocsMap.get(item.productId);
             const product = updatedProducts.get(item.productId) || (productDoc.data() as Product);
             
@@ -187,8 +202,8 @@ export const invoiceService = {
             
             // Sort by expiry date ascending for FEFO
             batchesList.sort((a, b) => {
-              const dateA = toJsDate(a.expiryDate).getTime();
-              const dateB = toJsDate(b.expiryDate).getTime();
+              const dateA = toJsDate(a.expiryDate)?.getTime() ?? 0;
+              const dateB = toJsDate(b.expiryDate)?.getTime() ?? 0;
               return dateA - dateB;
             });
 
@@ -317,9 +332,12 @@ export const invoiceService = {
 
     logFirestoreOperation(OperationType.LIST, COLLECTION_NAME, 'pending', { pageSize, hasLastInvoice: !!lastInvoice });
     try {
+      // Server-side ordering by createdAt DESC ensures pagination order
+      // matches display order (no client-side re-sort needed).
       let q = query(
         collection(db, COLLECTION_NAME),
         where('tenantId', '==', tenantId),
+        orderBy('createdAt', 'desc'),
         limit(pageSize)
       );
 
@@ -329,13 +347,6 @@ export const invoiceService = {
 
       const snapshot = await getDocs(q);
       const invoices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Invoice[];
-      
-      // Client-side sort by createdAt DESC
-      invoices.sort((a, b) => {
-        const dateA = typeof a.createdAt?.toDate === 'function' ? a.createdAt.toDate() : new Date(a.createdAt);
-        const dateB = typeof b.createdAt?.toDate === 'function' ? b.createdAt.toDate() : new Date(b.createdAt);
-        return dateB.getTime() - dateA.getTime();
-      });
 
       logFirestoreOperation(OperationType.LIST, COLLECTION_NAME, 'success', { count: invoices.length });
       return {
@@ -392,8 +403,8 @@ export const invoiceService = {
 
             // Sort batches
             batchesList.sort((a, b) => {
-              const dateA = toJsDate(a.expiryDate).getTime();
-              const dateB = toJsDate(b.expiryDate).getTime();
+              const dateA = toJsDate(a.expiryDate)?.getTime() ?? 0;
+              const dateB = toJsDate(b.expiryDate)?.getTime() ?? 0;
               return dateA - dateB;
             });
 

@@ -52,9 +52,12 @@ export const customerService = {
     if (!tenantId) return null;
 
     try {
+      // Server-side ordering by name ASC ensures pagination order
+      // matches display order (no client-side re-sort needed).
       let q = query(
         collection(db, COLLECTION_NAME),
         where('tenantId', '==', tenantId),
+        orderBy('name', 'asc'),
         limit(pageSize)
       );
 
@@ -65,9 +68,6 @@ export const customerService = {
       const snapshot = await getDocs(q);
       const lastDoc = snapshot.docs[snapshot.docs.length - 1];
       const customers = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Customer));
-
-      // Client-side sort by name
-      customers.sort((a, b) => a.name.localeCompare(b.name));
 
       return { customers, lastDoc, hasMore: snapshot.docs.length === pageSize };
     } catch (error) {

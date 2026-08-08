@@ -48,13 +48,22 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     setLoading(true);
     const path = `settings/${user.tenantId}`;
-    const unsub = onSnapshot(doc(db, 'settings', user.tenantId), (snapshot) => {
+    const settingsRef = doc(db, 'settings', user.tenantId);
+    const unsub = onSnapshot(settingsRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as StoreSettings;
         setSettings(data);
       } else {
-        // Initialize with defaults if not found for this new tenant
+        // Initialize with defaults if not found for this new tenant.
+        // Persist defaults immediately so they survive page refreshes.
         setSettings({ ...DEFAULT_SETTINGS });
+        setDoc(settingsRef, {
+          ...DEFAULT_SETTINGS,
+          tenantId: user.tenantId,
+          updatedAt: serverTimestamp(),
+        }, { merge: true }).catch((error) => {
+          console.error('Failed to persist default settings:', error);
+        });
       }
       setLoading(false);
     }, (error) => {

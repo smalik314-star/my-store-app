@@ -9,7 +9,10 @@ import {
   collection,
   query,
   where,
-  getDocs
+  getDocs,
+  addDoc,
+  collectionGroup,
+  limit
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Tenant, SubscriptionPlan, UserRole } from '../types';
@@ -17,8 +20,9 @@ import { handleFirestoreError, OperationType } from '../utils/firestore-errors';
 
 export const tenantService = {
   async createTenant(ownerId: string, storeName: string, email?: string): Promise<Tenant> {
-    const tenantId = `tenant_${Math.random().toString(36).substr(2, 9)}`;
-    const tenantRef = doc(db, 'tenants', tenantId);
+    // Use Firestore auto-ID to avoid collisions and non-deterministic IDs
+    const tenantRef = doc(collection(db, 'tenants'));
+    const tenantId = tenantRef.id;
     
     const tenantData: Tenant = {
       id: tenantId,
@@ -70,6 +74,62 @@ export const tenantService = {
       console.error('Error fetching tenant:', error);
       handleFirestoreError(error, OperationType.GET, `tenants/${tenantId}`);
       throw error;
+    }
+  },
+
+  /**
+   * Find a tenant invite by email across all tenants' user subcollections.
+   * Used during sign-in to link an invited user to an existing tenant.
+   */
+  async findInviteByEmail(email: string): Promise<{ tenantId: string; role: UserRole } | null> {
+    if (!email) return null;
+    try {
+      const q = query(
+        collectionGroup(db, 'users'),
+        where('email', '==', email),
+        limit(10)
+      );
+      const snap = await getDocs(q);
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        // Only match active invites (docs without a firebase uid yet, or where uid starts with 'user_')
+        if (data.uid && typeof data.uid === 'string' && data.uid.startsWith('user_')) {
+          return { tenantId: data.tenantId, role: data.role as UserRole };
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error finding invite by email:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Link an invited user to their tenant by replacing the placeholder UID
+   * with the real Firebase Auth UID.
+   */
+  async linkInvitedUser(tenantId: string, placeholderUid: string, realUid: string, email: string) {
+    const placeholderRef = doc(db, 'tenants', tenantId, 'users', placeholderUid);
+    const realRef = doc(db, 'tenants', tenantId, 'users', realUid);
+    try {
+      const snap = await getDoc(placeholderRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        // Create real user doc with invited role
+        await setDoc(realRef, {
+          ...data,
+          uid: realUid,
+          email,
+          updatedAt: serverTimestamp(),
+        });
+        // Remove placeholder
+        await deleteDoc(placeholderRef);
+        return data;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error linking invited user:', error);
+      return null;
     }
   },
 
@@ -135,7 +195,10 @@ export const tenantService = {
   },
 
   async addUserToTenant(tenantId: string, email: string, role: UserRole, name?: string, phone?: string) {
-    const userId = `user_${Math.random().toString(36).substr(2, 9)}`;
+    // Use a deterministic placeholder UID that can be linked later on sign-in.
+    // The placeholder is prefixed with 'user_' and keyed by email hash.
+    const hash = email.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const userId = `user_${hash}_${tenantId.slice(-8)}`;
     const userRef = doc(db, 'tenants', tenantId, 'users', userId);
     
     try {
@@ -146,9 +209,10 @@ export const tenantService = {
         email,
         name: name || '',
         phone: phone || '',
-        status: 'active',
+        status: 'invited',
         addedAt: serverTimestamp(),
       });
+      return userRef;
     } catch (error) {
       console.error('Error adding user to tenant:', error);
       handleFirestoreError(error, OperationType.WRITE, `tenants/${tenantId}/users/${userId}`);
