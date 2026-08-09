@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import nodemailer from 'nodemailer';
@@ -32,7 +32,7 @@ async function startServer() {
       titleCase,
     ]));
   };
-  const authenticateRequest = async (req: any, res: any): Promise<{ uid: string; tenantId: string } | null> => {
+  const authenticateRequest = async (req: Request, res: Response): Promise<{ uid: string; tenantId: string } | null> => {
     const authHeader = String(req.headers.authorization || '');
     if (!authHeader.startsWith('Bearer ')) {
       res.status(401).json({ error: 'Authentication required.' });
@@ -87,7 +87,7 @@ async function startServer() {
   });
 
   // API: Send Email with PDF attachment
-  app.post('/api/send-email', async (req: any, res: any) => {
+  app.post('/api/send-email', async (req: Request, res: Response) => {
     const session = await authenticateRequest(req, res);
     if (!session) return;
     const { uid, tenantId } = session;
@@ -184,7 +184,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/global-search', async (req: any, res: any) => {
+  app.get('/api/global-search', async (req: Request, res: Response) => {
     const session = await authenticateRequest(req, res);
     if (!session) return;
     const { tenantId } = session;
@@ -291,7 +291,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/products/search', async (req: any, res: any) => {
+  app.get('/api/products/search', async (req: Request, res: Response) => {
     const session = await authenticateRequest(req, res);
     if (!session) return;
     const { tenantId } = session;
