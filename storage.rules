@@ -1,0 +1,43 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userRecord() {
+      return firestore.get(/databases/ai-studio-pharmaflow-17500397-f099-4531-a8a4-a5ad18ba27d1/documents/users/$(request.auth.uid)).data;
+    }
+
+    function belongsToTenant(tenantId) {
+      return signedIn()
+        && userRecord().status == 'active'
+        && userRecord().tenantId == tenantId;
+    }
+
+    function validImageUpload() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Tenant logos
+    match /tenants/{tenantId}/logos/{fileName} {
+      allow read: if belongsToTenant(tenantId);
+      allow create, update: if belongsToTenant(tenantId) && validImageUpload();
+      allow delete: if belongsToTenant(tenantId);
+    }
+
+    // Tenant product images
+    match /tenants/{tenantId}/products/{fileName} {
+      allow read: if belongsToTenant(tenantId);
+      allow create, update: if belongsToTenant(tenantId) && validImageUpload();
+      allow delete: if belongsToTenant(tenantId);
+    }
+
+    // Deny everything else
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
